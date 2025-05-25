@@ -38,8 +38,8 @@ class GeometricSolver:
         self.deductive_agent = deductive_agent
         self.run_infos: dict[str, Any] = {}
 
-    def run(self, max_level: int = 1000) -> bool:
-        infos = run_loop(self.deductive_agent, proof=self.proof, rules=self.rules, max_level=max_level)
+    def run(self, max_level: int = 1000, time_limit: float = 3600) -> bool:
+        infos = run_loop(self.deductive_agent, proof=self.proof, rules=self.rules, max_level=max_level, time_limit=time_limit)
         self.run_infos = infos
         return infos["success"]
 
@@ -94,7 +94,7 @@ class GeometricSolverBuilder:
 
     def build(self, max_attempts: int = 10000) -> "GeometricSolver":
         if self.problemJGEX:
-            logging.info(f"Use problemJGEX {self.problemJGEX} to build the proof state")
+            logging.debug(f"Use problemJGEX {self.problemJGEX} to build the proof state")
             proof_state = ProofState.build_problemJGEX(
                 problemJGEX=self.problemJGEX,
                 defsJGEX=self.defs,

@@ -34,7 +34,7 @@ def handler(signum, frame):
 signal.signal(signal.SIGALRM, handler)
 
 class GeometryGenerator: 
-    def __init__(self, max_clauses=5, search_depth=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100):
+    def __init__(self, max_clauses=5, search_depth=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, time_limit=3600):
         self.max_clauses = max_clauses
         self.search_depth = search_depth
         self.n_threads = n_threads
@@ -42,6 +42,9 @@ class GeometryGenerator:
         self.min_proof_steps = min_proof_steps
         self.min_clauses_num = min_clauses_num
         self.n_samples = n_samples
+        self.time_limit = time_limit
+        self.samples_per_thread = []
+        self.ddar_times = []
 
         self.clauses_generator = CompoundClauseGen(
             max_comma_sep_clause=2,
@@ -345,7 +348,7 @@ class GeometryGenerator:
         data += return_proof_steps(proof_state)
         return data
 
-    def process_single_problem(self, args: tuple) -> list:
+    def process_single_problem(self, args: tuple) -> tuple[list, float]:
         """Process a single geometry problem."""
         pid, fl_statement = args
         
@@ -354,22 +357,24 @@ class GeometryGenerator:
         solver_builder.load_problem_from_txt(fl_statement)
 
         if not self.clauses_num_filter(solver_builder.problemJGEX):
-            return []
+            return [], 0.0
         
         try:
             solver = solver_builder.build(max_attempts=100)
         except Exception as e:
             logging.info(f"Error: {e}")
-            return []
-        
-        t = time.time()
+            return [], 0.0
+
+        t = time.time()        
         try:
-            signal.alarm(600) # Set alarm
-            solver.run(max_level=self.search_depth)
-            signal.alarm(0) # Disable the alarm
+            signal.alarm(self.time_limit*1.5)
+            #set time limit for the solver, when the solver meets time out will stop run.
+            solver.run(max_level=self.search_depth, time_limit=self.time_limit)
+            ddar_time = time.time() - t
+            signal.alarm(0)
         except Exception as e:
             logging.info(f"Problem couldn't be solved. {e}.")
-            return []
+            return [], 0.0
         logging.info(f"ddar time: {time.time() - t:.2f}s")
 
         t = time.time()
@@ -421,7 +426,7 @@ class GeometryGenerator:
                 "llm_nat_solution": llm_nat_solution,
             })
         logging.info(f"problem essential_clauses search time: {time.time() - t:.2f}s")
-        return generated_data
+        return generated_data, ddar_time
 
     def generate_problems(self):# -> Iterator[Dict[str, Any]]:
         """Generate geometry problems one at a time using a generator."""
@@ -436,9 +441,12 @@ class GeometryGenerator:
         if self.n_threads == 1:
             task_iterator = task_generator()
             while True:
-                result = self.process_single_problem(next(task_iterator))
+                results = self.process_single_problem(next(task_iterator))
+                result, ddar_time = results
                 if result:
                     data += result
+                    self.ddar_times.append(ddar_time)
+                    self.samples_per_thread.append(len(result))
                     logging.info(
                         f"Generated {len(data)} samples ({len(result)} new) in {time.time() - start_time:.1f}s "
                         f"({(time.time() - start_time)/len(data):.1f}s/sample)")
@@ -447,9 +455,12 @@ class GeometryGenerator:
         else:
             try:
                 with multiprocessing.Pool(self.n_threads) as pool:
-                    for result in pool.imap_unordered(self.process_single_problem, task_generator()):
+                    for results in pool.imap_unordered(self.process_single_problem, task_generator()):
+                        result, ddar_time = results
                         if result:
                             data += result
+                            self.ddar_times.append(ddar_time)
+                            self.samples_per_thread.append(len(result))
                             logging.info(
                                 f"Generated {len(data)} samples ({len(result)} new) in {time.time() - start_time:.1f}s "
                                 f"({(time.time() - start_time)/len(data):.1f}s/sample)")
@@ -462,14 +473,15 @@ class GeometryGenerator:
                 logging.error(f"multiprocessing Pool error: {e}")
         
         self.write_data(data)
+        self.write_data_summary()
         logging.info(f"Generated {len(data)} samples successfully")
 
     def write_data(self, all_data: list) -> int:
         """Write all generated data to output files."""
-        filename = os.path.join(self.output_dir, f"geometry_depth{self.search_depth}_raw.csv")
+        filename = os.path.join(self.output_dir, f"geometry_clauses_{self.max_clauses}_depth{self.search_depth}_raw_samples{self.n_samples}.csv")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         
-        nl_filename = os.path.join(self.output_dir, f"geometry_depth{self.search_depth}_nl.txt")
+        nl_filename = os.path.join(self.output_dir, f"geometry_clauses_{self.max_clauses}_depth{self.search_depth}_nl_samples{self.n_samples}.txt")
 
         with open(filename, "w", newline="", encoding="utf-8") as csvfile, \
             open(nl_filename, "w", encoding="utf-8") as nlf:
@@ -503,6 +515,28 @@ class GeometryGenerator:
 
         return len(all_data)
 
+    def write_data_summary(self):
+        """Write all generated data to output files."""
+        filename = os.path.join(self.output_dir, f"geometry_clauses{self.max_clauses}_depth{self.search_depth}_ddar_times.csv")
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        
+        with open(filename, "w", newline="", encoding="utf-8") as csvfile:
+            field_names = [
+                "id",
+                "ddar_time",
+                "samples_per_thread",
+            ]
+            writer = csv.DictWriter(
+                csvfile, fieldnames=field_names, quoting=csv.QUOTE_MINIMAL, quotechar='"'
+            )
+            writer.writeheader()
+
+            for i, time in enumerate(self.ddar_times):
+                writer.writerow({"id": i,
+                                 "ddar_time": f"{time:.2f}",
+                                 "samples_per_thread": self.samples_per_thread[i]}
+                                )
+
 
 def main():
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
@@ -514,6 +548,7 @@ def main():
     parser.add_argument("--n_samples", required=False, type=int, default=100)
     parser.add_argument("--dir", required=False, default="dataset")
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
+    parser.add_argument("--time_limit", required=False, type=int, default=3600)
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
@@ -526,6 +561,7 @@ def main():
         min_proof_steps=args.min_proof_steps,
         min_clauses_num=args.min_clauses_num,
         n_samples=args.n_samples,
+        time_limit=args.time_limit,
     )
     
     generator.generate_problems()
