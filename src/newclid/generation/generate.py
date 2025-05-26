@@ -362,12 +362,12 @@ class GeometryGenerator:
         try:
             solver = solver_builder.build(max_attempts=100)
         except Exception as e:
-            logging.info(f"Error: {e}")
+            logging.debug(f"Error: {e}")
             return [], 0.0
 
         t = time.time()        
         try:
-            signal.alarm(self.time_limit*1.5)
+            signal.alarm(self.time_limit*2)
             #set time limit for the solver, when the solver meets time out will stop run.
             solver.run(max_level=self.search_depth, time_limit=self.time_limit)
             ddar_time = time.time() - t

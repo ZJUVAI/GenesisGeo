@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 def run_loop(
-    deductive_agent: "DeductiveAgent", proof: "ProofState", rules: list[Rule], max_level: int = 1000, time_limit: float = 3600
+    deductive_agent: "DeductiveAgent", proof: "ProofState", rules: list[Rule], max_level: int = 1000, time_limit: int = 3600
 ) -> dict[str, Any]:
     """Run DeductiveAgent until saturation or goal found."""
     infos: dict[str, Any] = {}
