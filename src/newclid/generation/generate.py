@@ -118,6 +118,10 @@ class GeometryGenerator:
                     if goal: goal.check()
 
     def all_possible_goals_by_ar(self, dep_graph: DependencyGraph) -> list[Statement]:
+        def extract_points(s):
+            import re
+            return re.findall(r'[a-z][\d]*', s)
+
         def goal_from_tokens(tokens):
             if self.goal_filter(tokens[0], tokens[1:]):
                 goal = Statement.from_tokens(tokens, dep_graph)
@@ -140,6 +144,7 @@ class GeometryGenerator:
         for e in e2v_pairs2.keys():
             for v1, v2 in e2v_pairs2[e]:
                 try:
+                    v1, v2 = extract_points(v1), extract_points(v2)
                     goal_from_tokens(tuple(['para'] + list(v1 + v2)))
                     goal_from_tokens(tuple(['perp'] + list(v1 + v2)))
                 except Exception as e:
@@ -147,6 +152,7 @@ class GeometryGenerator:
                     continue
         for v1, v2, v3, v4 in e2v_pairs4:
             try:
+                v1, v2, v3, v4 = extract_points(v1), extract_points(v2), extract_points(v3), extract_points(v4)
                 goal_from_tokens(tuple(['eqangle'] + list(v1 + v2 + v3 + v4)))
             except Exception as e:
                 logging.warning(f"Error in goal_from_tokens: {e} for eqangle {v1}, {v2}, {v3}, {v4}")
