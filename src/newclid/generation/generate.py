@@ -139,18 +139,34 @@ class GeometryGenerator:
         e2v, e2v_pairs2, e2v_pairs4 = ar.atable.possible_pairs()
         for e in e2v_pairs2.keys():
             for v1, v2 in e2v_pairs2[e]:
-                goal_from_tokens(tuple(['para'] + list(v1 + v2)))
-                goal_from_tokens(tuple(['perp'] + list(v1 + v2)))
+                try:
+                    goal_from_tokens(tuple(['para'] + list(v1 + v2)))
+                    goal_from_tokens(tuple(['perp'] + list(v1 + v2)))
+                except Exception as e:
+                    logging.warning(f"Error in goal_from_tokens: {e} para/perp for {v1}, {v2}")
+                    continue
         for v1, v2, v3, v4 in e2v_pairs4:
-            goal_from_tokens(tuple(['eqangle'] + list(v1 + v2 + v3 + v4)))
+            try:
+                goal_from_tokens(tuple(['eqangle'] + list(v1 + v2 + v3 + v4)))
+            except Exception as e:
+                logging.warning(f"Error in goal_from_tokens: {e} for eqangle {v1}, {v2}, {v3}, {v4}")
+                continue
 
         e2v, e2v_pairs2, e2v_pairs4 = ar.rtable.possible_pairs()
         for e in e2v_pairs2.keys():
             for v1, v2 in e2v_pairs2[e]:
-                goal_from_tokens(tuple(['cong'] + v1[2:-1].split(',') + v2[2:-1].split(',')))
+                try:
+                    goal_from_tokens(tuple(['cong'] + v1[2:-1].split(',') + v2[2:-1].split(',')))
+                except Exception as e:
+                    logging.warning(f"Error in goal_from_tokens: {e} cong for {v1}, {v2}")
+                    continue
         for v1, v2, v3, v4 in e2v_pairs4:
-            tokens = tuple(['eqratio'] + list(v1[2:-1].split(',') + v2[2:-1].split(',') + v3[2:-1].split(',') + v4[2:-1].split(',')))
-            goal_from_tokens(tokens)
+            try:
+                tokens = tuple(['eqratio'] + list(v1[2:-1].split(',') + v2[2:-1].split(',') + v3[2:-1].split(',') + v4[2:-1].split(',')))
+                goal_from_tokens(tokens)
+            except Exception as e:
+                logging.warning(f"Error in goal_from_tokens: {e} for eqratio {v1}, {v2}, {v3}, {v4}")
+                continue
 
     def clauses_num_filter(self, problemJGEX: ProblemJGEX) -> bool:
         if len(problemJGEX.constructions) < self.min_clauses_num:
