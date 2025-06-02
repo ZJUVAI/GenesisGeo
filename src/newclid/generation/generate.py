@@ -45,6 +45,7 @@ class GeometryGenerator:
         self.time_limit = time_limit
         self.samples_per_thread = []
         self.ddar_times = []
+        self.pids = []
 
         self.clauses_generator = CompoundClauseGen(
             max_comma_sep_clause=2,
@@ -356,14 +357,14 @@ class GeometryGenerator:
         solver_builder.with_deductive_agent(DDARN())
         solver_builder.load_problem_from_txt(fl_statement)
 
-        if not self.clauses_num_filter(solver_builder.problemJGEX):
-            return [], 0.0
-        
-        try:
-            solver = solver_builder.build(max_attempts=100)
-        except Exception as e:
-            logging.debug(f"Error: {e}")
-            return [], 0.0
+            if not self.clauses_num_filter(solver_builder.problemJGEX):
+                return [], 0.0, -1
+            
+            try:
+                solver = solver_builder.build(max_attempts=100)
+            except Exception as e:
+                logging.debug(f"Error: {e}")
+                return [], 0.0, -1
 
         t = time.time()        
         try:
@@ -374,7 +375,7 @@ class GeometryGenerator:
             signal.alarm(0)
         except Exception as e:
             logging.info(f"Problem couldn't be solved. {e}.")
-            return [], 0.0
+            return [], 0.0 -1
         logging.info(f"ddar time: {time.time() - t:.2f}s")
 
         t = time.time()
@@ -419,6 +420,7 @@ class GeometryGenerator:
             # output
             generated_data.append({
                 "n_clauses": n_clauses,
+                "pid": pid,
                 "fl_problem": fl_problem,
                 "nl_problem": "",
                 "n_proof_steps": n_proof_steps,
@@ -456,10 +458,11 @@ class GeometryGenerator:
             try:
                 with multiprocessing.Pool(self.n_threads) as pool:
                     for results in pool.imap_unordered(self.process_single_problem, task_generator()):
-                        result, ddar_time = results
+                        result, ddar_time, pid = results
                         if result:
                             data += result
                             self.ddar_times.append(ddar_time)
+                            self.pids.append(pid)
                             self.samples_per_thread.append(len(result))
                             logging.info(
                                 f"Generated {len(data)} samples ({len(result)} new) in {time.time() - start_time:.1f}s "
@@ -487,6 +490,7 @@ class GeometryGenerator:
             open(nl_filename, "w", encoding="utf-8") as nlf:
             field_names = [
                 "id",
+                "pid",
                 "n_clauses",
                 "fl_problem",
                 "nl_problem",
@@ -517,12 +521,13 @@ class GeometryGenerator:
 
     def write_data_summary(self):
         """Write all generated data to output files."""
-        filename = os.path.join(self.output_dir, f"geometry_clauses{self.max_clauses}_depth{self.search_depth}_ddar_times.csv")
+        filename = os.path.join(self.output_dir, f"geometry_clauses{self.max_clauses}_depth{self.search_depth}_samples{self.n_samples}_ddar_times.csv")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         
         with open(filename, "w", newline="", encoding="utf-8") as csvfile:
             field_names = [
                 "id",
+                "pid",
                 "ddar_time",
                 "samples_per_thread",
             ]
@@ -533,6 +538,7 @@ class GeometryGenerator:
 
             for i, time in enumerate(self.ddar_times):
                 writer.writerow({"id": i,
+                                 "pid": self.pids[i],
                                  "ddar_time": f"{time:.2f}",
                                  "samples_per_thread": self.samples_per_thread[i]}
                                 )
