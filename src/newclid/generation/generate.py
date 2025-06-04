@@ -379,14 +379,14 @@ class GeometryGenerator:
         solver_builder.with_deductive_agent(DDARN())
         solver_builder.load_problem_from_txt(fl_statement)
 
-            if not self.clauses_num_filter(solver_builder.problemJGEX):
-                return [], 0.0, -1
-            
-            try:
-                solver = solver_builder.build(max_attempts=100)
-            except Exception as e:
-                logging.debug(f"Error: {e}")
-                return [], 0.0, -1
+        if not self.clauses_num_filter(solver_builder.problemJGEX):
+            return [], 0.0, -1
+        
+        try:
+            solver = solver_builder.build(max_attempts=100)
+        except Exception as e:
+            logging.debug(f"Error: {e}")
+            return [], 0.0, -1
 
         t = time.time()        
         try:
