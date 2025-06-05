@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 def run_loop(
-    deductive_agent: "DeductiveAgent", proof: "ProofState", rules: list[Rule], max_level: int = 1000, time_limit: int = 3600
+    deductive_agent: "DeductiveAgent", proof: "ProofState", rules: list[Rule], timeout: int = 3600
 ) -> dict[str, Any]:
     """Run DeductiveAgent until saturation or goal found."""
     infos: dict[str, Any] = {}
@@ -23,15 +23,10 @@ def run_loop(
     t0 = time.time()
 
     step = 0
-    current_level = 0
     running = True
-    reload = False
-    while running and current_level <= max_level and time.time() - t0 < time_limit:
-        running, reload = deductive_agent.step(proof=proof, rules=rules)
+    while running and time.time() - t0 < timeout:
+        running = deductive_agent.step(proof=proof, rules=rules)
         step += 1
-        current_level += 1 if reload else 0
-        if reload and running and current_level <= max_level:
-            logging.info("DDAR running at level " + str(current_level))
 
     infos["runtime"] = time.time() - t0
     infos["success"] = proof.check_goals()

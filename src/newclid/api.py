@@ -38,8 +38,8 @@ class GeometricSolver:
         self.deductive_agent = deductive_agent
         self.run_infos: dict[str, Any] = {}
 
-    def run(self, max_level: int = 1000, time_limit: int = 3600) -> bool:
-        infos = run_loop(self.deductive_agent, proof=self.proof, rules=self.rules, max_level=max_level, time_limit=time_limit)
+    def run(self, timeout: int = 3600) -> bool:
+        infos = run_loop(self.deductive_agent, proof=self.proof, rules=self.rules, timeout=timeout)
         self.run_infos = infos
         return infos["success"]
 
