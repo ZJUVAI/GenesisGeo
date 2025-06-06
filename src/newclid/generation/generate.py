@@ -5,26 +5,27 @@ import argparse
 import json
 import random
 import time
+from datetime import timedelta
 from pathlib import Path
 import itertools
 from collections import defaultdict
 import numpy as np
 from millify import millify
 
-from newclid.agent.ddarn import DDARN
-from newclid.api import GeometricSolverBuilder, GeometricSolver
 from newclid.configs import default_defs_path, default_rules_path
+from newclid.formulations.definition import DefinitionJGEX
+from newclid.formulations.rule import Rule
 from newclid.dependencies.symbols import Point
+from newclid.formulations.problem import ProblemJGEX
+from newclid.statement import Statement
+from newclid.api import GeometricSolverBuilder, GeometricSolver
+from newclid.agent.ddarn import DDARN
 from newclid.dependencies.dependency_graph import DependencyGraph
 from newclid.generation.clause_generation import CompoundClauseGen
+from newclid.proof import ProofState
 from newclid.proof_writing import get_structured_proof, write_proof_steps
-from newclid.statement import Statement
-from newclid.formulations.rule import Rule
-from newclid.formulations.definition import DefinitionJGEX
-from newclid.formulations.problem import ProblemJGEX
 from newclid.formulations.clause import translate_sentence
 from newclid.numerical import close_enough
-from newclid.proof import ProofState
 from newclid.generation.summary_plot import summary_plot
 
 
@@ -457,7 +458,6 @@ class GeometryGenerator:
         all_data_len = 0
         all_summaries = []
         start_time = time.time()
-
         if self.n_threads == 1:
             task_iterator = task_generator()
             while True:
@@ -466,9 +466,12 @@ class GeometryGenerator:
                     self.write_data(data, first_write = True if all_data_len == 0 else False)
                     all_data_len += len(data)
                     all_summaries.append(summary)
+                    elapsed_time = time.time() - start_time
                     logging.info(
-                        f"Generated {all_data_len} samples ({len(data)} new) in {time.time() - start_time:.1f}s "
-                        f"({(time.time() - start_time)/all_data_len:.1f}s/sample)")
+                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
+                        f"Speed: {(elapsed_time)/all_data_len:.1f}s/sample. "
+                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)))}"
+                    )
                 if all_data_len >= self.n_samples:
                     break
         else:
@@ -479,14 +482,17 @@ class GeometryGenerator:
                             self.write_data(data, first_write = True if all_data_len == 0 else False)
                             all_data_len += len(data)
                             all_summaries.append(summary)
+                            elapsed_time = time.time() - start_time
                             logging.info(
-                                f"Generated {all_data_len} samples ({len(data)} new) in {time.time() - start_time:.1f}s "
-                                f"({(time.time() - start_time)/all_data_len:.1f}s/sample)")
+                                f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
+                                f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
+                                f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)))}"
+                            )
                         if all_data_len >= self.n_samples:
                             pool.terminate() 
                             break
-                pool.close()
-                pool.join()
+                    pool.close()
+                    pool.join()
             except Exception as e:
                 logging.error(f"multiprocessing Pool error: {e}")
         
