@@ -300,9 +300,9 @@ class GeometryGenerator:
                     tmp_string += dep.to_str() + f' [{dep_idx[dep]}] '
                 string_aux.append(tmp_string)
         if len(string_aux) > 0:
-            data_aux += '<aux>'
-            data_aux += '\n'.join([s.strip() for s in string_aux])
-            data_aux += '</aux> '
+            data_aux += '<aux> '
+            data_aux += ' '.join([s.strip() for s in string_aux])
+            data_aux += ' </aux> '
 
         # get analysis, numerical_check and proof
         data_analysis, data_numerical_check, data_proof = get_structured_proof(proof_state, dep_idx)
@@ -454,7 +454,7 @@ class GeometryGenerator:
                 clauses = self.clauses_generator.generate_clauses()
                 yield (i, clauses)
 
-        all_data = []
+        all_data_len = 0
         all_summaries = []
         start_time = time.time()
 
@@ -463,24 +463,26 @@ class GeometryGenerator:
             while True:
                 data, summary = self.process_single_problem(next(task_iterator))
                 if data:
-                    all_data += data
+                    self.write_data(data, first_write = True if all_data_len == 0 else False)
+                    all_data_len += len(data)
                     all_summaries.append(summary)
                     logging.info(
-                        f"Generated {len(all_data)} samples ({len(data)} new) in {time.time() - start_time:.1f}s "
-                        f"({(time.time() - start_time)/len(all_data):.1f}s/sample)")
-                if len(all_data) >= self.n_samples:
+                        f"Generated {all_data_len} samples ({len(data)} new) in {time.time() - start_time:.1f}s "
+                        f"({(time.time() - start_time)/all_data_len:.1f}s/sample)")
+                if all_data_len >= self.n_samples:
                     break
         else:
             try:
                 with multiprocessing.Pool(self.n_threads) as pool:
                     for data, summary in pool.imap_unordered(self.process_single_problem, task_generator()):
                         if data:
-                            all_data += data
+                            self.write_data(data, first_write = True if all_data_len == 0 else False)
+                            all_data_len += len(data)
                             all_summaries.append(summary)
                             logging.info(
-                                f"Generated {len(all_data)} samples ({len(data)} new) in {time.time() - start_time:.1f}s "
-                                f"({(time.time() - start_time)/len(all_data):.1f}s/sample)")
-                        if len(all_data) >= self.n_samples:
+                                f"Generated {all_data_len} samples ({len(data)} new) in {time.time() - start_time:.1f}s "
+                                f"({(time.time() - start_time)/all_data_len:.1f}s/sample)")
+                        if all_data_len >= self.n_samples:
                             pool.terminate() 
                             break
                 pool.close()
@@ -488,23 +490,25 @@ class GeometryGenerator:
             except Exception as e:
                 logging.error(f"multiprocessing Pool error: {e}")
         
-        logging.info(f"Generated {len(all_data)} samples successfully")
-        self.write_data(all_data)
+        logging.info(f"Generated {all_data_len} samples successfully")
         summary_plot(all_summaries, prefix=self.path_prefix)
-    def write_data(self, all_data: list) -> int:
-        """Write all generated data to output files."""
-        filename = self.path_prefix + f".json"
+    def write_data(self, all_data: list, first_write: bool = False):
+        """Append a single JSON object to a .jsonl file."""
+        filename = self.path_prefix + ".jsonl"
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(all_data, f, ensure_ascii=False, indent=2)
-    
+        mode = 'w' if first_write else 'a'
+        with open(filename, mode, encoding='utf-8') as f:
+            for data_item in all_data:
+                json.dump(data_item, f, ensure_ascii=False)
+                f.write('\n')
+
 def main():
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
-    parser.add_argument("--max_clauses", required=False, type=int, default=10)
+    parser.add_argument("--max_clauses", required=False, type=int, default=5)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=2)
     parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
-    parser.add_argument("--n_threads", required=False, type=int, default=10)
-    parser.add_argument("--n_samples", required=False, type=int, default=1000)
+    parser.add_argument("--n_threads", required=False, type=int, default=1)
+    parser.add_argument("--n_samples", required=False, type=int, default=100)
     parser.add_argument("--dir", required=False, default="dataset")
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
