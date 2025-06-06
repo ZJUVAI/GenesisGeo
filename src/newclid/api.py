@@ -6,6 +6,7 @@ from typing_extensions import Self
 
 
 from newclid.agent.ddarn import DDARN
+from newclid.agent.lm import LMAgent
 from newclid.formulations.definition import DefinitionJGEX
 from newclid.dependencies.dependency_graph import DependencyGraph
 from newclid.load_geogebra import load_geogebra
@@ -39,9 +40,13 @@ class GeometricSolver:
         self.run_infos: dict[str, Any] = {}
 
     def run(self, timeout: int = 3600) -> bool:
-        infos = run_loop(self.deductive_agent, proof=self.proof, rules=self.rules, timeout=timeout)
+        infos = self.deductive_agent.run(proof=self.proof, rules=self.rules, timeout=timeout)
         self.run_infos = infos
         return infos["success"]
+        
+        # infos = run_loop(self.deductive_agent, proof=self.proof, rules=self.rules, timeout=timeout)
+        # self.run_infos = infos
+        # return infos["success"]
 
     def write_proof_steps(self, out_file: Optional[Path]):
         write_proof_steps(self.proof, out_file)
@@ -113,8 +118,11 @@ class GeometricSolverBuilder:
             )
         if self.deductive_agent is None:
             self.deductive_agent = DDARN()
+        
+        if isinstance(self.deductive_agent, LMAgent):
+            self.deductive_agent.problemJGEX = self.problemJGEX
 
-        proof_state.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
+        # proof_state.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
         return GeometricSolver(proof_state, self.rules, self.deductive_agent)
 
     def load_problem_from_file(

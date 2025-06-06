@@ -1,8 +1,9 @@
 """Classical Breadth-First Search based agents."""
 
 from __future__ import annotations
+import time
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from newclid.agent.agents_interface import (
     DeductiveAgent,
@@ -26,6 +27,31 @@ class DDARN(DeductiveAgent):
         self.rule_buffer: list[Rule] = []
         self.application_buffer: list[Dependency] = []
         self.any_new_statement_has_been_added = True
+  
+    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600) -> dict[str, Any]:
+        """Run DeductiveAgent until saturation or goal found."""
+        infos: dict[str, Any] = {}
+        for goal in proof.goals:
+            if not goal.check_numerical():
+                infos["error"] = f"{goal.pretty()} fails numerical check"
+                return infos
+        t0 = time.time()
+        proof.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
+        step = 0
+        running = True
+        while running and time.time() - t0 < timeout:
+            running = self.step(proof=proof, rules=rules)
+            step += 1
+
+        infos["runtime"] = time.time() - t0
+        infos["success"] = proof.check_goals()
+        infos["steps"] = step
+        for goal in proof.goals:
+            if goal.check():
+                infos[goal.pretty() + " succeeded"] = True
+            else:
+                infos[goal.pretty() + " succeeded"] = False
+        return infos
 
     def step(self, proof: ProofState, rules: list[Rule]) -> tuple[bool, bool]:
         if proof.check_goals():

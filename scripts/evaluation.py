@@ -5,6 +5,7 @@ import time
 
 from newclid.agent.ddarn import DDARN
 from newclid.agent.human_agent import HumanAgent
+from newclid.agent.lm import LMAgent
 from newclid.api import GeometricSolverBuilder
 
 
@@ -18,7 +19,7 @@ def solve_problem(args):
         solver = (
             GeometricSolverBuilder(8)
             .load_problem_from_file(problems_path, problem_name)
-            .with_deductive_agent(DDARN())
+            .with_deductive_agent(LMAgent())
             .build()
         )
         is_solved = solver.run()
@@ -28,7 +29,6 @@ def solve_problem(args):
         print(f"Warning: solver crashed on problem '{problem_name}' : ({type(e)}) {e}")
         elapsed_time = time.time() - start_time 
         return (problem_name, False, elapsed_time)
-
 
 def run_newclid(filepath: Path, max_workers: int = 4):
     """
@@ -57,15 +57,12 @@ def run_newclid(filepath: Path, max_workers: int = 4):
     solved_count = 0
     processed_count = 0  
     total_time = 0 
-    total_real_time = time.time()        
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        # Submit tasks and collect futures
-        futures = {executor.submit(solve_problem, (name, filepath)): name for name in problem_names}
+    total_real_time = time.time()   
 
-        # Process completed tasks
-        for future in as_completed(futures):
-            problem_name = futures[future]
-            problem_name, is_solved, elapsed_time = future.result()
+    if max_workers == 1:
+        # Single-threaded execution
+        for problem_name in problem_names:
+            problem_name, is_solved, elapsed_time = solve_problem((problem_name, filepath))
             solved_count += 1 if is_solved else 0
             processed_count += 1  
             total_time += elapsed_time 
@@ -76,6 +73,26 @@ def run_newclid(filepath: Path, max_workers: int = 4):
                 f"({'Success' if is_solved else 'Failed'}), "
                 f"Time: {elapsed_time:.2f}s"
             )
+    else:
+        # Multi-threaded execution using ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit tasks and collect futures
+            futures = {executor.submit(solve_problem, (name, filepath)): name for name in problem_names}
+
+            # Process completed tasks
+            for future in as_completed(futures):
+                problem_name = futures[future]
+                problem_name, is_solved, elapsed_time = future.result()
+                solved_count += 1 if is_solved else 0
+                processed_count += 1  
+                total_time += elapsed_time 
+                print(
+                    f"Progress: {processed_count}/{total_problems} processed, "  
+                    f"Solved: {solved_count}, "
+                    f"Current: {problem_name} "
+                    f"({'Success' if is_solved else 'Failed'}), "
+                    f"Time: {elapsed_time:.2f}s"
+                )
 
     solved_percentage = (solved_count / total_problems) * 100 if total_problems > 0 else 0
     total_real_time = time.time() - total_real_time
@@ -88,4 +105,5 @@ def run_newclid(filepath: Path, max_workers: int = 4):
 if __name__ == "__main__":
     problems_path = Path("problems_datasets/examples.txt")
     problems_path = Path("problems_datasets/imo_ag_30.txt")
+    # problems_path = Path("problems_datasets/dev.txt")
     run_newclid(problems_path, max_workers=5)  # You can adjust the value of max_workers as needed
