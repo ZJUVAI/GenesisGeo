@@ -36,14 +36,14 @@ def translate_constrained_to_constructive(
     # 全等/等距
     elif predicate == 'cong':
         a, b, c, d = args
-        if a == c and a == point:
-            return 'on_bline', [a, b, d]
         if point in [c, d]:
             a, b, c, d = c, d, a, b
         if point == b:
             a, b = b, a
         if point == d:
             c, d = d, c
+        if a == c and a == point:
+            return 'on_bline', [a, b, d]
         if b in [c, d]:
             if b == d:
                 c, d = d, c
@@ -64,14 +64,14 @@ def translate_constrained_to_constructive(
         a, b, c, d, e, f = args
         if point in [d, e, f]:
             a, b, c, d, e, f = d, e, f, a, b, c
-        x, b2, y, c2, d2 = b, c, e, d, f
-        if point == b2:
-            a, b2, c2, d2 = b2, a, d2, c2
-        if point == d2 and x == y:
-            return 'angle_bisector', [point, b2, x, c2]
+        x, b, y, c, d = b, c, e, d, f
+        if point == b:
+            a, b, c, d = b, a, d, c
+        if point == d and x == y:
+            return 'angle_bisector', [point, b, x, c]
         if point == x:
-            return 'eqangle3', [x, a, b2, y, c2, d2]
-        return 'on_aline', [a, x, b2, c2, y, d2]
+            return 'eqangle3', [x, a, b, y, c, d]
+        return 'on_aline', [a, x, b, c, y, d]
 
     # 四点共圆
     elif predicate == 'cyclic':

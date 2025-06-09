@@ -23,6 +23,11 @@ class TestTranslateConstrainedToConstructive(unittest.TestCase):
             translate_constrained_to_constructive('A', 'perp', ['A', 'B', 'A', 'D']),
             ('on_dia', ['A', 'D', 'B'])
         )
+        # 测试on_dia分支
+        self.assertEqual(
+            translate_constrained_to_constructive('D', 'perp', ['A', 'D', 'D', 'B']),
+            ('on_dia', ['D', 'B', 'A'])
+        )
 
     def test_para(self):
         # 点在c,d
@@ -55,7 +60,7 @@ class TestTranslateConstrainedToConstructive(unittest.TestCase):
         # on_bline分支
         self.assertEqual(
             translate_constrained_to_constructive('A', 'cong', ['A', 'B', 'A', 'D']),
-            ('on_bline', ['A', 'B', 'D'])
+            ('on_bline', ['A', 'D', 'B'])
         )
         # eqdistance分支
         self.assertEqual(
