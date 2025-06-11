@@ -6,10 +6,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 import re
 from collections import defaultdict
+import copy
 
 from newclid.agent.agents_interface import (
     DeductiveAgent,
 )
+from newclid.formulations.problem import ProblemJGEX
 from newclid.proof import ProofState
 from newclid.formulations.clause import Clause
 from newclid.statement import Statement
@@ -51,13 +53,16 @@ class LMAgent(DeductiveAgent):
                 {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
                 {"role": "user", "content": query}
             ],
-            max_tokens=3000,
-            temperature=0.6,
-            top_p=0.95,
-            extra_body={"top_k": 10,},
+            max_tokens=512,
+            # temperature=2,
+            top_p=0.9,
+            extra_body={
+                "top_k": 20
+            },
         )
         return chat_response.choices[0].message.content
     
+    @torch.no_grad()
     def inference2(self, query: str):
         model_path = "/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft"
         if self.model is None or self.tokenizer is None:
@@ -74,71 +79,92 @@ class LMAgent(DeductiveAgent):
         text = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
-            add_generation_prompt=True
+            add_generation_prompt=True,
         )
+        text += '<aux>'
         model_inputs = self.tokenizer([text], return_tensors="pt").to('cuda')
-        generated_ids = self.model.generate(
+        generated_output = self.model.generate(
             **model_inputs,
-            max_new_tokens=512
+            max_new_tokens=50,
+            num_beams=32,
+            # num_beam_groups=5,
+            # diversity_penalty=1.0,
+            num_return_sequences=16,
+            # do_sample=True, 
+            # # temperature=2, 
+            # top_k=50, 
+            # top_p=0.9, 
+            pad_token_id=151643,
+            eos_token_id=29, # self.tokenizer(['>']) = {'input_ids': [[29]], 'attention_mask': [[1]]}
+            return_dict_in_generate=True, 
+            output_scores=True
         )
-        generated_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-        ]
-        aux_dsl = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-
-        return aux_dsl
-
-    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600) -> dict[str, Any]:
+        dsl_with_aux = self.tokenizer.batch_decode(generated_output.sequences, skip_special_tokens=True)
+        return dsl_with_aux, generated_output.sequences_scores
+    
+    def run(self, proof: "ProofState", rules: list[Rule], 
+            beam_size: int = 256, search_depth: int = 4, 
+            timeout: int = 3600
+        ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
+        def proof_info(proof: "ProofState"):
+            infos["runtime"] = time.time() - t0
+            infos["success"] = proof.check_goals()
+            infos["steps"] = step
+            for goal in proof.goals:
+                if goal.check():
+                    infos[goal.pretty() + " succeeded"] = True
+                else:
+                    infos[goal.pretty() + " succeeded"] = False
+            return infos
+
         infos: dict[str, Any] = {}
         for goal in proof.goals:
             if not goal.check_numerical():
                 infos["error"] = f"{goal.pretty()} fails numerical check"
                 return infos
         t0 = time.time()
-
         step = 0
-        lm_try = 0
-        while lm_try < 5:
-            proof.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
-            running = True
-            while running and time.time() - t0 < timeout:
-                running = self.step(proof=proof, rules=rules)
-                step += 1
-            if proof.check_goals():
-                break
-            else:
-                with torch.no_grad():
-                    # problem -> dsl
-                    dsl = self.problem_to_dsl(proof_state=proof)
-                    # model inference (dsl) -> aux dsl # <aux>e: coll a c e [002] coll b d e [003]</aux>
-                    # aux_dsl = self.inference(dsl)
-                    aux_dsl = self.inference2(dsl)
-                    # aux dsl -> construction
-                    constructions = self.try_dsl_to_constructions(aux_dsl)
-                    # add construction
-                    max_attempts = 100
-                    for _ in range(max_attempts):
+
+        self.run_ddar(proof, rules, t0)
+
+        if not proof.check_goals():
+            base_problem = self.problemJGEX
+            base_proof = proof
+            beam_queue = BeamQueue(max_size=beam_size)
+            beam_queue.add(node=([]), val=0)
+            for depth in range(search_depth):
+                new_queue = BeamQueue(max_size=beam_size)  # to replace beam_queue.
+                for prev_score, (constructions) in beam_queue:
+                    current_problem = copy.deepcopy(base_problem)
+                    current_proof = copy.deepcopy(base_proof)
+                    # add constructions and solve problem by ddar
+                    if len(constructions)>0:
                         try:
-                            # add construction to problem
-                            self.problemJGEX.with_more_construction(constructions)
-                            # add construction to proof state
-                            self.add_construction(proof=proof, s=constructions)
-                            break
+                            current_problem = current_problem.with_more_construction('; '.join(constructions))
+                            self.add_construction(current_proof, '; '.join(constructions))
                         except Exception as e:
                             continue
-                    self.any_new_statement_has_been_added = True
-                    lm_try += 1
+                        print(self.problem_to_dsl(current_problem, current_proof))
+                        self.run_ddar(current_proof, rules, t0)
+                        if current_proof.check_goals():
+                            return proof_info(current_proof)
+                    # fail to solve the problem, seek help from llm
+                    dsl = self.problem_to_dsl(current_problem, current_proof)
+                    aux_dsl_list, scores = self.inference2(dsl)
+                    for aux_dsl, score in zip(aux_dsl_list, scores):
+                        try:
+                            construction = self.try_dsl_to_constructions(aux_dsl)
+                            if construction: 
+                                new_constructions = copy.copy(constructions)
+                                new_constructions.append(construction)
+                                new_queue.add(node=(new_constructions), val=prev_score+score)
+                        except Exception as e:
+                            continue
+                beam_queue = new_queue
+                print(beam_queue)
 
-        infos["runtime"] = time.time() - t0
-        infos["success"] = proof.check_goals()
-        infos["steps"] = step
-        for goal in proof.goals:
-            if goal.check():
-                infos[goal.pretty() + " succeeded"] = True
-            else:
-                infos[goal.pretty() + " succeeded"] = False
-        return infos
+        return proof_info(proof)
 
     def step(self, proof: ProofState, rules: list[Rule]) -> tuple[bool, bool]:
         if proof.check_goals():
@@ -162,6 +188,14 @@ class LMAgent(DeductiveAgent):
             logging.debug("ddarn : reload")
         return True
 
+    def run_ddar(self, proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600):
+        proof.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
+        self.any_new_statement_has_been_added = True
+        running = True
+        while running and time.time() - start_time < timeout:
+            running = self.step(proof=proof, rules=rules)
+            # TODO: add step later..
+            # step += 1
     def try_dsl_to_constructions(self, dsl):
         match = re.search(r"<aux>(.*?)</aux>", dsl) # <aux>e: coll a c e [002] coll b d e [003]</aux>
         if match:
@@ -268,9 +302,8 @@ class LMAgent(DeductiveAgent):
         # 其它直接返回
         return predicate, [point] + args if point not in args else args
     
-    def problem_to_dsl(self, proof_state: "ProofState") -> str:
+    def problem_to_dsl(self, problem: "ProblemJGEX", proof_state: "ProofState") -> str:
         """Convert the problem to a DSL string."""
-        problem = self.problemJGEX
         dep_idx: dict[Statement, str] = {}
         defs = proof_state.defs
         
@@ -326,3 +359,35 @@ class LMAgent(DeductiveAgent):
         clauses = Clause.parse_line(s)
         for clause in clauses:
             proof.add_construction(clause)
+
+class BeamQueue:
+    """Keep only the top k objects according to their values."""
+
+    def __init__(self, max_size: int = 512):
+        self.queue = []
+        self.max_size = max_size
+
+    def add(self, node: object, val: float) -> None:
+        """Add a new node to this queue."""
+
+        if len(self.queue) < self.max_size:
+            self.queue.append((val, node))
+            return
+
+        # Find the minimum node:
+        min_idx, (min_val, _) = min(enumerate(self.queue), key=lambda x: x[1])
+
+        # replace it if the new node has higher value.
+        if val > min_val:
+            self.queue[min_idx] = (val, node)
+
+    def __iter__(self):
+        for val, node in self.queue:
+            yield val, node
+
+    def __len__(self) -> int:
+        return len(self.queue)
+    
+    def __repr__(self) -> str:
+        items = ',\n  '.join(f'({val:.4f}, {repr(node)})' for val, node in self.queue)
+        return f'BeamQueue(max_size={self.max_size}, size={len(self.queue)}, items=[\n  {items}\n])'
