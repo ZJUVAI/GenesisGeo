@@ -26,7 +26,7 @@ from newclid.proof import ProofState
 from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.formulations.clause import translate_sentence
 from newclid.numerical import close_enough
-from newclid.generation.summary_plot import summary_plot
+from newclid.generation.summary_plot import summary_plot, plot_goal_distribution
 
 
 class GeometryGenerator: 
@@ -400,6 +400,7 @@ class GeometryGenerator:
         logging.info(f"{len(possible_goals)=}")
 
         generated_data = []
+        goal_collection = [] # 初始化 goal_collection
         for goal in possible_goals:
             # essential fl_problem
             essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
@@ -423,6 +424,7 @@ class GeometryGenerator:
                 logging.debug(f"Naive proof with length {n_proof_steps}")
                 continue
             
+            goal_collection.append(goal.predicate.NAME) # 收集 goal 类型
             # solution
             solver.proof.goals = [goal]
             aux_points = [p.name for p in aux_points]
@@ -445,6 +447,7 @@ class GeometryGenerator:
         summary = {
             'runtime': solver.run_infos['runtime'],
             'n_samples': len(generated_data),
+            'goals': goal_collection,
         }
         return generated_data, summary
 
@@ -498,6 +501,8 @@ class GeometryGenerator:
         
         logging.info(f"Generated {all_data_len} samples successfully")
         summary_plot(all_summaries, prefix=self.path_prefix)
+        plot_goal_distribution(all_summaries, prefix=self.path_prefix) # 调用 plot_goal_distribution
+
     def write_data(self, all_data: list, first_write: bool = False):
         """Append a single JSON object to a .jsonl file."""
         filename = self.path_prefix + ".jsonl"
