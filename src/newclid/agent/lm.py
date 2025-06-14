@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any
 import re
 from collections import defaultdict
 import copy
+from openai import OpenAI
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from newclid.agent.agents_interface import (
     DeductiveAgent,
@@ -16,12 +19,7 @@ from newclid.proof import ProofState
 from newclid.formulations.clause import Clause
 from newclid.statement import Statement
 from newclid.formulations.clause import translate_sentence
-from newclid.configs import default_defs_path, default_rules_path
-from newclid.formulations.rule import Rule
 
-from openai import OpenAI
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
@@ -53,18 +51,24 @@ class LMAgent(DeductiveAgent):
                 {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
                 {"role": "user", "content": query}
             ],
-            max_tokens=512,
+            max_tokens=50,
             # temperature=2,
-            top_p=0.9,
+            # top_p=0.9,
+            temperature=0.0,
+            logprobs=True,
+            n=8,
             extra_body={
-                "top_k": 20
+                'use_beam_search': True,
+                'best_of': 8,
+                'stop_token_ids': [62],
             },
         )
+        #chat_response.choices[0].logprobs.content[0].logprob
         return chat_response.choices[0].message.content
     
     @torch.no_grad()
     def inference2(self, query: str):
-        model_path = "/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft"
+        model_path = "/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft10/checkpoint-10000"
         if self.model is None or self.tokenizer is None:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,
@@ -85,11 +89,11 @@ class LMAgent(DeductiveAgent):
         model_inputs = self.tokenizer([text], return_tensors="pt").to('cuda')
         generated_output = self.model.generate(
             **model_inputs,
-            max_new_tokens=50,
-            num_beams=32,
+            max_new_tokens=100,
+            num_beams=8,
             # num_beam_groups=5,
             # diversity_penalty=1.0,
-            num_return_sequences=16,
+            num_return_sequences=8,
             # do_sample=True, 
             # # temperature=2, 
             # top_k=50, 
@@ -103,7 +107,7 @@ class LMAgent(DeductiveAgent):
         return dsl_with_aux, generated_output.sequences_scores
     
     def run(self, proof: "ProofState", rules: list[Rule], 
-            beam_size: int = 256, search_depth: int = 4, 
+            beam_size: int = 64, search_depth: int = 4, 
             timeout: int = 3600
         ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
@@ -129,40 +133,30 @@ class LMAgent(DeductiveAgent):
         self.run_ddar(proof, rules, t0)
 
         if not proof.check_goals():
-            base_problem = self.problemJGEX
-            base_proof = proof
             beam_queue = BeamQueue(max_size=beam_size)
-            beam_queue.add(node=([]), val=0)
+            beam_queue.add(node=(self.problemJGEX, proof), val=0)
             for depth in range(search_depth):
                 new_queue = BeamQueue(max_size=beam_size)  # to replace beam_queue.
-                for prev_score, (constructions) in beam_queue:
-                    current_problem = copy.deepcopy(base_problem)
-                    current_proof = copy.deepcopy(base_proof)
-                    # add constructions and solve problem by ddar
-                    if len(constructions)>0:
-                        try:
-                            current_problem = current_problem.with_more_construction('; '.join(constructions))
-                            self.add_construction(current_proof, '; '.join(constructions))
-                        except Exception as e:
-                            continue
-                        print(self.problem_to_dsl(current_problem, current_proof))
-                        self.run_ddar(current_proof, rules, t0)
-                        if current_proof.check_goals():
-                            return proof_info(current_proof)
-                    # fail to solve the problem, seek help from llm
-                    dsl = self.problem_to_dsl(current_problem, current_proof)
+                for prev_score, (problem, proof) in beam_queue:
+                    # seek help from llm
+                    dsl = self.problem_to_dsl(problem, proof)
                     aux_dsl_list, scores = self.inference2(dsl)
                     for aux_dsl, score in zip(aux_dsl_list, scores):
                         try:
-                            construction = self.try_dsl_to_constructions(aux_dsl)
-                            if construction: 
-                                new_constructions = copy.copy(constructions)
-                                new_constructions.append(construction)
-                                new_queue.add(node=(new_constructions), val=prev_score+score)
+                            aux = self.try_dsl_to_constructions(aux_dsl)
+                            if aux:
+                                new_problem = problem.with_more_construction(aux) # will recreate the problem
+                                new_proof = copy.deepcopy(proof)
+                                self.add_construction(new_proof, aux)
+                                self.run_ddar(new_proof, rules, t0)
+                                if new_proof.check_goals():
+                                    return proof_info(new_proof)
+                                else:
+                                    new_queue.add(node=(new_problem, new_proof), val=prev_score+score)
                         except Exception as e:
                             continue
                 beam_queue = new_queue
-                print(beam_queue)
+                # print(beam_queue)
 
         return proof_info(proof)
 
@@ -200,7 +194,6 @@ class LMAgent(DeductiveAgent):
         match = re.search(r"<aux>(.*?)</aux>", dsl) # <aux>e: coll a c e [002] coll b d e [003]</aux>
         if match:
             content = match.group(1).strip()  # e: coll a c e [002] coll b d e [003]
-            
             prefix_match = re.match(r"(\w+)\s*:\s*(.*)", content)
             if prefix_match:
                 prefix = prefix_match.group(1) # e
@@ -209,7 +202,7 @@ class LMAgent(DeductiveAgent):
                 segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
                 # result = [prefix] + segments
                 if len(segments) > 2:
-                    return None
+                    segments = segments[:2]
                 result = prefix + ' = '
                 result_constructions = []
                 for segment in segments:
@@ -389,5 +382,6 @@ class BeamQueue:
         return len(self.queue)
     
     def __repr__(self) -> str:
+        # return f'BeamQueue(max_size={self.max_size}, size={len(self.queue)}])'
         items = ',\n  '.join(f'({val:.4f}, {repr(node)})' for val, node in self.queue)
         return f'BeamQueue(max_size={self.max_size}, size={len(self.queue)}, items=[\n  {items}\n])'

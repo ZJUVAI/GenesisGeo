@@ -1,4 +1,5 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
@@ -15,29 +16,29 @@ def solve_problem(args):
     """
     problem_name, problems_path = args
     start_time = time.time()
-    # try:
-    #     solver = (
-    #         GeometricSolverBuilder(8)
-    #         .load_problem_from_file(problems_path, problem_name)
-    #         .with_deductive_agent(LMAgent())
-    #         .build()
-    #     )
-    #     is_solved = solver.run()
-    #     elapsed_time = time.time() - start_time
-    #     return (problem_name, is_solved, elapsed_time) 
-    # except Exception as e:
-    #     print(f"Warning: solver crashed on problem '{problem_name}' : ({type(e)}) {e}")
-    #     elapsed_time = time.time() - start_time 
-    #     return (problem_name, False, elapsed_time)
-    solver = (
-        GeometricSolverBuilder(8)
-        .load_problem_from_file(problems_path, problem_name)
-        .with_deductive_agent(LMAgent())
-        .build()
-    )
-    is_solved = solver.run()
-    elapsed_time = time.time() - start_time
-    return (problem_name, is_solved, elapsed_time) 
+    try:
+        solver = (
+            GeometricSolverBuilder(8)
+            .load_problem_from_file(problems_path, problem_name)
+            .with_deductive_agent(LMAgent())
+            .build()
+        )
+        is_solved = solver.run()
+        elapsed_time = time.time() - start_time
+        return (problem_name, is_solved, elapsed_time) 
+    except Exception as e:
+        print(f"Warning: solver crashed on problem '{problem_name}' : ({type(e)}) {e}")
+        elapsed_time = time.time() - start_time 
+        return (problem_name, False, elapsed_time)
+    # solver = (
+    #     GeometricSolverBuilder(8)
+    #     .load_problem_from_file(problems_path, problem_name)
+    #     .with_deductive_agent(LMAgent())
+    #     .build()
+    # )
+    # is_solved = solver.run()
+    # elapsed_time = time.time() - start_time
+    # return (problem_name, is_solved, elapsed_time) 
 
 def run_newclid(filepath: Path, max_workers: int = 4):
     """
@@ -114,5 +115,7 @@ def run_newclid(filepath: Path, max_workers: int = 4):
 if __name__ == "__main__":
     problems_path = Path("problems_datasets/examples.txt")
     problems_path = Path("problems_datasets/imo_ag_30.txt")
-    problems_path = Path("problems_datasets/dev.txt")
-    run_newclid(problems_path, max_workers=5)  # You can adjust the value of max_workers as needed
+    problems_path = Path("problems_datasets/dev7.txt")
+    problems_path = Path("problems_datasets/dev_jgex.txt")
+    # problems_path = Path("problems_datasets/dev.txt")
+    run_newclid(problems_path, max_workers=8)  # You can adjust the value of max_workers as needed
