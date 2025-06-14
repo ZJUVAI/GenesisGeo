@@ -9,6 +9,7 @@ from collections import defaultdict
 import copy
 from openai import OpenAI
 import torch
+from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from newclid.agent.agents_interface import (
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
 
 class LMAgent(DeductiveAgent):
-    def __init__(self):
+    def __init__(self, model_path: Path):
         self.rule_buffer: list[Rule] = []
         self.application_buffer: list[Dependency] = []
         self.any_new_statement_has_been_added = True
@@ -41,6 +42,7 @@ class LMAgent(DeductiveAgent):
         )
 
         # transformer
+        self.model_path = model_path
         self.model = None
         self.tokenizer = None
 
@@ -68,14 +70,13 @@ class LMAgent(DeductiveAgent):
     
     @torch.no_grad()
     def inference2(self, query: str):
-        model_path = "/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft10/checkpoint-10000"
         if self.model is None or self.tokenizer is None:
             self.model = AutoModelForCausalLM.from_pretrained(
-                model_path,
+                self.model_path,
                 torch_dtype="auto",
                 device_map="auto"
             )
-            self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         messages = [
             {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
             {"role": "user", "content": query}

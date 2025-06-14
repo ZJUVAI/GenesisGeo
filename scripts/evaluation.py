@@ -3,6 +3,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
+import argparse 
 
 from newclid.agent.ddarn import DDARN
 from newclid.agent.human_agent import HumanAgent
@@ -14,13 +15,13 @@ def solve_problem(args):
     """
     Process a single problem and return whether it was solved successfully along with the time taken.
     """
-    problem_name, problems_path = args
+    problem_name, problems_path, model_path = args
     start_time = time.time()
     try:
         solver = (
             GeometricSolverBuilder(8)
             .load_problem_from_file(problems_path, problem_name)
-            .with_deductive_agent(LMAgent())
+            .with_deductive_agent(LMAgent(model_path))
             .build()
         )
         is_solved = solver.run()
@@ -40,7 +41,7 @@ def solve_problem(args):
     # elapsed_time = time.time() - start_time
     # return (problem_name, is_solved, elapsed_time) 
 
-def run_newclid(filepath: Path, max_workers: int = 4):
+def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4):
     """
     Main function, read the file and execute tasks using ProcessPoolExecutor.
     
@@ -72,7 +73,7 @@ def run_newclid(filepath: Path, max_workers: int = 4):
     if max_workers == 1:
         # Single-threaded execution
         for problem_name in problem_names:
-            problem_name, is_solved, elapsed_time = solve_problem((problem_name, filepath))
+            problem_name, is_solved, elapsed_time = solve_problem((problem_name, filepath, modelpath))
             solved_count += 1 if is_solved else 0
             processed_count += 1  
             total_time += elapsed_time 
@@ -87,7 +88,7 @@ def run_newclid(filepath: Path, max_workers: int = 4):
         # Multi-threaded execution using ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit tasks and collect futures
-            futures = {executor.submit(solve_problem, (name, filepath)): name for name in problem_names}
+            futures = {executor.submit(solve_problem, (name, filepath, modelpath)): name for name in problem_names}
 
             # Process completed tasks
             for future in as_completed(futures):
@@ -113,9 +114,20 @@ def run_newclid(filepath: Path, max_workers: int = 4):
 
 
 if __name__ == "__main__":
-    problems_path = Path("problems_datasets/examples.txt")
-    problems_path = Path("problems_datasets/imo_ag_30.txt")
-    problems_path = Path("problems_datasets/dev7.txt")
-    problems_path = Path("problems_datasets/dev_jgex.txt")
-    # problems_path = Path("problems_datasets/dev.txt")
-    run_newclid(problems_path, max_workers=8)  # You can adjust the value of max_workers as needed
+    parser = argparse.ArgumentParser(description="Run Newclid evaluation with configurable paths.")
+    parser.add_argument("--problems_path", type=str, default="problems_datasets/dev_jgex.txt",
+                        help="Path to the problems dataset file")
+    parser.add_argument("--model_path", type=str, help="Path to the model checkpoint")
+    parser.add_argument("--max_workers", type=int, default=8, help="Number of worker processes to use")
+    args = parser.parse_args()
+    problems_path = Path(args.problems_path)
+    model_path = Path(args.model_path)
+    run_newclid(problems_path, model_path, max_workers=args.max_workers)
+
+    # problems_path = Path("problems_datasets/examples.txt")
+    # problems_path = Path("problems_datasets/imo_ag_30.txt")
+    # problems_path = Path("problems_datasets/dev7.txt")
+    # problems_path = Path("problems_datasets/dev_jgex.txt")
+    # # problems_path = Path("problems_datasets/dev.txt")
+    # model_path = "/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft10/checkpoint-10000"
+    # run_newclid(problems_path, max_workers=8)  # You can adjust the value of max_workers as needed
