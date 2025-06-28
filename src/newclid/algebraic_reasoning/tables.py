@@ -16,6 +16,7 @@ NLOGATOM: int = 9
 
 Angle_Chase = "Angle Chasing"
 Ratio_Chase = "Ratio Chasing"
+Shortcut_Derivation = "Shortcut Derivation"
 
 
 SumCV = dict[str, Fraction]

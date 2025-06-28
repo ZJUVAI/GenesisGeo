@@ -88,3 +88,44 @@ def plot_goal_distribution(summaries: list[dict[str, float]], prefix: str, ylog:
     plt.savefig(output_image_path, dpi=300)
     plt.close()
     logging.info(f"Goal distribution plot saved to {output_image_path}")
+
+def plot_first_predicate_distribution(summaries: list[dict[str, float]], prefix: str, ylog: bool = True):
+    df = pd.DataFrame(summaries) 
+    
+    if 'first_predicate' not in df.columns or df['first_predicate'].empty:
+        logging.warning("The 'first_predicate' column is missing or empty in summaries. Cannot plot first predicate distribution.")
+        predicates = []
+    else:
+        predicates = df['first_predicate'].dropna().tolist()
+
+    if not predicates:
+        print("No first predicates found to plot.")
+        return
+
+    counter = Counter(predicates)
+    total = len(predicates)
+
+    percentages = {k: (v / total) * 100 for k, v in counter.items()}
+    sorted_items = sorted(counter.items(), key=lambda x: x[1], reverse=True)
+    labels = [item[0] for item in sorted_items]
+    counts = [item[1] for item in sorted_items]
+    percs = [percentages[label] for label in labels]
+
+    plt.figure(figsize=(12, 8))
+    bars = plt.bar(labels, counts, color='skyblue', log=ylog)
+
+    for bar, perc in zip(bars, percs):
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width() / 2., height,
+                 f'{perc:.1f}%', ha='center', va='bottom')
+
+    plt.xlabel('Predicate Type')
+    plt.ylabel('Count (log scale)' if ylog else 'Count')
+    plt.title('Distribution of First Predicates')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+
+    output_image_path = f'{prefix}_first_predicate_distribution.jpg'
+    plt.savefig(output_image_path, dpi=300)
+    plt.close()
+    logging.info(f"First predicate distribution plot saved to {output_image_path}")

@@ -17,6 +17,30 @@ def get_structured_proof(proof_state: "ProofState", id: dict[Statement, str]) ->
             if statement not in id:
                 id[statement] = f"{len(id):03d}"
         return f"{' '.join(premise.to_str() + ' [' + id[premise] + ']' for premise in dep.why)} ({dep.reason})=> {dep.statement.to_str()} [{id[dep.statement]}]"
+    
+    def rediger_new_format(dep: Dependency) -> str:
+        """Generate proof step in new format: statement [id] rule_id [required_statement_ids]"""
+        for statement in (dep.statement,) + dep.why:
+            if statement not in id:
+                id[statement] = f"{len(id):03d}"
+        
+        # Extract rule ID from reason string and handle special cases
+        reason = dep.reason
+        if "Ratio Chasing" in reason or reason == "Ratio":
+            rule_id = "r99"
+        elif "Angle Chasing" in reason or reason == "Angle":
+            rule_id = "r98"
+        elif "Shortcut Derivation" in reason or reason == "Shortcut":
+            rule_id = "r97"
+        elif reason and ' ' in reason:
+            rule_id = reason.split()[0]
+        else:
+            rule_id = reason if reason else "unknown"
+        
+        # Generate new format: statement [statement_id] rule_id [premise_ids]
+        premise_ids = ' '.join(f"[{id[premise]}]" for premise in dep.why)
+        return f"{dep.statement.to_str()} [{id[dep.statement]}] {rule_id} {premise_ids}".strip()
+    
     def pure_predicate(dep: Dependency) -> str:
         # return f"{' '.join(premise.to_str() + ' [' + id[premise] + ']' for premise in dep.why)} ({dep.reason})=> {dep.statement.to_str()} [{id[dep.statement]}]"
         return f"{dep.statement.to_str()} [{id[dep.statement]}]"
@@ -38,31 +62,38 @@ def get_structured_proof(proof_state: "ProofState", id: dict[Statement, str]) ->
         if line.statement not in id:
             id[line.statement] = f"{len(id):03d}"
     sorted_premises = sorted(premises, key=lambda line: id[line.statement])
+    analysis_items = []
     for line in sorted_premises:
-        analysis += pure_predicate(line) + " "
+        analysis_items.append(pure_predicate(line))
+    analysis += "; ".join(analysis_items) + " "
     analysis += "</analysis>"
 
     numerical_check = ""
+    numerical_check_items = []
     for line in numercial_checked_premises:
         if line.statement not in id:
             id[line.statement] = f"{len(id):03d}"
     sorted_numercial_checked_premises = sorted(numercial_checked_premises, key=lambda line: id[line.statement])
     for line in sorted_numercial_checked_premises:
-        numerical_check += pure_predicate(line) + " "
+        numerical_check_items.append(pure_predicate(line))
     for line in numercial_checked_aux:
         if line.statement not in id:
             id[line.statement] = f"{len(id):03d}"
     sorted_numercial_checked_aux = sorted(numercial_checked_aux, key=lambda line: id[line.statement])
     for line in sorted_numercial_checked_aux:
-        numerical_check += pure_predicate(line) + " "
-    if len(numerical_check) > 0:
-        numerical_check = "<numerical_check> " + numerical_check + "</numerical_check>"
+        numerical_check_items.append(pure_predicate(line))
+    if len(numerical_check_items) > 0:
+        numerical_check = "<numerical_check> " + "; ".join(numerical_check_items) + " </numerical_check>"
 
     proof = "<proof> "
+    proof_steps_formatted = []
     for k, line in enumerate(proof_steps):
         if NUMERICAL_CHECK not in line.reason and IN_PREMISES not in line:
-            proof += f"{rediger(line)} "
-    proof += "</proof>"
+            proof_steps_formatted.append(rediger_new_format(line))
+    
+    # Join proof steps with semicolons
+    proof += "; ".join(proof_steps_formatted)
+    proof += " </proof>"
 
     return analysis, numerical_check, proof
 

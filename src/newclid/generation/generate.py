@@ -26,7 +26,7 @@ from newclid.proof import ProofState
 from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.formulations.clause import translate_sentence
 from newclid.numerical import close_enough
-from newclid.generation.summary_plot import summary_plot, plot_goal_distribution
+from newclid.generation.output_summary import summary_plot, plot_goal_distribution, plot_first_predicate_distribution
 
 
 class GeometryGenerator: 
@@ -373,11 +373,27 @@ class GeometryGenerator:
         data += write_proof_steps(proof_state, print_output=False)
         return data
 
-    def process_single_problem(self, args: tuple) -> tuple[list, float]:
+    def process_single_problem(self, args: tuple) -> tuple[list, dict]:
         """Process a single geometry problem."""
         pid, fl_statement = args
         # fl_statement = "a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b; e = on_line e a c, on_line e b d ? perp a d b c"
         
+        if '?' in fl_statement:
+            predicates_part, _ = fl_statement.split('?', 1)
+        else:
+            predicates_part = fl_statement
+        
+        first_predicate = ''
+        try:
+            first_statement = predicates_part.split(';')[0].strip()
+            predicate_part = first_statement
+            if '=' in first_statement:
+                predicate_part = first_statement.split('=', 1)[1].strip()
+            
+            first_predicate = predicate_part.split(' ')[0]
+        except IndexError:
+            logging.warning(f"Could not parse first predicate for: {fl_statement}")
+
         solver_builder = GeometricSolverBuilder(seed=998244353)
         solver_builder.with_deductive_agent(DDARN())
         solver_builder.load_problem_from_txt(fl_statement)
@@ -448,6 +464,7 @@ class GeometryGenerator:
             'runtime': solver.run_infos['runtime'],
             'n_samples': len(generated_data),
             'goals': goal_collection,
+            'first_predicate': first_predicate,
         }
         return generated_data, summary
 
@@ -502,6 +519,7 @@ class GeometryGenerator:
         logging.info(f"Generated {all_data_len} samples successfully")
         summary_plot(all_summaries, prefix=self.path_prefix)
         plot_goal_distribution(all_summaries, prefix=self.path_prefix) # 调用 plot_goal_distribution
+        plot_first_predicate_distribution(all_summaries, prefix=self.path_prefix)
 
     def write_data(self, all_data: list, first_write: bool = False):
         """Append a single JSON object to a .jsonl file."""

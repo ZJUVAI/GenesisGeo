@@ -6,6 +6,7 @@ from newclid.numerical.geometries import CircleNum
 from newclid.predicates.congruence import Cong
 from newclid.predicates.cyclic import Cyclic
 from newclid.predicates.predicate import Predicate
+from newclid.algebraic_reasoning.tables import Shortcut_Derivation
 
 
 if TYPE_CHECKING:
@@ -78,7 +79,7 @@ class Circumcenter(Predicate):
         p0 = points[1]
         return Dependency.mk(
             statement,
-            "",
+            Shortcut_Derivation,
             tuple(statement.with_new(Cong, (o, p0, o, p1)) for p1 in points[2:]),
         )
 
