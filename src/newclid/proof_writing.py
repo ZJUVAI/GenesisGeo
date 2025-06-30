@@ -27,11 +27,11 @@ def get_structured_proof(proof_state: "ProofState", id: dict[Statement, str]) ->
         # Extract rule ID from reason string and handle special cases
         reason = dep.reason
         if "Ratio Chasing" in reason or reason == "Ratio":
-            rule_id = "r99"
+            rule_id = "a00"
         elif "Angle Chasing" in reason or reason == "Angle":
-            rule_id = "r98"
+            rule_id = "a01"
         elif "Shortcut Derivation" in reason or reason == "Shortcut":
-            rule_id = "r97"
+            rule_id = "r99"
         elif reason and ' ' in reason:
             rule_id = reason.split()[0]
         else:

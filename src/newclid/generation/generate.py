@@ -322,7 +322,8 @@ class GeometryGenerator:
         return {
             "llm_data": data_problem + ' ' + data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
             "llm_input": data_problem,
-            "llm_output": data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
+            # "llm_output": data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
+            "llm_output": data_aux + data_numerical_check + data_proof,
         }
 
     def llm_nat_solution(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
