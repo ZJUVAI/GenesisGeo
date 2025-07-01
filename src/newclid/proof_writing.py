@@ -83,7 +83,7 @@ def get_structured_proof(proof_state: "ProofState", id: dict[Statement, str]) ->
     for line in sorted_numercial_checked_aux:
         numerical_check_items.append(pure_predicate(line))
     if len(numerical_check_items) > 0:
-        numerical_check = "<numerical_check> " + "; ".join(numerical_check_items) + " </numerical_check>"
+        numerical_check = "<numerical_check> " + "; ".join(numerical_check_items) + "; </numerical_check>"
 
     proof = "<proof> "
     proof_steps_formatted = []
@@ -93,7 +93,7 @@ def get_structured_proof(proof_state: "ProofState", id: dict[Statement, str]) ->
     
     # Join proof steps with semicolons
     proof += "; ".join(proof_steps_formatted)
-    proof += " </proof>"
+    proof += "; </proof>"
 
     return analysis, numerical_check, proof
 

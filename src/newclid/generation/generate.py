@@ -26,7 +26,7 @@ from newclid.proof import ProofState
 from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.formulations.clause import translate_sentence
 from newclid.numerical import close_enough
-from newclid.generation.output_summary import summary_plot, plot_goal_distribution, plot_first_predicate_distribution
+from newclid.generation.output_summary import summary_plot, plot_goal_distribution, get_first_predicate, plot_first_predicate_distribution
 
 
 class GeometryGenerator: 
@@ -193,13 +193,17 @@ class GeometryGenerator:
         if args[-1] == '':
             args = args[:-1]
         # AG1 do not support aconst and rconst
-        if name == 'aconst' or name == 'rconst':
+        if name == 'aconst' or name == 'rconst': # rconst AB:AB=1, aconst ∠AB AB=0
             return False
-        # case: cong AB = AB, para AB ∥∥ AB, rconst AB:AB=1, aconst ∠AB AB=0
-        if name == 'cong' or name == 'para': # or predicate == 'rconst' or predicate == 'aconst':
+        # case: cong AB = AB, 
+        if name == 'cong': 
             left = {args[0], args[1]}
             right = {args[2], args[3]}
             if left == right:
+                return False
+        # para AB ∥∥ AB, AB ∥∥ AC
+        if name == 'para':
+            if len({args[0], args[1], args[2], args[3]}) < 4:
                 return False
         if name == 'eqratio':
             seg_1 = {args[0], args[1]}
@@ -302,25 +306,18 @@ class GeometryGenerator:
                 string_aux.append(tmp_string)
         if len(string_aux) > 0:
             data_aux += '<aux> '
-            data_aux += ' '.join([s.strip() for s in string_aux])
-            data_aux += ' </aux> '
+            data_aux += '; '.join([s.strip() for s in string_aux])
+            data_aux += '; </aux> '
 
         # get analysis, numerical_check and proof
         data_analysis, data_numerical_check, data_proof = get_structured_proof(proof_state, dep_idx)
         
-        # # <analysis> </analysis>
-        # data += analysis
-
-        # # <numerical_check> </numerical_check>
-        # data += numerical_check        
+        # <numerical_check> </numerical_check>
         if data_numerical_check != '':
             data_numerical_check += ' '
-        
-        # # <proof> </proof>
-        # data += proof
 
         return {
-            "llm_data": data_problem + ' ' + data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
+            "llm_data": data_problem + ' ' + data_aux + data_numerical_check + data_proof,
             "llm_input": data_problem,
             # "llm_output": data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
             "llm_output": data_aux + data_numerical_check + data_proof,
@@ -379,22 +376,6 @@ class GeometryGenerator:
         pid, fl_statement = args
         # fl_statement = "a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b; e = on_line e a c, on_line e b d ? perp a d b c"
         
-        if '?' in fl_statement:
-            predicates_part, _ = fl_statement.split('?', 1)
-        else:
-            predicates_part = fl_statement
-        
-        first_predicate = ''
-        try:
-            first_statement = predicates_part.split(';')[0].strip()
-            predicate_part = first_statement
-            if '=' in first_statement:
-                predicate_part = first_statement.split('=', 1)[1].strip()
-            
-            first_predicate = predicate_part.split(' ')[0]
-        except IndexError:
-            logging.warning(f"Could not parse first predicate for: {fl_statement}")
-
         solver_builder = GeometricSolverBuilder(seed=998244353)
         solver_builder.with_deductive_agent(DDARN())
         solver_builder.load_problem_from_txt(fl_statement)
@@ -451,6 +432,7 @@ class GeometryGenerator:
 
             # output
             generated_data.append({
+                "fl_statement_src": fl_statement,
                 "n_clauses": n_clauses,
                 "fl_problem": str(fl_problem),
                 "nl_problem": "",
@@ -465,7 +447,7 @@ class GeometryGenerator:
             'runtime': solver.run_infos['runtime'],
             'n_samples': len(generated_data),
             'goals': goal_collection,
-            'first_predicate': first_predicate,
+            'first_predicate': get_first_predicate(fl_statement),
         }
         return generated_data, summary
 
@@ -535,8 +517,8 @@ class GeometryGenerator:
 def main():
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
     parser.add_argument("--max_clauses", required=False, type=int, default=5)
-    parser.add_argument("--min_proof_steps", required=False, type=int, default=2)
-    parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
+    parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
+    parser.add_argument("--min_clauses_num", required=False, type=int, default=3)
     parser.add_argument("--n_threads", required=False, type=int, default=1)
     parser.add_argument("--n_samples", required=False, type=int, default=100)
     parser.add_argument("--dir", required=False, default="dataset")

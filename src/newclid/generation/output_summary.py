@@ -89,6 +89,25 @@ def plot_goal_distribution(summaries: list[dict[str, float]], prefix: str, ylog:
     plt.close()
     logging.info(f"Goal distribution plot saved to {output_image_path}")
 
+def get_first_predicate(fl_statement: str):
+    if '?' in fl_statement:
+        predicates_part, _ = fl_statement.split('?', 1)
+    else:
+        predicates_part = fl_statement
+    
+    first_predicate = ''
+    try:
+        first_statement = predicates_part.split(';')[0].strip()
+        predicate_part = first_statement
+        if '=' in first_statement:
+            predicate_part = first_statement.split('=', 1)[1].strip()
+        first_predicate = predicate_part.split(' ')[0]
+        return first_predicate
+    except IndexError:
+        logging.warning(f"Could not parse first predicate for: {fl_statement}")
+        return None
+
+
 def plot_first_predicate_distribution(summaries: list[dict[str, float]], prefix: str, ylog: bool = True):
     df = pd.DataFrame(summaries) 
     
