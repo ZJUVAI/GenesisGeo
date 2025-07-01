@@ -37,7 +37,7 @@ iso_trapezoid
 eq_triangle x b c
 x : b c
 b c = diff b c
-x : cong x b b c, cong b c c x; eqangle b x b c c b c x, eqangle x c x b b x b c
+x : cong x b b c, cong b c c x, eqangle b x b c c b c x, eqangle x c x b b x b c
 circle b b c, circle c b c
 
 eqangle2 x a b c
@@ -73,31 +73,31 @@ free
 incenter x a b c
 x : a b c
 a b c = ncoll a b c
-x : eqangle a b a x a x a c, eqangle c a c x c x c b; eqangle b c b x b x b a
+x : eqangle a b a x a x a c, eqangle c a c x c x c b, eqangle b c b x b x b a
 bisect a b c, bisect b c a
 
 incenter2 x y z i a b c
 i : a b c, x : i b c, y : i c a, z : i a b
 a b c = ncoll a b c
-i : eqangle a b a i a i a c, eqangle c a c i c i c b; eqangle b c b i b i b a; x : coll x b c, perp i x b c; y : coll y c a, perp i y c a; z : coll z a b, perp i z a b; cong i x i y, cong i y i z
+i : eqangle a b a i a i a c, eqangle c a c i c i c b, eqangle b c b i b i b a; x : coll x b c, perp i x b c; y : coll y c a, perp i y c a; z : coll z a b, perp i z a b
 incenter2 a b c
 
 excenter x a b c
 x : a b c
 a b c = ncoll a b c
-x : eqangle a b a x a x a c, eqangle c a c x c x c b; eqangle b c b x b x b a
+x : eqangle a b a x a x a c, eqangle c a c x c x c b, eqangle b c b x b x b a
 bisect b a c, exbisect b c a
 
 excenter2 x y z i a b c
 i : a b c, x : i b c, y : i c a, z : i a b
 a b c = ncoll a b c
-i : eqangle a b a i a i a c, eqangle c a c i c i c b; eqangle b c b i b i b a; x : coll x b c, perp i x b c; y : coll y c a, perp i y c a; z : coll z a b, perp i z a b; cong i x i y, cong i y i z
+i : eqangle a b a i a i a c, eqangle c a c i c i c b, eqangle b c b i b i b a; x : coll x b c, perp i x b c; y : coll y c a, perp i y c a; z : coll z a b, perp i z a b
 excenter2 a b c
 
 centroid x y z i a b c
-x : b c, y : c a, z : a b, i : a x b y
+x : b c, y : c a, z : a b, i : a x b y c z
 a b c = ncoll a b c
-x : coll x b c, cong x b x c; y : coll y c a, cong y c y a; z : coll z a b, cong z a z b; i : coll a x i, coll b y i; coll c z i
+x : coll x b c, cong x b x c; y : coll y c a, cong y c y a; z : coll z a b, cong z a z b; i : coll a x i, coll b y i, coll c z i
 centroid a b c
 
 ninepoints x y z i a b c
@@ -217,13 +217,13 @@ tline a b c
 orthocenter x a b c
 x : a b c
 a b c = ncoll a b c
-x : perp x a b c, perp x b c a; perp x c a b
+x : perp x a b c, perp x b c a, perp x c a b
 tline a b c, tline b c a
 
 parallelogram a b c x
 x : a b c
 a b c = ncoll a b c
-x : para a b c x, para a x b c; cong a b c x, cong a x b c
+x : para a b c x, para a x b c, cong a b c x, cong a x b c
 pline a b c, pline c a b
 
 pentagon a b c d e
@@ -259,19 +259,19 @@ r_triangle
 rectangle a b c d
 c : a b c , d : a b c
  =
-a : ; b : ; c : perp a b b c ; d : para a b c d, para a d b c; perp a b a d, cong a b c d, cong a d b c, cong a c b d
+a : ; b : ; c : perp a b b c ; d : para a b c d, para a d b c, perp a b a d, cong a b c d, cong a d b c, cong a c b d
 rectangle
 
 reflect x a b c
 x : a b c
 a b c = diff b c, ncoll a b c
-x : cong b a b x, cong c a c x; perp b c a x
+x : cong b a b x, cong c a c x, perp b c a x
 reflect a b c
 
 risos a b c
 c : a b
  =
-a : ; b : ; c : perp a b a c, cong a b a c; eqangle b a b c c b c a
+a : ; b : ; c : perp a b a c, cong a b a c, eqangle b a b c c b c a
 risos
 
 segment a b
@@ -289,13 +289,13 @@ shift d c b
 square a b x y
 x : a b, y : a b x
 a b = diff a b
-x : perp a b b x, cong a b b x; y : para a b x y, para a y b x; perp a y y x, cong b x x y, cong x y y a, perp a x b y, cong a x b y
+x : perp a b b x, cong a b b x; y : para a b x y, para a y b x, perp a y y x, cong b x x y, cong x y y a, perp a x b y, cong a x b y
 square a b
 
 isquare a b c d
 c : a b , d : a b c
  =
-a : ; b : ; c : perp a b b c, cong a b b c; d : para a b c d, para a d b c; perp a d d c, cong b c c d, cong c d d a, perp a c b d, cong a c b d
+a : ; b : ; c : perp a b b c, cong a b b c; d : para a b c d, para a d b c, perp a d d c, cong b c c d, cong c d d a, perp a c b d, cong a c b d
 isquare
 
 trapezoid a b c d
@@ -355,7 +355,7 @@ dia a b
 ieq_triangle a b c
 c : a b
  =
-a : ; b : ; c : cong a b b c, cong b c c a; eqangle a b a c c a c b, eqangle c a c b b c b a
+a : ; b : ; c : cong a b b c, cong b c c a, eqangle a b a c c a c b, eqangle c a c b b c b a
 ieq_triangle
 
 cc_tangent x y z i o a w b
