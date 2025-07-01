@@ -1,4 +1,5 @@
 import csv
+import json
 import sys
 import re
 import os
@@ -758,34 +759,38 @@ class GeometryEquivalenceAnalyzer:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             output_path = os.path.join(script_dir, "fl_problem.txt")
 
-            with open(input_path, newline='', encoding='utf-8') as csvfile, \
+            with open(input_path, newline='', encoding='utf-8') as infile, \
                 open(output_path, 'w', encoding='utf-8') as outfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    data_num = int(row['id'])
-                    fl_problem = row['fl_problem']
+                for i, row in enumerate(infile):
+                    data = json.loads(row)
+                    fl_problem = data['fl_problem']
                     outfile.write(fl_problem + '\n')
-                    self.process_geometry_block(data_num, fl_problem)
+                    self.process_geometry_block(i, fl_problem)
             return True
         except Exception as e:
-            print(f"Error reading input CSV file: {e}")
+            print(f"Error reading input file: {e}")
             return False
         
         
-    def remove_duplicates_based_on_output(self, input_filename, output_filename):
-        """Remove duplicate entries from CSV based on analysis results."""
+    def remove_duplicates_based_on_output(self, input_filename, output_filename, new_filename):
+        """Remove duplicate entries from infile based on analysis results."""
         input_path = self.get_dataset_path(input_filename)
+        output_path = self.get_dataset_path(output_filename)
+        new_path = self.get_dataset_path(new_filename)
 
         rows = []
-        with open(input_path, 'r', newline='', encoding='utf-8') as csvfile:
-            reader = csv.DictReader(csvfile)
-            fieldnames = reader.fieldnames
-            for row in reader:
-                rows.append(row)
+        with open(input_path, 'r', newline='', encoding='utf-8') as infile:
+            # reader = csv.DictReader(infile)
+            # fieldnames = reader.fieldnames
+            # for row in reader:
+            #     rows.append(row)
+            for row in infile:
+                data = json.loads(row)
+                rows.append(data)
 
         # Identify IDs to remove
         to_remove = set()
-        with open(output_filename, 'r', encoding='utf-8') as f:
+        with open(output_path, 'r', encoding='utf-8') as f:
             for line in f:
                 parts = line.strip().split(',')
                 if len(parts) >= 2:
@@ -794,17 +799,21 @@ class GeometryEquivalenceAnalyzer:
 
         # Filter remaining rows
         remaining_rows = []
-        for new_id, row in enumerate([r for r in rows if int(r['id']) not in to_remove]):
+        for new_id, row in enumerate([r for i, r in enumerate(rows) if i not in to_remove]):
             new_row = row.copy()
             new_row['id'] = str(new_id) 
             remaining_rows.append(new_row)
 
         # Write cleaned CSV (overwrite original)
-        with open(input_path, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(remaining_rows)
-
+        # with open(input_path, 'w', newline='', encoding='utf-8') as infile:
+        #     writer = csv.DictWriter(infile, fieldnames=fieldnames)
+        #     writer.writeheader()
+        #     writer.writerows(remaining_rows)
+            
+        with open(new_path, 'w', encoding='utf-8') as outfile:
+            for row in remaining_rows:
+                json.dump(row, outfile, ensure_ascii=False)
+                outfile.write('\n')
 
     def find_equivalent_figures(self):
         """Find all pairs of equivalent figures."""
@@ -834,8 +843,9 @@ class GeometryEquivalenceAnalyzer:
 
     def write_results_to_file(self, output_file, equivalent_pairs):
         """Write the results to the output file."""
+        output_path = self.get_dataset_path(output_file)
         try:
-            with open(output_file, "w", encoding="utf-8") as out_file:
+            with open(output_path, "w", encoding="utf-8") as out_file:
                 for a, b in equivalent_pairs:
                     out_file.write(f"{a}, {b}\n")
             return True
@@ -844,9 +854,9 @@ class GeometryEquivalenceAnalyzer:
             return False
         
 
-    def run_analysis(self, input_file="input.csv", output_file="output.txt"):
-        """Run the complete analysis process with CSV input."""
-        print(f"Analyzing CSV file dataset/{input_file}...")
+    def run_analysis(self, input_file="input.jsonl", output_file="output.txt", new_file="new.jsonl"):
+        """Run the complete analysis process."""
+        print(f"Analyzing dataset/{input_file}...")
         if not self.analyze_input_file(input_file):
             return False
 
@@ -858,15 +868,15 @@ class GeometryEquivalenceAnalyzer:
             return False
 
         print("Removing duplicates from original file...")
-        self.remove_duplicates_based_on_output(input_file, output_file)
+        self.remove_duplicates_based_on_output(input_file, output_file, new_file)
 
         print(f"Analysis completed. Found {len(equivalent_pairs)} equivalent pairs.")
         return True
     
 
 if __name__ == "__main__":
-    input_filename = "input.csv" 
-    output_filename = "output.txt"
+    input_filename = "geometry_clauses15_samples10K_aux.jsonl" 
+    output_filename = f"analysis_{input_filename.split('.')[0]}_output.txt"
 
     if len(sys.argv) > 1:
         input_filename = sys.argv[1]
@@ -874,4 +884,4 @@ if __name__ == "__main__":
         output_filename = sys.argv[2]
 
     analyzer = GeometryEquivalenceAnalyzer()
-    analyzer.run_analysis(input_filename, output_filename)
+    analyzer.run_analysis(input_filename, output_filename, new_file="new_" + input_filename)
