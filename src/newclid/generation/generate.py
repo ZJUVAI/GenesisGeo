@@ -26,7 +26,7 @@ from newclid.proof import ProofState
 from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.formulations.clause import translate_sentence
 from newclid.numerical import close_enough
-from newclid.generation.output_summary import summary_plot, plot_goal_distribution, get_first_predicate, plot_first_predicate_distribution
+from newclid.generation.output_summary import Summary, get_first_predicate
 
 
 class GeometryGenerator: 
@@ -448,6 +448,8 @@ class GeometryGenerator:
             'n_samples': len(generated_data),
             'goals': goal_collection,
             'first_predicate': get_first_predicate(fl_statement),
+            'n_clauses': n_clauses if generated_data else 0,
+            'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
         }
         return generated_data, summary
 
@@ -459,7 +461,7 @@ class GeometryGenerator:
                 yield (i, clauses)
 
         all_data_len = 0
-        all_summaries = []
+        summary_reporter = Summary(prefix=self.path_prefix)
         start_time = time.time()
         if self.n_threads == 1:
             task_iterator = task_generator()
@@ -468,7 +470,7 @@ class GeometryGenerator:
                 if data:
                     self.write_data(data, first_write = True if all_data_len == 0 else False)
                     all_data_len += len(data)
-                    all_summaries.append(summary)
+                    summary_reporter.add(summary)
                     elapsed_time = time.time() - start_time
                     logging.info(
                         f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
@@ -484,7 +486,7 @@ class GeometryGenerator:
                         if data:
                             self.write_data(data, first_write = True if all_data_len == 0 else False)
                             all_data_len += len(data)
-                            all_summaries.append(summary)
+                            summary_reporter.add(summary)
                             elapsed_time = time.time() - start_time
                             logging.info(
                                 f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
@@ -499,10 +501,11 @@ class GeometryGenerator:
             except Exception as e:
                 logging.error(f"multiprocessing Pool error: {e}")
         
-        logging.info(f"Generated {all_data_len} samples successfully")
-        summary_plot(all_summaries, prefix=self.path_prefix)
-        plot_goal_distribution(all_summaries, prefix=self.path_prefix) # 调用 plot_goal_distribution
-        plot_first_predicate_distribution(all_summaries, prefix=self.path_prefix)
+        final_elapsed_time = time.time() - start_time
+        summary_reporter.total_elapsed_time = final_elapsed_time
+        summary_reporter.total_samples_generated = all_data_len
+        logging.info(f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
+        summary_reporter.output_report()
 
     def write_data(self, all_data: list, first_write: bool = False):
         """Append a single JSON object to a .jsonl file."""
