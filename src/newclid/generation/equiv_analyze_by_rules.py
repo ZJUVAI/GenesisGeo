@@ -65,7 +65,7 @@ class GeometryEquivalenceAnalyzer:
         time_taken = time.time() - start_time
 
         print(f"Total rows: {total_rows}, Rows to be kept: {len(rows_to_be_kept)}")
-        print(f"Ratio of kept rows: {len(rows_to_be_kept) / total_rows:.2f}")
+        print(f"Ratio of kept rows: {len(rows_to_be_kept) / total_rows * 100:.2f}%")
         print(f"Deduplicated file written to: dataset/{output_file}")
         print(f"Time taken: {time_taken:.2f} seconds")
 
@@ -73,7 +73,7 @@ class GeometryEquivalenceAnalyzer:
         with open(self.get_dataset_path(analysis_file), 'w', encoding='utf-8') as analysis_outfile:
             analysis_outfile.write(f"Total rows: {total_rows}\n")
             analysis_outfile.write(f"Rows to be kept: {len(rows_to_be_kept)}\n")
-            analysis_outfile.write(f"Ratio of kept rows: {len(rows_to_be_kept) / total_rows:.2f}\n")
+            analysis_outfile.write(f"Ratio of kept rows: {len(rows_to_be_kept) / total_rows * 100:.2f}%\n")
             analysis_outfile.write(f"Time taken: {time_taken:.2f} seconds\n")
 
             for pair in duplicated_pairs:
@@ -81,7 +81,7 @@ class GeometryEquivalenceAnalyzer:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        input_file = 'geometry_clauses15_samples30K_aux.jsonl'
+        input_file = 'geometry_clauses15_samples10M_aux.jsonl'
     else:
         input_file = sys.argv[1]
 
