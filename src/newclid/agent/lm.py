@@ -276,18 +276,40 @@ class LMAgent(DeductiveAgent):
 
         # 等角
         elif predicate == 'eqangle':
-            a, b, c, d, e, f = args
-            if point in [d, e, f]:
-                a, b, c, d, e, f = d, e, f, a, b, c
-            x, b2, y, c2, d2 = b, c, e, d, f
+            a1, a2, b1, b2, c1, c2, d1, d2 = args
+            if point in [c1, c2, d1, d2]:
+                a1, a2, b1, b2, c1, c2, d1, d2 = c1, c2, d1, d2, a1, a2, b1, b2
+            if point in [b1, b2]:
+                a1, a2, b1, b2 = b1, b2, a1, a2
+            if point in [d1, d2]:
+                c1, c2, d1, d2 = d1, d2, c1, c2
+            if point == a2:
+                a1, a2 = a2, a1
             if point == b2:
-                a, b2, c2, d2 = b2, a, d2, c2
-            if point == d2 and x == y:
-                return 'angle_bisector', [point, b2, x, c2]
-            if point == x:
-                return 'eqangle3', [x, a, b2, y, c2, d2]
-            return 'on_aline', [a, x, b2, c2, y, d2]
-
+                b1, b2 = b2, b1
+            if point == c2:
+                c1, c2 = c2, c1
+            # 1. angle_bisector
+            if point == a1 and point == c1:
+                b = a2
+                a = b1 if b == b2 else b2
+                c = d1 if b == d2 else d2
+                return 'angle_bisector', [point, a, b, c]
+            # 2. eqangle3
+            if point == a1 and point == b1:
+                a = a2
+                b = b2
+                d = c1 if c1 == d1 or c1 == d2 else c2
+                e = c2 if d == c1 else c1
+                f = d2 if d == d1 else d1
+                return 'eqangle3', [point, a, b, d, e, f]            
+            # 3. on_aline
+            a = a2
+            b = b2 if a == b1 else b1
+            d = c1 if c1 == d1 or c1 == d2 else c2
+            c = c2 if d == c1 else c1
+            e = d2 if d == d1 else d1
+            return 'on_aline', [point, a, b, c, d, e]
         # 四点共圆
         elif predicate == 'cyclic':
             a, b, c = [x for x in args if x != point]
