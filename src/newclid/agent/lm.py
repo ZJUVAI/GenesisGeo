@@ -78,7 +78,7 @@ class LMAgent(DeductiveAgent):
             )
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         messages = [
-            {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+            {"role": "system", "content": "You are a helpful assistant."}, #You are Qwen, created by Alibaba Cloud. 
             {"role": "user", "content": query}
         ]
         text = self.tokenizer.apply_chat_template(
@@ -87,6 +87,7 @@ class LMAgent(DeductiveAgent):
             add_generation_prompt=True,
         )
         text += '<aux>'
+        # text = query + ' <aux>'
         model_inputs = self.tokenizer([text], return_tensors="pt").to('cuda')
         generated_output = self.model.generate(
             **model_inputs,

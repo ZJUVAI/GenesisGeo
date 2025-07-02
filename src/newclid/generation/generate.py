@@ -280,14 +280,14 @@ class GeometryGenerator:
         string_premise = []
         for k, v in data_tmp.items():
             if not all(p in aux_points for p in k.split(' ')):
-                tmp_string = k + ': '
+                tmp_string = k + ' : '
                 for dep in v:
                     if dep not in dep_idx:
                         dep_idx[dep] = f"{len(dep_idx):03d}"
                     tmp_string += dep.to_str() + f' [{dep_idx[dep]}] '
                 string_premise.append(tmp_string)
-        data_problem += '; '.join([s.strip() for s in string_premise]) + ' ? '
-        data_problem += ';'.join([
+        data_problem += ' ; '.join([s.strip() for s in string_premise]) + ' ? '
+        data_problem += ' ;'.join([
             (goal[0] + ' ' + ' '.join(goal[1:])) 
             for goal in problem.goals
             ])
@@ -298,7 +298,7 @@ class GeometryGenerator:
         string_aux = []
         for k, v in data_tmp.items():
             if all(p in aux_points for p in k.split(' ')):
-                tmp_string = k + ': '
+                tmp_string = k + ' : '
                 for dep in v:
                     if dep not in dep_idx:
                         dep_idx[dep] = f"{len(dep_idx):03d}"
@@ -306,8 +306,8 @@ class GeometryGenerator:
                 string_aux.append(tmp_string)
         if len(string_aux) > 0:
             data_aux += '<aux> '
-            data_aux += '; '.join([s.strip() for s in string_aux])
-            data_aux += '; </aux> '
+            data_aux += ' ; '.join([s.strip() for s in string_aux])
+            data_aux += ' ; </aux> '
 
         # get analysis, numerical_check and proof
         data_analysis, data_numerical_check, data_proof = get_structured_proof(proof_state, dep_idx)
@@ -437,7 +437,7 @@ class GeometryGenerator:
                 "fl_problem": str(fl_problem),
                 "nl_problem": "",
                 "n_proof_steps": n_proof_steps,
-                "nl_solution": nl_solution,
+                # "nl_solution": nl_solution,
                 # "llm_data": llm['llm_data'],
                 "llm_input": llm['llm_input'],
                 "llm_output": llm['llm_output'],
@@ -475,7 +475,7 @@ class GeometryGenerator:
                     logging.info(
                         f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
                         f"Speed: {(elapsed_time)/all_data_len:.1f}s/sample. "
-                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)))}"
+                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
                     )
                 if all_data_len >= self.n_samples:
                     break
@@ -491,7 +491,7 @@ class GeometryGenerator:
                             logging.info(
                                 f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
                                 f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
-                                f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)))}"
+                                f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
                             )
                         if all_data_len >= self.n_samples:
                             pool.terminate() 
