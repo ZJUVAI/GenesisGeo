@@ -70,6 +70,13 @@ _build
 # Documentation
 docs/source
 
+# New output and model directories
+outputs/
+models/ckpts/
+
+# Keep model info file but ignore checkpoints
+!models/ckpts_info.md
+
 tests-exp/*
 !tests-exp/*.ggb
 !tests-exp/*.ggb
