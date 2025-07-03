@@ -158,8 +158,6 @@ class LMAgent(DeductiveAgent):
                         except Exception as e:
                             continue
                 beam_queue = new_queue
-                # print(beam_queue)
-
         return proof_info(proof)
 
     def step(self, proof: ProofState, rules: list[Rule]) -> tuple[bool, bool]:
@@ -194,7 +192,6 @@ class LMAgent(DeductiveAgent):
             # step += 1
     def try_dsl_to_constructions(self, dsl):
         dsl = dsl + ' </aux>'
-        print(dsl)
         match = re.search(r"<aux>(.*?)</aux>", dsl) # <aux>e: coll a c e [002] coll b d e [003]</aux>
         if match:
             content = match.group(1).strip()  # e: coll a c e [002] coll b d e [003]
