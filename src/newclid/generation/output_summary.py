@@ -15,11 +15,18 @@ def get_first_predicate(fl_statement: str):
     
     first_predicate = ''
     try:
-        first_statement = predicates_part.split(' ')[0].strip()
-        predicate_part = first_statement
-        if '=' in first_statement:
-            predicate_part = first_statement.split('=', 1)[1].strip()
-        first_predicate = predicate_part.split(' ')[0]
+        # 检查是否包含等号，如果有等号则取等号右边的部分
+        if '=' in predicates_part:
+            # 取第一个等号右边的部分
+            predicate_part = predicates_part.split('=', 1)[1].strip()
+            # 如果有分号，只取分号前面的第一个语句
+            if ';' in predicate_part:
+                predicate_part = predicate_part.split(';')[0].strip()
+        else:
+            predicate_part = predicates_part
+        
+        # 从处理后的部分提取第一个词作为谓词
+        first_predicate = predicate_part.split(' ')[0].strip()
         return first_predicate
     except IndexError:
         logging.warning(f"Could not parse first predicate for: {fl_statement}")
@@ -135,7 +142,7 @@ class Summary:
 
         plt.xlabel('Goal Type')
         plt.ylabel('Count (log scale)' if ylog else 'Count')
-        plt.title('Distribution of Geometric Problem Goals')
+        plt.title('Goal Distribution')
         plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         output_image_path = f'{self.prefix}_goal_distribution.jpg'
@@ -170,7 +177,7 @@ class Summary:
 
         plt.xlabel('Predicate Type')
         plt.ylabel('Count (log scale)' if ylog else 'Count')
-        plt.title('Distribution of First Predicates')
+        plt.title('First Predicate Distribution')
         plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         output_image_path = f'{self.prefix}_first_predicate_distribution.jpg'
@@ -220,9 +227,10 @@ class Summary:
                 labels = [item[0] for item in sorted_items]
                 counts = [item[1] for item in sorted_items]
                 ax.bar(labels, counts, color=colors[2])
+                ax.set_yscale('log')
                 ax.set_xticks(np.arange(len(labels)))
                 ax.set_xticklabels(labels, rotation=45, ha='right')
-        ax.set_title('Distribution of Geometric Problem Goals')
+        ax.set_title('Goal Distribution')
         ax.set_xlabel('Goal Type')
         ax.set_ylabel('Count')
         ax.grid(True, alpha=0.3)
@@ -240,7 +248,7 @@ class Summary:
                 ax.bar(labels, counts, color=colors[3])
                 ax.set_xticks(np.arange(len(labels)))
                 ax.set_xticklabels(labels, rotation=45, ha='right')
-        ax.set_title('Distribution of First Predicates')
+        ax.set_title('First Predicate Distribution')
         ax.set_xlabel('Predicate Type')
         ax.set_ylabel('Count')
         ax.grid(True, alpha=0.3)
@@ -251,6 +259,7 @@ class Summary:
             proof_steps = self.df['n_proof_steps'].explode().dropna()
             if not proof_steps.empty:
                 ax.hist(proof_steps, bins=20, edgecolor='black', alpha=0.7, color=colors[4])
+                ax.set_yscale('log')
                 mean_len = proof_steps.mean()
                 median_len = proof_steps.median()
                 ax.axvline(mean_len, color='red', linestyle='--', label=f'Mean: {mean_len:.2f}')
