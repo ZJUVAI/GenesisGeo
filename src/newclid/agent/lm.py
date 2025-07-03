@@ -101,7 +101,7 @@ class LMAgent(DeductiveAgent):
             # top_k=50, 
             # top_p=0.9, 
             pad_token_id=151643,
-            eos_token_id=29, # self.tokenizer(['>']) = {'input_ids': [[29]], 'attention_mask': [[1]]}
+            eos_token_id=2587, #' ;' #29, # self.tokenizer(['>']) = {'input_ids': [[29]], 'attention_mask': [[1]]}
             return_dict_in_generate=True, 
             output_scores=True
         )
@@ -193,9 +193,12 @@ class LMAgent(DeductiveAgent):
             # TODO: add step later..
             # step += 1
     def try_dsl_to_constructions(self, dsl):
+        dsl = dsl + ' </aux>'
+        print(dsl)
         match = re.search(r"<aux>(.*?)</aux>", dsl) # <aux>e: coll a c e [002] coll b d e [003]</aux>
         if match:
             content = match.group(1).strip()  # e: coll a c e [002] coll b d e [003]
+            content = content.split(';')[0].strip()
             prefix_match = re.match(r"(\w+)\s*:\s*(.*)", content)
             if prefix_match:
                 prefix = prefix_match.group(1) # e
@@ -336,14 +339,14 @@ class LMAgent(DeductiveAgent):
         data_problem = '<problem> '
         string_premise = []
         for k, v in data_tmp.items():
-            tmp_string = k + ': '
+            tmp_string = k + ' : '
             for dep in v:
                 if dep not in dep_idx:
                     dep_idx[dep] = f"{len(dep_idx):03d}"
                 tmp_string += dep.to_str() + f' [{dep_idx[dep]}] '
             string_premise.append(tmp_string)
-        data_problem += '; '.join([s.strip() for s in string_premise]) + ' ? '
-        data_problem += ';'.join([
+        data_problem += ' ; '.join([s.strip() for s in string_premise]) + ' ? '
+        data_problem += ' ; '.join([
             (goal[0] + ' ' + ' '.join(goal[1:])) 
             for goal in problem.goals
             ])
