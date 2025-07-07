@@ -331,6 +331,16 @@ class Summary:
         }
         if self.total_elapsed_time > 0:
             summary_stats["Average Speed (samples/s)"] = f"{self.total_samples_generated / self.total_elapsed_time:.2f}"
+        
+        # 添加过滤率统计
+        if 'n_filtered_samples' in self.df.columns:
+            total_filtered = self.df['n_filtered_samples'].sum()
+            total_original = self.total_samples_generated + total_filtered
+            if total_original > 0:
+                filter_rate = (total_filtered / total_original) * 100
+                summary_stats["Total Filtered Samples"] = int(total_filtered)
+                summary_stats["Filter Rate (%)"] = f"{filter_rate:.2f}"
+                summary_stats["Average Filtered per Problem"] = f"{self.df['n_filtered_samples'].mean():.2f}"
 
         if 'n_proof_steps' in self.df.columns and not self.df['n_proof_steps'].explode().empty:
             summary_stats["Average Proof Steps"] = f"{self.df['n_proof_steps'].explode().mean():.2f}"

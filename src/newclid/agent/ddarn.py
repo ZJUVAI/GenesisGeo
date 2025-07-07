@@ -36,7 +36,7 @@ class DDARN(DeductiveAgent):
                 infos["error"] = f"{goal.pretty()} fails numerical check"
                 return infos
         t0 = time.time()
-        proof.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
+        proof.dep_graph.obtain_numerical_checked_premises()
         step = 0
         running = True
         while running and time.time() - t0 < timeout:

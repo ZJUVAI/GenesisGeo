@@ -30,7 +30,7 @@ from newclid.generation.output_summary import Summary, get_first_predicate
 
 
 class GeometryGenerator: 
-    def __init__(self, max_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600):
+    def __init__(self, max_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600, filteration_rate=0.6):
         self.max_clauses = max_clauses
         self.min_proof_steps = min_proof_steps
         self.min_clauses_num = min_clauses_num
@@ -38,6 +38,7 @@ class GeometryGenerator:
         self.n_threads = n_threads
         self.timeout = timeout
         self.output_dir = output_dir
+        self.filteration_rate = filteration_rate
         self.path_prefix = os.path.join(self.output_dir, f"geometry_clauses{self.max_clauses}_samples{millify(self.n_samples)}")
 
         self.clauses_generator = CompoundClauseGen(
@@ -370,7 +371,45 @@ class GeometryGenerator:
 
         data += write_proof_steps(proof_state, print_output=False)
         return data
+    
+    @staticmethod
+    def proofs_similarity(proof_lines1: tuple[str], proof_lines2: tuple[str]) -> float:
+        """Calculate the similarity between two proofs based on their lines."""
+        set1 = set(proof_lines1)
+        set2 = set(proof_lines2)
+        intersection = set1.intersection(set2)
+        union = set1.union(set2)
+        if not union:
+            return 0.0
+        # print(f"Intersection: {intersection}, Union: {union}")
+        return len(intersection) / len(union)
 
+    @staticmethod
+    def get_rules_and_lines_from_output(llm_output: str) -> tuple[str, tuple[str]]:
+        """Extract rules from the proof string."""
+        proof = llm_output.split('<proof>')[1].split('</proof>')[0].strip()
+        lines = [line.strip() for line in proof.split(';')][:-1]
+        rules = [line.split(']')[1].strip().split()[0] for line in lines]
+
+        # print(f"Proof lines: {lines}")
+        # print(f"Extracted rules: {rules}")
+        
+        return ('_'.join(rules), tuple(lines))
+    
+    def similarity_check(self, llm_output: str, proofs_of_used_rules: dict[str, list[tuple]]) -> bool:
+        """Check if the LLM output is similar to any of the existing proofs."""
+        rules, proof_lines = GeometryGenerator.get_rules_and_lines_from_output(llm_output)
+        for proofs in proofs_of_used_rules.get(rules, []):
+            similarity = GeometryGenerator.proofs_similarity(proof_lines, proofs)
+            # print(f"Similarity between {proof_lines} and {proofs}: {similarity:.2f}")
+            if similarity > self.filteration_rate:
+                return True
+                
+        if rules not in proofs_of_used_rules:
+            proofs_of_used_rules[rules] = []
+        proofs_of_used_rules[rules].append(proof_lines)
+        return False
+    
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
         """Process a single geometry problem."""
         pid, fl_statement = args
@@ -397,6 +436,8 @@ class GeometryGenerator:
         logging.info(f"check goals time: {time.time() - t:.2f}s")
         logging.info(f"{len(possible_goals)=}")
 
+        n_filtered_samples = 0
+        proofs_of_used_rules = {}
         generated_data = []
         goal_collection = [] # 初始化 goal_collection
         for goal in possible_goals:
@@ -430,6 +471,12 @@ class GeometryGenerator:
             llm = self.llm_solution(fl_problem, aux_points, solver.proof)
             # llm_nat_solution = self.llm_nat_solution(fl_problem, aux_points, solver.proof)
 
+            # check similarity
+            if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
+                logging.debug(f"Similar proof found for {goal.predicate.NAME} with clauses {n_clauses} and proof steps {n_proof_steps}. Skipping.")
+                n_filtered_samples += 1
+                continue
+
             # output
             generated_data.append({
                 "fl_statement_src": fl_statement,
@@ -450,7 +497,9 @@ class GeometryGenerator:
             'first_predicate': get_first_predicate(fl_statement),
             'n_clauses': n_clauses if generated_data else 0,
             'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
+            'n_filtered_samples': n_filtered_samples
         }
+
         return generated_data, summary
 
     def generate_problems(self):
@@ -527,6 +576,7 @@ def main():
     parser.add_argument("--dir", required=False, default="dataset")
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
+    parser.add_argument("--filteration_rate", required=False, type=float, default=0.6)
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
@@ -539,6 +589,7 @@ def main():
         min_clauses_num=args.min_clauses_num,
         n_samples=args.n_samples,
         timeout=args.timeout,
+        filteration_rate=args.filteration_rate
     )
     
     generator.generate_problems()
