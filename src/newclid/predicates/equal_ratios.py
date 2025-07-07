@@ -27,7 +27,133 @@ class EqRatio(Predicate):
 
     @classmethod
     def preparse(cls, args: tuple[str, ...]):
-        return EqAngle.preparse(args)
+        a, b, c, d, e, f, g, h = args
+        if a == b or c == d or e == f or g == h:
+            return 
+        if a == c:
+            if e == g:
+                a, b, c, d, e, f, g, h = a, b, c, d, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = a, b, c, d, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = a, b, c, d, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = a, b, c, d, f, e, h, g
+        elif a == d:
+            if e == g:
+                a, b, c, d, e, f, g, h = a, b, d, c, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = a, b, d, c, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = a, b, d, c, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = a, b, d, c, f, e, h, g
+        elif b == c:
+            if e == g:
+                a, b, c, d, e, f, g, h = b, a, c, d, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = b, a, c, d, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = b, a, c, d, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = b, a, c, d, f, e, h, g
+        elif b == d:
+            if e == g:
+                a, b, c, d, e, f, g, h = b, a, d, c, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = b, a, d, c, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = b, a, d, c, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = b, a, d, c, f, e, h, g
+        elif a == e:
+            if c == g:
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = a, b, e, f, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = a, b, e, f, d, c, h, g
+        elif a == f:
+            if c == g:
+                a, b, c, d, e, f, g, h = a, b, f, e, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = a, b, f, e, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = a, b, f, e, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = a, b, f, e, d, c, h, g
+        elif b == e:
+            if c == g:
+                a, b, c, d, e, f, g, h = b, a, e, f, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = b, a, e, f, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = b, a, e, f, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = b, a, e, f, d, c, h, g
+        elif b == f:
+            if c == g:
+                a, b, c, d, e, f, g, h = b, a, f, e, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = b, a, f, e, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = b, a, f, e, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = b, a, f, e, d, c, h, g
+        if a != c or e != g:
+            if a > b: a, b = b, a
+            if c > d: c, d = d, c
+            if e > f: e, f = f, e
+            if g > h: g, h = h, g
+            g1a = (a, b, c, d)
+            g1b = (e, f, g, h)
+            g2a = (c, d, a, b)
+            g2b = (g, h, e, f)
+            if g1a <= g1b:
+                groups1 = g1a + g1b
+            else:
+                groups1 = g1b + g1a
+            if g2a <= g2b:
+                groups2 = g2a + g2b
+            else:
+                groups2 = g2b + g2a
+            return groups1 if groups1 <= groups2 else groups2
+
+        if a == e:
+            x = min(b, d, f, h)
+            if b == x:
+                if d < f:
+                    return (a, b, c, d, e, f, g, h)
+                else:
+                    return (a, b, e, f, c, d, g, h)
+            elif d == x:
+                if b < h:
+                    return (c, d, a, b, g, h, e, f)
+                else:
+                    return (c, d, g, h, a, b, e, f)
+            elif f == x:
+                if b < h:
+                    return (e, f, a, b, g, h, c, d)
+                else:
+                    return (e, f, g, h, a, b, c, d)
+            else:
+                if d < f:
+                    return (g, h, c, d, e, f, a, b)
+                else:
+                    return (g, h, e, f, c, d, a, b)
+        elif a < e:
+            if b < d:
+                return (a, b, c, d, e, f, g, h)
+            else:
+                return (c, d, a, b, g, h, e, f)
+        else:
+            if f < h:
+                return (e, f, g, h, a, b, c, d)
+            else:
+                return (g, h, e, f, c, d, a, b)
+        return EqAngle.preparse(args)    
 
     @classmethod
     def parse(cls, args: tuple[str, ...], dep_graph: DependencyGraph):
