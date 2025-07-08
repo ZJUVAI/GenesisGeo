@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, Optional
 import json
+import time
 
 from newclid.formulations.clause import translate_sentence
 from newclid.dependencies.symbols import Point
@@ -30,6 +31,7 @@ class Matcher:
         self.runtime_cache_path: Optional[Path] = None
         self.update(runtime_cache_path)
         self.cache: dict["Rule", tuple[Dependency, ...]] = {}
+        self.rule_match_time: dict[str, float] = {}
 
     def update(self, runtime_cache_path: Optional[Path] = None):
         self.runtime_cache_path = runtime_cache_path
@@ -39,6 +41,7 @@ class Matcher:
             with open(self.runtime_cache_path, "w") as f:
                 json.dump({}, f)
         self.cache = {}
+        self.rule_match_time = {}
         
     def apply_theorem(self, theorem: "Rule", mapping: dict[str, str]) -> Optional[set[Dependency]]:
         res: set[Dependency] = set()
@@ -384,6 +387,8 @@ class Matcher:
         return res
 
     def cache_theorem11(self, theorem: "Rule"):
+        start_time = time.time()
+        
         # file_cache = None
         # write = False
         # read = False
@@ -431,4 +436,19 @@ class Matcher:
         # logging.debug(
         #     f"{theorem} matching cache : now {len(self.cache[theorem])=} {read=} {write=} {len(mappings)=}"
         # )
+        
+        # record cache time
+        elapsed_time = time.time() - start_time
+        rule_name = theorem.descrption
+        if rule_name not in self.rule_match_time:
+            self.rule_match_time[rule_name] = 0
+        self.rule_match_time[rule_name] += elapsed_time
+
+    def get_rule_match_time_stats(self) -> dict[str, float]:
+        """get the statistics of rule match time"""
+        return self.rule_match_time.copy()
+    
+    def reset_rule_match_time_stats(self):
+        """Reset the rule match time statistics."""
+        self.rule_match_time = {}
 

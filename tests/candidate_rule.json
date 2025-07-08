@@ -1,0 +1,252 @@
+[
+    {
+        "rule_num": "r00",
+        "rule_text": "perp A B C D, perp C D E F, ncoll A B E => para A B E F",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_tline d c a b; e = free e; f = on_tline f e c d ? para a b e f"
+    },
+    {
+        "rule_num": "r01",
+        "rule_text": "cong O A O B, cong O B O C, cong O C O D => cyclic A B C D",
+        "rule_problem": "o = free o; a = free a; b = eqdistance b o o a; c = eqdistance c o o b; d = eqdistance d o o c ? cyclic a b c d"
+    },
+    {
+        "rule_num": "r02",
+        "rule_text": "eqangle A B P Q C D P Q => para A B C D",
+        "rule_problem": "p = free p; q = free q; a = free a; b = free b; c = free c; d = on_aline0 d p q a b p q c ? para a b c d"
+    },
+    {
+        "rule_num": "r03",
+        "rule_text": "cyclic A B P Q => eqangle P A P B Q A Q B",
+        "rule_problem": "a = free a; b = free b; p = free p; q = on_circum q a b p ? eqangle p a p b q a q b"
+    },
+    {
+        "rule_num": "r04",
+        "rule_text": "eqangle P A P B Q A Q B, ncoll P Q A B => cyclic A B P Q",
+        "rule_problem": "a = free a; b = free b; q = free q; p = eqangle3 p a b q a b ? cyclic a b p q"
+    },
+    {
+        "rule_num": "r05",
+        "rule_text": "eqangle C A C B R P R Q, cyclic A B C P Q R => cong A B P Q",
+        "rule_problem": "a = free a; b = free b; c = free c; p = on_circum p a b c; r = on_circum r a b c; q = on_circum q a b c, on_aline q r p b c a ? cong a b p q"
+    },
+    {
+        "rule_num": "r06",
+        "rule_text": "midp E A B, midp F A C => para E F B C",
+        "rule_problem": "a = free a; b = free b; c = free c; e = midpoint e a b; f = midpoint f a c ? para e f b c"
+    },
+    {
+        "rule_num": "r07",
+        "rule_text": "para A B C D, coll O A C, ncoll O A B, coll O B D => eqratio3 A B C D O O",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_pline d c a b; o = on_line o a c, on_line o b d ? eqratio3 a b c d o o"
+    },
+    {
+        "rule_num": "r08",
+        "rule_text": "perp A B C D, perp E F G H, npara A B E F => eqangle A B E F C D G H",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_tline d c a b; e = free e; f = free f; g = free g; h = on_tline h g e f ? eqangle a b e f c d g h"
+    },
+    {
+        "rule_num": "r09",
+        "rule_text": "eqangle a b c d m n p q, eqangle c d e f p q r u => eqangle a b e f m n r u",
+        "rule_problem": "c = free c; d = free d; p = free p; q = free q; a = free a; b = free b; m = free m; n = on_aline0 n c d a b p q m; e = free e; f = free f; r = free r; u = on_aline0 u c d e f p q r ? eqangle a b e f m n r u"
+    },
+    {
+        "rule_num": "r10",
+        "rule_text": "eqratio a b c d m n p q, eqratio c d e f p q r u => eqratio a b e f m n r u",
+        "rule_problem": "a = free a; b = free b; c = free c; d = free d; m = free m; n = free n; p = free p; q = eqratio q a b c d m n p; e = free e; f = free f; r = free r; u = eqratio u c d e f p q r ? eqratio a b e f m n r u"
+    },
+    {
+        "rule_num": "r11",
+        "rule_text": "eqratio d b d c a b a c, coll d b c, ncoll a b c => eqangle a b a d a d a c",
+        "rule_problem": "a = free a; b = free b; c = free c; d = eqratio6 d b c a b a c, on_line d b c ? eqangle a b a d a d a c"
+    },
+    {
+        "rule_num": "r12",
+        "rule_text": "eqangle a b a d a d a c, coll d b c, ncoll a b c => eqratio d b d c a b a c",
+        "rule_problem": "a = free a; b = free b; d = free d; c = on_line c b d, on_aline c a d d a b ? eqratio d b d c a b a c"
+    },
+    {
+        "rule_num": "r13",
+        "rule_text": "cong O A O B, ncoll O A B => eqangle O A A B A B O B",
+        "rule_problem": "o = free o; a = free a; b = eqdistance b o o a ? eqangle o a a b a b o b"
+    },
+    {
+        "rule_num": "r14",
+        "rule_text": "eqangle A O A B B A B O, ncoll O A B => cong O A O B",
+        "rule_problem": "a = free a; b = free b; o = iso_triangle_vertex_angle o a b ? cong o a o b"
+    },
+    {
+        "rule_num": "r15",
+        "rule_text": "circle O A B C, perp O A A X => eqangle A X A B C A C B",
+        "rule_problem": "a = free a; b = free b; c = free c; o = circle o a b c; x = on_tline x a a o ? eqangle a x a b c a c b"
+    },
+    {
+        "rule_num": "r16",
+        "rule_text": "eqangle A X A B C A C B, circle O A B C => perp O A A X",
+        "rule_problem": "a = free a; b = free b; c = free c; o = circle o a b c; x = on_aline x a b a c b ? perp o a a x"
+    },
+    {
+        "rule_num": "r17",
+        "rule_text": "midp M B C, circle O A B C => eqangle A B A C O B O M",
+        "rule_problem": "a = free a; b = free b; c = free c; o = circle o a b c; m = midpoint m b c ? eqangle a b a c o b o m"
+    },
+    {
+        "rule_num": "r18",
+        "rule_text": "eqangle A B A C O B O M, circle O A B C, coll M B C => midp M B C",
+        "rule_problem": "a = free a; b = free b; c = free c; o = circle o a b c; m = on_line m b c, on_aline m o b c a b ? midp m b c"
+    },
+    {
+        "rule_num": "r19",
+        "rule_text": "midp M A C, perp A B B C => cong A M B M",
+        "rule_problem": "a = free a; b = free b; c = on_tline c b b a; m = midpoint m a c ? cong a m b m"
+    },
+    {
+        "rule_num": "r20",
+        "rule_text": "circle O A B C, coll O A C => perp A B B C",
+        "rule_problem": "o = free o; a = free a; b = on_circle b o a; c = on_circle c o a, on_line c o a ? perp a b b c"
+    },
+    {
+        "rule_num": "r21",
+        "rule_text": "cyclic A B C D, para A B C D => eqangle A D C D C D C B",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_pline d c a b, on_circum d a b c ? eqangle a d c d c d c b"
+    },
+    {
+        "rule_num": "r22",
+        "rule_text": "midp M A B, perp O M A B => cong O A O B",
+        "rule_problem": "a = free a; b = free b; m = midpoint m a b; o = on_tline o m a b ? cong o a o b"
+    },
+    {
+        "rule_num": "r23",
+        "rule_text": "cong A P B P, cong A Q B Q => perp A B P Q",
+        "rule_problem": "a = free a; p = free p; q = free q; b = eqdistance b p a p, eqdistance b q a q ? perp a b p q"
+    },
+    {
+        "rule_num": "r24",
+        "rule_text": "cong A P B P, cong A Q B Q, cyclic A B P Q => perp P A A Q",
+        "rule_problem": "a = free a; b = free b; p = iso_triangle_vertex p a b; q = iso_triangle_vertex q a b, on_circum q a b p ? perp p a a q"
+    },
+    {
+        "rule_num": "r25",
+        "rule_text": "midp M A B, midp M C D => para A C B D",
+        "rule_problem": "a = free a; b = free b; c = free c; m = midpoint m a b; d = on_line d c m, eqdistance d m c m ? para a c b d"
+    },
+    {
+        "rule_num": "r26",
+        "rule_text": "midp M A B, para A C B D, para A D B C => midp M C D",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_pline d b a c, on_pline d a b c; m = midpoint m a b ? midp m c d"
+    },
+    {
+        "rule_num": "r27",
+        "rule_text": "eqratio A O A C B O B D, coll O A C, coll O B D, ncoll A B C, sameside A O C B O D => para A B C D",
+        "rule_problem": "o = free o; a = free a; b = free b; c = on_line c a o; d = eqratio d o a a c o b b, on_line d o b ? para a b c d"
+    },
+    {
+        "rule_num": "r28",
+        "rule_text": "para A B A C => coll A B C",
+        "rule_problem": "a = free a; b = free b; c = on_pline0 c a b a ? coll a b c"
+    },
+    {
+        "rule_num": "r29",
+        "rule_text": "midp M A B, midp N C D => eqratio M A A B N C C D",
+        "rule_problem": "a = free a; b = free b; c = free c; d = free d; m = midpoint m a b; n = midpoint n c d ? eqratio m a a b n c c d"
+    },
+    {
+        "rule_num": "r30",
+        "rule_text": "eqangle A B P Q C D U V, perp P Q U V => perp A B C D",
+        "rule_problem": "p = free p; q = free q; u = free u; v = on_tline v u p q; a = free a; b = free b; c = free c; d = on_aline0 d p q a b u v c ? perp a b c d"
+    },
+    {
+        "rule_num": "r31",
+        "rule_text": "eqratio A B P Q C D U V, cong P Q U V => cong A B C D",
+        "rule_problem": "p = free p; q = free q; u = free u; v = eqdistance v u p q; a = free a; b = free b; c = free c; d = eqratio d p q a b u v c ? cong a b c d"
+    },
+    {
+        "rule_num": "r34",
+        "rule_text": "eqangle B A B C Q P Q R, eqangle C A C B R P R Q, ncoll A B C, sameclock A B C P Q R => simtri A B C P Q R",
+        "rule_problem": "a = free a; b = free b; c = free c; q = free q; r = free r; p = on_aline p q r a b c, on_aline p r q a c b ? simtri a b c p q r"
+    },
+    {
+        "rule_num": "r35",
+        "rule_text": "eqangle B A B C Q R Q P, eqangle C A C B R Q R P, ncoll A B C, sameclock A B C P R Q => simtrir A B C P Q R",
+        "rule_problem": "a = free a; b = free b; c = free c; q = free q; r = free r; p = on_aline p q r c b a , on_aline p r q b c a ? simtrir a b c p q r"
+    },
+    {
+        "rule_num": "r36",
+        "rule_text": "eqangle B A B C Q P Q R, eqangle C A C B R P R Q, ncoll A B C, cong A B P Q, sameclock A B C P Q R => contri A B C P Q R",
+        "rule_problem": "a = free a; b = free b; p = free p; q = eqdistance q p a b; r = free r; c = on_aline c b a r q p, eqangle3 c a b r p q ? contri a b c p q r"
+    },
+    {
+        "rule_num": "r37",
+        "rule_text": "eqangle B A B C Q R Q P, eqangle C A C B R Q R P, ncoll A B C, cong A B P Q, sameclock A B C P R Q => contrir A B C P Q R",
+        "rule_problem": "a = free a; b = free b; p = free p; q = eqdistance q p a b; r = free r; c = on_aline c b a p q r, eqangle3 c a b r q p ? contrir a b c p q r"
+    },
+    {
+        "rule_num": "r41",
+        "rule_text": "eqratio m a m d n b n c, para a b c d, coll m a d, coll n b c, sameside m a d n b c => para m n a b",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_pline d c a b; n = on_line n b c; m = eqratio6 m a d n b n c, on_line m a d ? para m n a b"
+    },
+    {
+        "rule_num": "r42",
+        "rule_text": "para a b c d, coll m a d, coll n b c, para m n a b, ncoll a b c => eqratio m a m d n b n c",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_pline d c a b; m = on_line m a d; n = on_line n b c, on_pline n m a b ? eqratio m a m d n b n c"
+    },
+    {
+        "rule_num": "r43",
+        "rule_text": "perp a b c d, perp a c b d => perp a d b c",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_tline d b a c, on_tline d c a b ? perp a d b c"
+    },
+    {
+        "rule_num": "r44",
+        "rule_text": "coll a b c, coll p q r, coll x a q, coll x p b, coll y a r, coll y p c, coll z b r, coll z c q => coll x y z",
+        "rule_problem": "a = free a; b = free b; c = on_line c a b; p = free p; q = free q; r = on_line r p q; x = on_line x a q, on_line x p b; y = on_line y a r, on_line y p c; z = on_line z b r, on_line z c q ? coll x y z"
+    },
+    {
+        "rule_num": "r45",
+        "rule_text": "cyclic a b c p, coll a l c, perp p l a c, coll m b c, perp p m b c, coll n a b, perp p n a b => coll l m n",
+        "rule_problem": "a = free a; b = free b; c = free c; p = on_circum p a b c; l = on_line l a c, on_tline l p a c; m = on_line m b c, on_tline m p b c; n = on_line n a b, on_tline n p a b ? coll l m n"
+    },
+    {
+        "rule_num": "r46",
+        "rule_text": "eqangle a b a x a x a c, eqangle b a b x b x b c, ncoll a b c => eqangle c b c x c x c a",
+        "rule_problem": "a = free a; b = free b; c = free c; x = angle_bisector x b a c, angle_bisector x a b c ? eqangle c b c x c x c a"
+    },
+    {
+        "rule_num": "r47",
+        "rule_text": "midp m a b, perp x m a b, midp n b c, perp x n b c, midp p c a => perp x p c a",
+        "rule_problem": "a = free a; b = free b; c = free c; m = midpoint m a b; n = midpoint n b c; p = midpoint p c a; x = on_tline x m a b, on_tline x n b c ? perp x p c a"
+    },
+    {
+        "rule_num": "r48",
+        "rule_text": "midp m a b, coll m x c, midp n b c, coll n x a, midp p c a => coll x p b",
+        "rule_problem": "a = free a; b = free b; c = free c; m = midpoint m a b; n = midpoint n b c; p = midpoint p c a; x = on_line x m c, on_line x n a ? coll x p b"
+    },
+    {
+        "rule_num": "r49",
+        "rule_text": "circle O A B C, cyclic A B C D => cong O A O D",
+        "rule_problem": "o = free o; a = free a; b = on_circle b o a; c = on_circle c o a; d = on_circum d a b c ? cong o a o d"
+    },
+    {
+        "rule_num": "r50",
+        "rule_text": "cyclic A B C D, cong O A O B, cong O C O D, npara A B C D => cong O A O C",
+        "rule_problem": "a = free a; b = free b; c = free c; d = on_circum d a b c; o = iso_triangle_vertex o a b, iso_triangle_vertex o c d ? cong o a o c"
+    },
+    {
+        "rule_num": "r51",
+        "rule_text": "midp M A B => rconst M A A B 1/2",
+        "rule_problem": "a = free a; b = free b; m = midpoint m a b ? rconst m a a b 1/2"
+    },
+    {
+        "rule_num": "r54",
+        "rule_text": "cong M A M B, coll M A B => midp M A B",
+        "rule_problem": "a = free a; b = free b; m = on_line m a b, iso_triangle_vertex m a b ? midp m a b"
+    },
+    {
+        "rule_num": "r55",
+        "rule_text": "midp M A B => cong M A M B",
+        "rule_problem": "a = free a; b = free b; m = midpoint m a b ? cong m a m b"
+    },
+    {
+        "rule_num": "r56",
+        "rule_text": "midp M A B => coll M A B",
+        "rule_problem": "a = free a; b = free b; m = midpoint m a b ? coll m a b"
+    }
+]

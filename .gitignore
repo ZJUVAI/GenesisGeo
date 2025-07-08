@@ -45,6 +45,7 @@ ddar_results/
 run_results/
 src/newclid/generation/dataset/
 src/newclid/test.py
+results/
 
 # TODO
 TODO.md
