@@ -75,10 +75,34 @@ para A B C D, cyclic A B C D => eqangle D A D C C D C B
 r28 Overlapping parallels
 para A B A C => coll A B C
 r42 Thales theorem IV
-para a b c d, para m n a b, coll m a d, coll n b c, ncoll a b c => eqratio m a m d n b n c
+coll m a d, para a b c d, para m n a b, coll n b c, ncoll a b c => eqratio m a m d n b n c
 r03 Arc determines internal angles
 cyclic A B P Q => eqangle P A P B Q A Q B
 r52 Properties of similar triangles (Direct)
 simtri A B C P Q R => eqangle B A B C Q P Q R, eqratio B A B C Q P Q R
 r53 Properties of similar triangles (Reverse)
 simtrir A B C P Q R => eqangle B A B C Q R Q P, eqratio B A B C Q P Q R
+r102 dubhe added rule2
+simtri A B C P Q R, cong A B P Q => contri A B C P Q R
+r103 dubhe added rule3
+simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
+r00 Perpendiculars give parallel
+perp C D A B, perp C D E F, ncoll A B E => para A B E F
+r08 Right triangles common angle I
+perp A B C D, perp E F G H, npara A B E F => eqangle A B E F C D G H
+r41 Thales theorem III
+eqratio m a m d n b n c, para a b c d, coll m a d, coll n b c, sameside m a d n b c => para m n a b
+r43 Orthocenter theorem
+perp a b c d, perp a c b d => perp a d b c
+r44 Pappus's theorem
+coll a b c, coll p q r, coll x a q, coll x p b, coll y a r, coll y p c, coll z b r, coll z c q => coll x y z
+r45 Simson's line theorem
+cyclic a b c p, coll a l c, perp p l a c, coll m b c, perp p m b c, coll n a b, perp p n a b => coll l m n
+r46 Incenter theorem
+eqangle a b a x a x a c, eqangle b a b x b x b c, ncoll a b c => eqangle c b c x c x c a
+r47 Circumcenter theorem
+midp m a b, perp x m a b, midp n b c, perp x n b c, midp p c a => perp x p c a
+r48 Centroid theorem
+midp m a b, coll m x c, midp n b c, coll n x a, midp p c a => coll x p b
+r50 Recognize center of cyclic (cong)
+cong O A O B, cong O C O D, cyclic A B C D, npara A B C D => cong O A O C
