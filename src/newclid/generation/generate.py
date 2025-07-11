@@ -440,6 +440,7 @@ class GeometryGenerator:
         proofs_of_used_rules = {}
         generated_data = []
         goal_collection = [] # 初始化 goal_collection
+        n_clauses = 0
         for goal in possible_goals:
             # essential fl_problem
             essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
@@ -529,26 +530,44 @@ class GeometryGenerator:
                 if all_data_len >= self.n_samples:
                     break
         else:
-            try:
-                with multiprocessing.Pool(self.n_threads) as pool:
-                    for data, summary in pool.imap_unordered(self.process_single_problem, task_generator()):
-                        if data:
-                            self.write_data(data, first_write = True if all_data_len == 0 else False)
-                            all_data_len += len(data)
-                            summary_reporter.add(summary)
-                            elapsed_time = time.time() - start_time
-                            logging.info(
-                                f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
-                                f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
-                                f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                            )
-                        if all_data_len >= self.n_samples:
-                            pool.terminate() 
-                            break
-                    pool.close()
-                    pool.join()
-            except Exception as e:
-                logging.error(f"multiprocessing Pool error: {e}")
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            tasks = task_generator()
+            with ProcessPoolExecutor(max_workers=self.n_threads) as executor:
+                futures = {executor.submit(self.process_single_problem, next(tasks)) for _ in range(self.n_threads * 2)}
+
+                while futures and all_data_len < self.n_samples:
+                    for future in as_completed(futures):
+                        futures.remove(future)
+                        
+                        try:
+                            data, summary = future.result()
+                            if data:
+                                self.write_data(data, first_write = True if all_data_len == 0 else False)
+                                all_data_len += len(data)
+                                summary_reporter.add(summary)
+                                elapsed_time = time.time() - start_time
+                                logging.info(
+                                    f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
+                                    f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
+                                    f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                                )
+                        except Exception as e:
+                            logging.error(f"A worker process failed, restarting task: {e}")
+                            # Potentially resubmit the original task if it's possible to get it
+                            # Here we just submit a new task     
+                        if all_data_len < self.n_samples:
+                            try:
+                                new_task = next(tasks)
+                                futures.add(executor.submit(self.process_single_problem, new_task))
+                            except StopIteration:
+                                break # No more tasks
+                        else:
+                            # Cancel remaining futures
+                            for f in futures:
+                                f.cancel()
+                            break # Exit the as_completed loop
+                    if all_data_len >= self.n_samples:
+                        break
         
         final_elapsed_time = time.time() - start_time
         summary_reporter.total_elapsed_time = final_elapsed_time
