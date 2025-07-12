@@ -69,7 +69,7 @@ class LMAgent(DeductiveAgent):
         return chat_response.choices[0].message.content
     
     @torch.no_grad()
-    def inference2(self, query: str):
+    def inference2(self, query: str, response_prefix: str = '<aux>'):
         if self.model is None or self.tokenizer is None:
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
@@ -86,9 +86,11 @@ class LMAgent(DeductiveAgent):
             tokenize=False,
             add_generation_prompt=True,
         )
-        text += '<aux>'
-        # text = query + ' <aux>'
+        # text = query + '\n<aux> '
+        model_prompt_inputs = self.tokenizer([text], return_tensors="pt")
+        text += response_prefix
         model_inputs = self.tokenizer([text], return_tensors="pt").to('cuda')
+        bad_words_ids = self.tokenizer(["<", " <"]).input_ids
         generated_output = self.model.generate(
             **model_inputs,
             max_new_tokens=100,
@@ -102,11 +104,14 @@ class LMAgent(DeductiveAgent):
             # top_p=0.9, 
             pad_token_id=151643,
             eos_token_id=2587, #' ;' #29, # self.tokenizer(['>']) = {'input_ids': [[29]], 'attention_mask': [[1]]}
+            # bad_words_ids=bad_words_ids,
             return_dict_in_generate=True, 
             output_scores=True
         )
-        dsl_with_aux = self.tokenizer.batch_decode(generated_output.sequences, skip_special_tokens=True)
-        return dsl_with_aux, generated_output.sequences_scores
+        scores = generated_output.sequences_scores
+        generated_output = generated_output.sequences[:, model_prompt_inputs.input_ids.shape[1]:]
+        aux_dsl = self.tokenizer.batch_decode(generated_output, skip_special_tokens=True)
+        return aux_dsl, scores
     
     def run(self, proof: "ProofState", rules: list[Rule], 
             beam_size: int = 64, search_depth: int = 4, 
@@ -132,31 +137,56 @@ class LMAgent(DeductiveAgent):
         t0 = time.time()
         step = 0
 
-        self.run_ddar(proof, rules, t0)
+        self.run_ddar(proof, rules, t0, timeout)
 
         if not proof.check_goals():
             beam_queue = BeamQueue(max_size=beam_size)
-            beam_queue.add(node=(self.problemJGEX, proof), val=0)
+            beam_queue.add(node=(self.problemJGEX, proof, '<aux>'), val=0)
+            p_dsl = self.problem_to_dsl(self.problemJGEX, proof)
             for depth in range(search_depth):
                 new_queue = BeamQueue(max_size=beam_size)  # to replace beam_queue.
-                for prev_score, (problem, proof) in beam_queue:
+                for prev_score, (problem, proof, a_dsl) in beam_queue:
                     # seek help from llm
-                    dsl = self.problem_to_dsl(problem, proof)
-                    aux_dsl_list, scores = self.inference2(dsl)
+
+                    # Stragety 1: insert the aux string into problem and predict the next aux
+                    p_dsl = self.problem_to_dsl(problem, proof)
+                    aux_dsl_list, scores = self.inference2(p_dsl, '<aux> x00')
                     for aux_dsl, score in zip(aux_dsl_list, scores):
                         try:
-                            aux = self.try_dsl_to_constructions(aux_dsl)
+                            aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
                             if aux:
                                 new_problem = problem.with_more_construction(aux) # will recreate the problem
                                 new_proof = copy.deepcopy(proof)
                                 self.add_construction(new_proof, aux)
-                                self.run_ddar(new_proof, rules, t0)
+                                self.run_ddar(new_proof, rules, t0, timeout)
                                 if new_proof.check_goals():
                                     return proof_info(new_proof)
                                 else:
-                                    new_queue.add(node=(new_problem, new_proof), val=prev_score+score)
+                                    new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
                         except Exception as e:
                             continue
+
+                    # Stragety 2: extend the aux string
+                    # a_dsl += ' x00'
+                    # aux_dsl_list, scores = self.inference2(p_dsl, a_dsl)
+                    # for aux_dsl, score in zip(aux_dsl_list, scores):
+                    #     # if time.time() - t0 > timeout: 
+                    #     #     return proof_info(proof)
+                    #     try:
+                    #         aux = self.try_dsl_to_constructions(aux_dsl[len(a_dsl):])
+                    #         if aux:
+                    #             new_problem = problem.with_more_construction(aux) # will recreate the problem
+                    #             new_proof = copy.deepcopy(proof)
+                    #             self.add_construction(new_proof, aux)
+                    #             self.run_ddar(new_proof, rules, t0, timeout)
+                    #             if new_proof.check_goals():
+                    #                 return proof_info(new_proof)
+                    #             else:
+                    #                 new_queue.add(node=(new_problem, new_proof, aux_dsl), val=prev_score+score)
+                    #     except Exception as e:
+                    #         continue
+
+                    
                 beam_queue = new_queue
         return proof_info(proof)
 
@@ -183,37 +213,34 @@ class LMAgent(DeductiveAgent):
         return True
 
     def run_ddar(self, proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600):
-        proof.dep_graph.obtain_numerical_checked_eqangle_and_eqratio()
+        proof.dep_graph.obtain_numerical_checked_premises()
         self.any_new_statement_has_been_added = True
         running = True
         while running and time.time() - start_time < timeout:
             running = self.step(proof=proof, rules=rules)
             # TODO: add step later..
             # step += 1
-    def try_dsl_to_constructions(self, dsl):
-        dsl = dsl + ' </aux>'
-        match = re.search(r"<aux>(.*?)</aux>", dsl) # <aux>e: coll a c e [002] coll b d e [003]</aux>
-        if match:
-            content = match.group(1).strip()  # e: coll a c e [002] coll b d e [003]
-            content = content.split(';')[0].strip()
-            prefix_match = re.match(r"(\w+)\s*:\s*(.*)", content)
-            if prefix_match:
-                prefix = prefix_match.group(1) # e
-                rest = prefix_match.group(2) # coll a c e [002] coll b d e [003]
-                segments = re.split(r"\s*\[\d+\]", rest)
-                segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
-                # result = [prefix] + segments
-                if len(segments) > 2:
-                    segments = segments[:2]
-                result = prefix + ' = '
-                result_constructions = []
-                for segment in segments:
-                    parts = segment.split()
-                    predicate_name, args = self.translate_dsl_to_construction(prefix, parts[0], parts[1:])
-                    result_constructions.append(f"{predicate_name} {' '.join(args)}")
-                result += ', '.join(result_constructions)
-                return result
-        return None
+
+    def try_dsl_to_constructions(self, content):
+        content = content.split(';')[0].strip()
+        prefix_match = re.match(r"(\w+)\s*:\s*(.*)", content)
+        if prefix_match:
+            prefix = prefix_match.group(1) # e
+            rest = prefix_match.group(2) # coll a c e [002] coll b d e [003]
+            segments = re.split(r"\s*\[\d+\]", rest)
+            segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
+            # result = [prefix] + segments
+            if len(segments) > 2:
+                segments = segments[:2]
+            result = prefix + ' = '
+            result_constructions = []
+            for segment in segments:
+                parts = segment.split()
+                predicate_name, args = self.translate_dsl_to_construction(prefix, parts[0], parts[1:])
+                result_constructions.append(f"{predicate_name} {' '.join(args)}")
+            result += ', '.join(result_constructions)
+            return result
+
     
     def translate_dsl_to_construction(self, point: str, predicate: str, args: list[str]
         ) -> tuple[str, list[str]]:

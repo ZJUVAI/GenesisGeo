@@ -300,7 +300,7 @@ class GeometryGenerator:
         string_aux = []
         for k, v in data_tmp.items():
             if all(p in aux_points for p in k.split(' ')):
-                tmp_string = k + ' : '
+                tmp_string = 'x00 ' + k + ' : '
                 for dep in v:
                     if dep not in dep_idx:
                         dep_idx[dep] = f"{len(dep_idx):03d}"
