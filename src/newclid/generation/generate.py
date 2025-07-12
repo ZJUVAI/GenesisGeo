@@ -1,4 +1,3 @@
-import multiprocessing
 import logging
 import os
 import argparse
@@ -11,6 +10,8 @@ import itertools
 from collections import defaultdict
 import numpy as np
 from millify import millify
+# import concurrent
+import multiprocessing
 
 from newclid.configs import default_defs_path, default_rules_path
 from newclid.formulations.definition import DefinitionJGEX
@@ -40,7 +41,7 @@ class GeometryGenerator:
         self.output_dir = output_dir
         self.filteration_rate = filteration_rate
         self.path_prefix = os.path.join(self.output_dir, f"geometry_clauses{self.max_clauses}_samples{millify(self.n_samples)}")
-
+        self.write_buffer = []
         self.clauses_generator = CompoundClauseGen(
             max_comma_sep_clause=2,
             max_single_clause=1,
@@ -411,97 +412,95 @@ class GeometryGenerator:
         return False
     
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
-        """Process a single geometry problem."""
-        pid, fl_statement = args
-        # fl_statement = "a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b; e = on_line e a c, on_line e b d ? perp a d b c"
-        
-        solver_builder = GeometricSolverBuilder(seed=998244353)
-        solver_builder.with_deductive_agent(DDARN())
-        solver_builder.load_problem_from_txt(fl_statement)
-        
         try:
-            solver = solver_builder.build(max_attempts=100)
-        except Exception as e:
-            logging.debug(f"Error: {e}")
-            return [], {}
-
-        solver.run(timeout=self.timeout)
-        logging.info(f"ddar time: {solver.run_infos['runtime']}s")
-
-        t = time.time()
-        # self.all_possible_goals_by_goals(solver.proof.dep_graph)
-        # self.get_numerical_checked_eqangle_and_eqratio(solver.proof.dep_graph)
-        self.all_possible_goals_by_ar(solver.proof.dep_graph)
-        possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, goal.args)]
-        logging.info(f"check goals time: {time.time() - t:.2f}s")
-        logging.info(f"{len(possible_goals)=}")
-
-        n_filtered_samples = 0
-        proofs_of_used_rules = {}
-        generated_data = []
-        goal_collection = [] # 初始化 goal_collection
-        n_clauses = 0
-        for goal in possible_goals:
-            # essential fl_problem
-            essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
-            statements = []
-            for clause in solver_builder.problemJGEX.constructions:
-                if str(clause) in essential_clauses or str(clause) in essential_aux_clauses:
-                    statements.append(str(clause))
-            fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
-            fl_problem = ProblemJGEX.from_text(fl_problem)
-
-            # cluases num filter
-            n_clauses = len(essential_clauses | essential_aux_clauses)
-            if n_clauses < self.min_clauses_num:
-                logging.debug(f"Too few clauses: {len(essential_clauses | essential_aux_clauses)}")
-                continue
-
-            # get and filter proof
-            _, _, _, aux_points, _, _, proof_steps, = solver.proof.dep_graph.get_proof_steps([goal])
-            n_proof_steps = len(proof_steps)
-            if n_proof_steps < self.min_proof_steps:
-                logging.debug(f"Naive proof with length {n_proof_steps}")
-                continue
+            """Process a single geometry problem."""
+            pid, fl_statement = args
+            # fl_statement = "a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b; e = on_line e a c, on_line e b d ? perp a d b c"
             
-            goal_collection.append(goal.predicate.NAME) # 收集 goal 类型
-            # solution
-            solver.proof.goals = [goal]
-            aux_points = [p.name for p in aux_points]
-            nl_solution = write_proof_steps(solver.proof, print_output=False)
-            llm = self.llm_solution(fl_problem, aux_points, solver.proof)
-            # llm_nat_solution = self.llm_nat_solution(fl_problem, aux_points, solver.proof)
+            solver_builder = GeometricSolverBuilder(seed=998244353)
+            solver_builder.with_deductive_agent(DDARN())
+            solver_builder.load_problem_from_txt(fl_statement)
+            solver = solver_builder.build(max_attempts=100)
+            solver.run(timeout=self.timeout)
+            logging.info(f"ddar time: {solver.run_infos['runtime']}s")
 
-            # check similarity
-            if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
-                logging.debug(f"Similar proof found for {goal.predicate.NAME} with clauses {n_clauses} and proof steps {n_proof_steps}. Skipping.")
-                n_filtered_samples += 1
-                continue
+            t = time.time()
+            # self.all_possible_goals_by_goals(solver.proof.dep_graph)
+            # self.get_numerical_checked_eqangle_and_eqratio(solver.proof.dep_graph)
+            self.all_possible_goals_by_ar(solver.proof.dep_graph)
+            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, goal.args)]
+            logging.info(f"check goals time: {time.time() - t:.2f}s")
+            logging.info(f"{len(possible_goals)=}")
 
-            # output
-            generated_data.append({
-                "fl_statement_src": fl_statement,
-                "n_clauses": n_clauses,
-                "fl_problem": str(fl_problem),
-                "nl_problem": "",
-                "n_proof_steps": n_proof_steps,
-                # "nl_solution": nl_solution,
-                # "llm_data": llm['llm_data'],
-                "llm_input": llm['llm_input'],
-                "llm_output": llm['llm_output'],
-                # "llm_nat_solution": llm_nat_solution,
-            })
-        summary = {
-            'runtime': solver.run_infos['runtime'],
-            'n_samples': len(generated_data),
-            'goals': goal_collection,
-            'first_predicate': get_first_predicate(fl_statement),
-            'n_clauses': n_clauses if generated_data else 0,
-            'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
-            'n_filtered_samples': n_filtered_samples
-        }
+            n_filtered_samples = 0
+            proofs_of_used_rules = {}
+            generated_data = []
+            goal_collection = [] # 初始化 goal_collection
+            n_clauses = 0
+            for goal in possible_goals:
+                # essential fl_problem
+                essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
+                statements = []
+                for clause in solver_builder.problemJGEX.constructions:
+                    if str(clause) in essential_clauses or str(clause) in essential_aux_clauses:
+                        statements.append(str(clause))
+                fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                fl_problem = ProblemJGEX.from_text(fl_problem)
 
-        return generated_data, summary
+                # cluases num filter
+                n_clauses = len(essential_clauses | essential_aux_clauses)
+                if n_clauses < self.min_clauses_num:
+                    logging.debug(f"Too few clauses: {len(essential_clauses | essential_aux_clauses)}")
+                    continue
+
+                # get and filter proof
+                _, _, _, aux_points, _, _, proof_steps, = solver.proof.dep_graph.get_proof_steps([goal])
+                n_proof_steps = len(proof_steps)
+                if n_proof_steps < self.min_proof_steps:
+                    logging.debug(f"Naive proof with length {n_proof_steps}")
+                    continue
+                
+                goal_collection.append(goal.predicate.NAME) # 收集 goal 类型
+                # solution
+                solver.proof.goals = [goal]
+                aux_points = [p.name for p in aux_points]
+                nl_solution = write_proof_steps(solver.proof, print_output=False)
+                llm = self.llm_solution(fl_problem, aux_points, solver.proof)
+                # llm_nat_solution = self.llm_nat_solution(fl_problem, aux_points, solver.proof)
+
+                # check similarity
+                if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
+                    logging.debug(f"Similar proof found for {goal.predicate.NAME} with clauses {n_clauses} and proof steps {n_proof_steps}. Skipping.")
+                    n_filtered_samples += 1
+                    continue
+
+                # output
+                generated_data.append({
+                    "fl_statement_src": fl_statement,
+                    "n_clauses": n_clauses,
+                    "fl_problem": str(fl_problem),
+                    "nl_problem": "",
+                    "n_proof_steps": n_proof_steps,
+                    # "nl_solution": nl_solution,
+                    # "llm_data": llm['llm_data'],
+                    "llm_input": llm['llm_input'],
+                    "llm_output": llm['llm_output'],
+                    # "llm_nat_solution": llm_nat_solution,
+                })
+            summary = {
+                'runtime': solver.run_infos['runtime'],
+                'n_samples': len(generated_data),
+                'goals': goal_collection,
+                'first_predicate': get_first_predicate(fl_statement),
+                'n_clauses': n_clauses if generated_data else 0,
+                'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
+                'n_filtered_samples': n_filtered_samples
+            }
+
+            return generated_data, summary
+        except Exception as e:
+            logging.debug(f"Error generating problem: {e}")
+            return [], {}
 
     def generate_problems(self):
         """Generate geometry problems one at a time using a generator."""
@@ -509,16 +508,16 @@ class GeometryGenerator:
             for i in range(10**9):
                 clauses = self.clauses_generator.generate_clauses()
                 yield (i, clauses)
-
+        task_iterator = task_generator()
+        
         all_data_len = 0
         summary_reporter = Summary(prefix=self.path_prefix)
         start_time = time.time()
         if self.n_threads == 1:
-            task_iterator = task_generator()
             while True:
                 data, summary = self.process_single_problem(next(task_iterator))
                 if data:
-                    self.write_data(data, first_write = True if all_data_len == 0 else False)
+                    self.write_data(data)
                     all_data_len += len(data)
                     summary_reporter.add(summary)
                     elapsed_time = time.time() - start_time
@@ -530,60 +529,45 @@ class GeometryGenerator:
                 if all_data_len >= self.n_samples:
                     break
         else:
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            tasks = task_generator()
-            with ProcessPoolExecutor(max_workers=self.n_threads) as executor:
-                futures = {executor.submit(self.process_single_problem, next(tasks)) for _ in range(self.n_threads * 2)}
+            try:
+                with multiprocessing.Pool(self.n_threads) as pool:
+                    for data, summary in pool.imap_unordered(self.process_single_problem, task_generator()):
+                        if data:
+                            self.write_data(data)
+                            all_data_len += len(data)
+                            summary_reporter.add(summary)
+                            elapsed_time = time.time() - start_time
+                            logging.info(
+                                f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
+                                f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
+                                f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                            )
+                        if all_data_len >= self.n_samples:
+                            pool.terminate() 
+                            break
+                    pool.close()
+                    pool.join()
+            except Exception as e:
+                logging.error(f"multiprocessing Pool error: {e}")
 
-                while futures and all_data_len < self.n_samples:
-                    for future in as_completed(futures):
-                        futures.remove(future)
-                        
-                        try:
-                            data, summary = future.result()
-                            if data:
-                                self.write_data(data, first_write = True if all_data_len == 0 else False)
-                                all_data_len += len(data)
-                                summary_reporter.add(summary)
-                                elapsed_time = time.time() - start_time
-                                logging.info(
-                                    f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
-                                    f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
-                                    f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                                )
-                        except Exception as e:
-                            logging.error(f"A worker process failed, restarting task: {e}")
-                            # Potentially resubmit the original task if it's possible to get it
-                            # Here we just submit a new task     
-                        if all_data_len < self.n_samples:
-                            try:
-                                new_task = next(tasks)
-                                futures.add(executor.submit(self.process_single_problem, new_task))
-                            except StopIteration:
-                                break # No more tasks
-                        else:
-                            # Cancel remaining futures
-                            for f in futures:
-                                f.cancel()
-                            break # Exit the as_completed loop
-                    if all_data_len >= self.n_samples:
-                        break
-        
+        self.write_data([], force=True)
         final_elapsed_time = time.time() - start_time
         summary_reporter.total_elapsed_time = final_elapsed_time
         summary_reporter.total_samples_generated = all_data_len
         logging.info(f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
         summary_reporter.output_report()
 
-    def write_data(self, all_data: list, first_write: bool = False):
+    def write_data(self, all_data: list, force: bool = False):
         """Append a single JSON object to a .jsonl file."""
-        filename = self.path_prefix + ".jsonl"
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        mode = 'w' if first_write else 'a'
-        with open(filename, mode, encoding='utf-8') as f:
-            for data_item in all_data:
-                json.dump(data_item, f, ensure_ascii=False)
-                f.write('\n')
+        self.write_buffer.extend(all_data)
+        if len(self.write_buffer) > 10000 or force:
+            filename = self.path_prefix + ".jsonl"
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            with open(filename, 'a', encoding='utf-8') as f:
+                for data_item in self.write_buffer:
+                    json.dump(data_item, f, ensure_ascii=False)
+                    f.write('\n')
+            self.write_buffer.clear()
 
 def main():
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
