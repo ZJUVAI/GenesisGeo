@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
     from newclid.dependencies.dependency_graph import DependencyGraph
 
+from . import matchinC
 
 class Matcher:
     def __init__(
@@ -66,7 +67,7 @@ class Matcher:
                 translate_sentence(mapping, conclusion), self.dep_graph
             )
             # assert conclusion_statement.check_numerical()
-            if conclusion_statement is None:
+            if conclusion_statement is None or not conclusion_statement.check_numerical():
                 continue
             dep = Dependency.mk(conclusion_statement, reason, tuple(why))
             res.add(dep)
@@ -88,103 +89,10 @@ class Matcher:
                 perm[2], perm[3], perm[6], perm[7] = perm[6], perm[7], perm[2], perm[3]
             permutations.add(tuple(perm))
         return permutations
-    
-    def cache_theorem(self, theorem: "Rule"):
-        file_cache = None
-        write = False
-        read = False
-        mappings: list[dict[str, str]] = []
-        eq_premise = None
-        statement_list = None
-        for premise in theorem.premises:
-            if premise[0] == "eqangle":
-                eq_premise = premise
-                statement_list = self.dep_graph.numerical_checked_eqangle
-                break
-            if premise[0] == "eqratio":
-                eq_premise = premise
-                statement_list = self.dep_graph.numerical_checked_eqratio
-                break
-
-        if self.runtime_cache_path is not None:
-            with open(self.runtime_cache_path) as f:
-                file_cache = json.load(f)
-            if "matcher" not in file_cache:
-                file_cache["matcher"] = {}
-            if str(theorem) in file_cache["matcher"]:
-                mappings = file_cache["matcher"][str(theorem)]
-                read = True
-            else:
-                file_cache["matcher"][str(theorem)] = mappings
-                write = True
-        res: set[Dependency] = set()
-        self.cache[theorem] = ()
-        points = [p.name for p in self.dep_graph.symbols_graph.nodes_of_type(Point)]
-        variables = theorem.variables()
-        logging.debug(
-            f"{theorem} matching cache : before {len(self.cache[theorem])=} {read=} {write=} {len(mappings)=}"
-        )
-        if read:
-            for mapping in mappings:
-                new_conclusions = self.apply_theorem(theorem, mapping)
-                if new_conclusions:
-                    res.update(new_conclusions)
-        elif eq_premise:
-            variables_in_premise = set()
-            for arg in eq_premise[1:]:
-                variables_in_premise.add(arg)
-            variables_not_in_premise= list(set(variables) - variables_in_premise)
-            for statement in statement_list:
-                args_permutation = self.rearrange([p.name for p in statement.args])
-                for args in args_permutation:
-                    mapping = {}
-                    flag = True
-                    for v, p in zip(eq_premise[1:], args):
-                        if v not in mapping:
-                            mapping[v] = p
-                        elif mapping[v] != p:
-                            flag = False
-                            break
-                    if not flag:
-                        continue
-                    
-                    for extra_mapping in (
-                        {v: p for v, p in zip(variables_not_in_premise, point_list)} 
-                        for point_list in itertools.product(points, repeat=len(variables_not_in_premise))
-                    ):
-                        mapping.update(extra_mapping)
-                        # logging.info(f"{theorem} mapping {mapping=}")
-                        new_conclusions = self.apply_theorem(theorem, mapping)
-                        if new_conclusions:
-                            res.update(new_conclusions)
-                            if write:
-                                mappings.append(mapping)
-        else:
-            for mapping in (
-                (
-                    {v: p for v, p in zip(variables, point_list)}
-                    for point_list in itertools.product(points, repeat=len(variables))
-                )
-            ):
-                new_conclusions = self.apply_theorem(theorem, mapping)
-                if new_conclusions:
-                    res.update(new_conclusions)
-                    if write:
-                        mappings.append(mapping)
-
-        self.cache[theorem] = tuple(
-            sorted(res, key=lambda x: repr(x))
-        )  # to maintain determinism
-        if self.runtime_cache_path is not None and write:
-            with open(self.runtime_cache_path, "w") as f:
-                json.dump(file_cache, f)
-        logging.debug(
-            f"{theorem} matching cache : now {len(self.cache[theorem])=} {read=} {write=} {len(mappings)=}"
-        )
 
     def match_theorem(self, theorem: "Rule") -> Generator["Dependency", None, None]:
         if theorem not in self.cache:
-            self.cache_theorem11(theorem)
+            self.cache_theorem(theorem)
         for dep in self.cache[theorem]:
             if dep.statement in dep.statement.dep_graph.hyper_graph:
                 continue
@@ -328,7 +236,13 @@ class Matcher:
                 (args[1], args[0], args[2], args[4], args[3], args[5]),
                 (args[1], args[2], args[0], args[4], args[5], args[3]),
                 (args[2], args[0], args[1], args[5], args[3], args[4]),
-                (args[2], args[1], args[0], args[5], args[4], args[3])
+                (args[2], args[1], args[0], args[5], args[4], args[3]),
+                (args[3], args[4], args[5], args[0], args[1], args[2]),
+                (args[3], args[5], args[4], args[0], args[2], args[1]),
+                (args[4], args[3], args[5], args[1], args[0], args[2]),
+                (args[4], args[5], args[3], args[1], args[2], args[0]),
+                (args[5], args[3], args[4], args[2], args[0], args[1]),
+                (args[5], args[4], args[3], args[2], args[1], args[0])
             }
             for args in args_permutation:
                 mapping = {}
@@ -355,38 +269,145 @@ class Matcher:
 
     def cache_normal_theorem(self, theorem : "Rule", points):
         premises = theorem.premises
-        mappings = self.map_premises_to_points(premises, points)
+        point_ids = [(p.num.x, p.num.y) for p in self.dep_graph.symbols_graph.nodes_of_type(Point)]
+        list_premises = [list(premise) for premise in premises]
+        mappings = matchinC.mapping_normal_theorem(list_premises, point_ids)
         res: set[Dependency] = set()
-        
-        def check_sub_mapping(index, current_mapping, why):
-            if index == len(premises):
-                for conclusion in theorem.conclusions:
-                    conclusion_statement = Statement.from_tokens(
-                        translate_sentence(current_mapping, conclusion), self.dep_graph
-                    )
-                    if conclusion_statement is None:
-                        continue
-                    dep = Dependency.mk(conclusion_statement, theorem.descrption, tuple(why))
-                    res.add(dep)
-                return
-                
-            premise = premises[index]
 
-            for sub_mapping in mappings[index]:
-                new_mapping = current_mapping.copy()
-                new_mapping.update(sub_mapping)
+        for mapping in mappings:
+            why = []
+            flag = False
+            for key in mapping:
+                mapping[key] = points[mapping[key]]
+            for premise in premises:
                 s = Statement.from_tokens(
-                        translate_sentence(new_mapping, premise), self.dep_graph
+                        translate_sentence(mapping, premise), self.dep_graph
                     )
-                if s is not None and s.check_numerical():
-                    check_sub_mapping(index+1,new_mapping, why+[s])
-                # for key in sub_mapping:
-                #     del current_mapping[key]
+                if s is None:
+                    flag = True
+                    break
+                why.append(s)
+            if flag:
+                continue
+            for conclusion in theorem.conclusions:
+                s = Statement.from_tokens(
+                        translate_sentence(mapping, conclusion), self.dep_graph
+                    )
+                if s is None or not s.check_numerical():
+                    continue
+                dep = Dependency.mk(s, theorem.descrption, tuple(why))
+                res.add(dep)
+                
+        return res
+    
+    def cache_simtri_conclusion_theorem(self, theorem: "Rule", points):
+        statement_list = None
+        res: set[Dependency] = set()
+        conclusion = theorem.conclusions[0]
+        variables = theorem.variables()
+        if conclusion[0] == "simtri":
+            statement_list = self.dep_graph.numerical_checked_simtri
+        elif conclusion[0] == "simtrir":
+            statement_list = self.dep_graph.numerical_checked_simtrir
+        variables_in_premise = set(conclusion[1:])
+        variables_not_in_premise= list(set(variables) - variables_in_premise)
+        for statement in statement_list:
+            args = [p.name for p in statement.args]
+            assert len(args) == 6
+            args_permutation = {
+                (args[0], args[1], args[2], args[3], args[4], args[5]),
+                (args[0], args[2], args[1], args[3], args[5], args[4]),
+                (args[1], args[0], args[2], args[4], args[3], args[5]),
+                (args[1], args[2], args[0], args[4], args[5], args[3]),
+                (args[2], args[0], args[1], args[5], args[3], args[4]),
+                (args[2], args[1], args[0], args[5], args[4], args[3]),
+                (args[3], args[4], args[5], args[0], args[1], args[2]),
+                (args[3], args[5], args[4], args[0], args[2], args[1]),
+                (args[4], args[3], args[5], args[1], args[0], args[2]),
+                (args[4], args[5], args[3], args[1], args[2], args[0]),
+                (args[5], args[3], args[4], args[2], args[0], args[1]),
+                (args[5], args[4], args[3], args[2], args[1], args[0])
+            }
+            for args in args_permutation:
+                mapping = {}
+                flag = True
+                for v, p in zip(conclusion[1:], args):
+                    if v not in mapping:
+                        mapping[v] = p
+                    elif mapping[v] != p:
+                        flag = False
+                        break
+                if not flag:
+                    continue
+                    
+                for extra_mapping in (
+                    {v: p for v, p in zip(variables_not_in_premise, point_list)} 
+                    for point_list in itertools.product(points, repeat=len(variables_not_in_premise))
+                ):
+                    mapping.update(extra_mapping)
+                    # logging.info(f"{theorem} mapping {mapping=}")
+                    new_conclusions = self.apply_theorem(theorem, mapping)
+                    if new_conclusions:
+                        res.update(new_conclusions)
+        return res
+    
+    def cache_eq_conclusion_theorem(self, theorem: "Rule", points):
+        statement_list = None
+        res: set[Dependency] = set()
+        premise = theorem.conclusions[0]
+        variables = theorem.variables()
+        if premise[0] == "eqangle":
+            statement_list = self.dep_graph.numerical_checked_eqangle
+        if premise[0] == "eqratio":
+            statement_list = self.dep_graph.numerical_checked_eqratio
+        variables_in_premise = set(premise[1:])
+        variables_not_in_premise= list(set(variables) - variables_in_premise)
+        for statement in statement_list:
+            args = [p.name for p in statement.args]
+            assert len(args) == 8
+            if args[0] != args[4]:
+                args_permutation = {
+                    (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
+                    (args[2], args[3], args[0], args[1], args[6], args[7], args[4], args[5]),
+                    (args[4], args[5], args[6], args[7], args[0], args[1], args[2], args[3]),
+                    (args[6], args[7], args[4], args[5], args[2], args[3], args[0], args[1])
+                }
+            else:
+                args_permutation = {
+                    (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
+                    (args[2], args[3], args[0], args[1], args[6], args[7], args[4], args[5]),
+                    (args[4], args[5], args[6], args[7], args[0], args[1], args[2], args[3]),
+                    (args[6], args[7], args[4], args[5], args[2], args[3], args[0], args[1]),
+                    (args[0], args[1], args[4], args[5], args[2], args[3], args[6], args[7]),
+                    (args[4], args[5], args[0], args[1], args[6], args[7], args[2], args[3]),
+                    (args[6], args[7], args[2], args[3], args[4], args[5], args[0], args[1]),
+                    (args[2], args[3], args[6], args[7], args[0], args[1], args[4], args[5]),
+                }
 
-        check_sub_mapping(0, {}, [])
+            for args in args_permutation:
+                mapping = {}
+                flag = True
+                for v, p in zip(premise[1:], args):
+                    if v not in mapping:
+                        mapping[v] = p
+                    elif mapping[v] != p:
+                        flag = False
+                        break
+                if not flag:
+                    continue
+                    
+                for extra_mapping in (
+                    {v: p for v, p in zip(variables_not_in_premise, point_list)} 
+                    for point_list in itertools.product(points, repeat=len(variables_not_in_premise))
+                ):
+                    mapping.update(extra_mapping)
+                    # logging.info(f"{theorem} mapping {mapping=}")
+                    new_conclusions = self.apply_theorem(theorem, mapping)
+                    if new_conclusions:
+                        res.update(new_conclusions)
         return res
 
-    def cache_theorem11(self, theorem: "Rule"):
+    def cache_theorem(self, theorem: "Rule"):
         start_time = time.time()
         
         # file_cache = None
@@ -417,12 +438,16 @@ class Matcher:
         #         new_conclusions = self.apply_theorem(theorem, mapping)
         #         if new_conclusions:
         #             res.update(new_conclusions)
-        if theorem.premises[0][0] == 'eqangle' or theorem.premises[0][0] == 'eqratio':
-            res = self.cache_eq_premise_theorem(theorem, points)
-        elif theorem.premises[0][0] == 'midp':
-            res = self.cache_midp_premise_theorem(theorem, points)
+        if theorem.conclusions[0][0] == 'simtri' or theorem.conclusions[0][0] == 'simtrir':
+            res = self.cache_simtri_conclusion_theorem(theorem, points)
         elif theorem.premises[0][0] == 'simtri' or theorem.premises[0][0] == 'simtrir':
             res = self.cache_simtri_premise_theorem(theorem, points)
+        elif theorem.premises[0][0] == 'eqangle' or theorem.premises[0][0] == 'eqratio':
+            res = self.cache_eq_premise_theorem(theorem, points)
+        # elif theorem.conclusions[0][0] == 'eqangle' or theorem.conclusions[0][0] == 'eqratio':
+        #     res = self.cache_eq_conclusion_theorem(theorem, points)
+        elif theorem.premises[0][0] == 'midp':
+            res = self.cache_midp_premise_theorem(theorem, points)
         else:
             res = self.cache_normal_theorem(theorem, points)
 
