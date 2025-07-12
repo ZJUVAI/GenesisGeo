@@ -383,29 +383,50 @@ class BeamQueue:
     def __init__(self, max_size: int = 512):
         self.queue = []
         self.max_size = max_size
+        self.counter = 0
+        self.entry_finder = {}
+        self.REMOVED = object()
 
     def add(self, node: object, val: float) -> None:
         """Add a new node to this queue."""
 
         if len(self.queue) < self.max_size:
-            self.queue.append((val, node))
-            return
-
-        # Find the minimum node:
-        min_idx, (min_val, _) = min(enumerate(self.queue), key=lambda x: x[1])
-
-        # replace it if the new node has higher value.
-        if val > min_val:
-            self.queue[min_idx] = (val, node)
+            entry = [val, self.counter, node]
+            self.counter += 1
+            heapq.heappush(self.queue, entry)
+            self.entry_finder[node] = entry
+        else:
+            # Find the minimum node:
+            min_val, _, min_node = self.queue[0]
+            # replace it if the new node has higher value.
+            if val > min_val:
+                self.remove(min_node)
+                entry = [val, self.counter, node]
+                self.counter += 1
+                heapq.heappush(self.queue, entry)
+                self.entry_finder[node] = entry
+    
+    def remove(self, node: object) -> None:
+        """Mark an existing node as REMOVED."""
+        entry = self.entry_finder.pop(node, None)
+        if entry:
+            entry[-1] = self.REMOVED
+        self._rebuild_heap()
+    
+    def _rebuild_heap(self):
+        """Rebuild the heap to remove any invalid entries marked as REMOVED."""
+        self.queue = [entry for entry in self.queue if entry[-1] is not self.REMOVED]
+        heapq.heapify(self.queue)
 
     def __iter__(self):
-        for val, node in self.queue:
-            yield val, node
+        for val, _, node in self.queue:
+            if node is not self.REMOVED:
+                yield val, node
 
     def __len__(self) -> int:
         return len(self.queue)
     
     def __repr__(self) -> str:
         # return f'BeamQueue(max_size={self.max_size}, size={len(self.queue)}])'
-        items = ',\n  '.join(f'({val:.4f}, {repr(node)})' for val, node in self.queue)
+        items = ',\n  '.join(f'({val:.4f}, {repr(node)})' for val, _, node in self.queue if node is not self.REMOVED)
         return f'BeamQueue(max_size={self.max_size}, size={len(self.queue)}, items=[\n  {items}\n])'

@@ -6,11 +6,12 @@ from newclid.dependencies.dependency import IN_PREMISES, NUMERICAL_CHECK
 from newclid.dependencies.symbols import Point
 from newclid.dependencies.symbols_graph import SymbolsGraph
 from pyvis.network import Network  # type: ignore
-from newclid.numerical import close_enough
+from newclid.numerical import close_enough, nearly_zero
 from newclid.numerical.check import same_clock
 from newclid.statement import Statement
 from newclid.predicates import NAME_TO_PREDICATE
 import itertools
+from . import geometry
 
 from newclid.tools import add_edge, boring_statement  # type: ignore
 
@@ -53,86 +54,61 @@ class DependencyGraph:
         self.numerical_checked_midp: list[Statement] = []
         self.numerical_checked_simtri: list[Statement] = []
         self.numerical_checked_simtrir: list[Statement] = []
+        # self.numerical_checked_cong: list[Statement] = []
+        # self.numerical_checked_para: list[Statement] = []
 
     def obtain_numerical_checked_premises(self):
         points = self.symbols_graph.nodes_of_type(Point)
-        angles: list[tuple[float, str, str, str, str]] = []
-        ratios: list[tuple[float, str, str, str, str]] = []
-        all_angle = []
-        all_dis = []
-        for (i, a), (j, b) in itertools.combinations(enumerate(points), 2):
-                all_angle.append(((a.num - b.num).angle(),a,b))
-                all_dis.append((a.num.distance(b.num),a,b))
-        
-        for (i, a), (j, b) in itertools.combinations(enumerate(all_angle), 2):
-            angles.append(((b[0]-a[0]) % np.pi,a[1],a[2],b[1],b[2]))
-            angles.append(((a[0]-b[0]) % np.pi,b[1],b[2],a[1],a[2]))
-        for (i, a), (j, b) in itertools.combinations(enumerate(all_dis), 2):
-            if a[0]>b[0]:
-                ratios.append((a[0]/b[0],a[1],a[2],b[1],b[2]))
-            else:
-                ratios.append((b[0]/a[0],b[1],b[2],a[1],a[2]))
-            if close_enough(a[0], b[0]):
-                a, b, c, d = a[1], a[2], b[1], b[2]
-                tokens = None
-                if a.name == c.name and a.num.close_enough((b.num + d.num) / 2):
-                    tokens = ('midp', a.name, b.name, d.name)
-                elif a.name == d.name and a.num.close_enough((b.num + c.num) / 2):
-                    tokens = ('midp', a.name, b.name, c.name)
-                elif b.name == c.name and b.num.close_enough((a.num + d.num) / 2):
-                    tokens = ('midp', b.name, a.name, d.name)
-                elif b.name == d.name and b.num.close_enough((a.num + c.num) / 2):
-                    tokens = ('midp', b.name, a.name, c.name)
-                if tokens:
-                    goal = Statement.from_tokens(tokens, self)
-                    if goal:
-                        self.numerical_checked_midp.append(goal)
+        point_coords = [(point.num.x, point.num.y) for point in points]
 
-        # for (i, a) in enumerate(points):
-        #     for b in points[i + 1:]: 
-        #         angle1 = (a.num - b.num).angle()
-        #         dis = a.num.distance(b.num)
-        #         for (k, c) in enumerate(points):
-        #             for d in points[k + 1:]:
-        #                 angle = ((c.num - d.num).angle() - angle1) % np.pi
-        #                 ratio = dis / c.num.distance(d.num)
-        #                 angles.append((angle, a, b, c, d))
-        #                 ratios.append((ratio, a, b, c, d))
-        #                 ratios.append((1 / ratio, c, d, a, b))
+        angle_ids, ratio_ids = geometry.process_points(point_coords)
         
-        angles.sort(key=lambda x: x[0])
-        ratios.sort(key=lambda x: x[0])
-        for (i, A) in enumerate(angles):
-            if close_enough(A[0], 0) or close_enough(A[0], np.pi):
-                continue
-            for B in angles[i + 1:]:
-                if not close_enough(A[0], B[0]):
-                    break
-                if goal_filter('eqangle', [item.name for item in list(A[1:] + B[1:])]):
-                    tokens = tuple(['eqangle']+[item.name for item in list(A[1:] + B[1:])])
-                    pred = NAME_TO_PREDICATE[tokens[0]]
-                    preparsed = pred.preparse(tokens[1:])
-                    if preparsed[0] != preparsed[2] or preparsed[4] != preparsed[6] or preparsed[1] == preparsed[3] or preparsed[5] == preparsed[7]:
-                        continue
-                    goal = Statement.from_tokens(tokens, self)
-                    if goal:
-                        self.numerical_checked_eqangle.append(goal)
+        angles = [(angle[0], points[angle[1]], points[angle[2]], points[angle[3]], points[angle[4]])for angle in angle_ids]
+        ratios = [(ratio[0], points[ratio[1]], points[ratio[2]], points[ratio[3]], points[ratio[4]])for ratio in ratio_ids]
+
+        # for (i, A) in enumerate(angles):
+        #     if close_enough(A[0], 0) or close_enough(A[0], np.pi):
+        #         continue
+        #     for B in angles[i + 1:]:
+        #         if not close_enough(A[0], B[0]):
+        #             break
+        #         if goal_filter('eqangle', [item.name for item in list(A[1:] + B[1:])]):
+        #             tokens = tuple(['eqangle']+[item.name for item in list(A[1:] + B[1:])])
+        #             pred = NAME_TO_PREDICATE[tokens[0]]
+        #             preparsed = pred.preparse(tokens[1:])
+        #             if preparsed[0] != preparsed[2] or preparsed[4] != preparsed[6] or preparsed[1] == preparsed[3] or preparsed[5] == preparsed[7]:
+        #                 continue
+        #             goal = Statement.from_tokens(tokens, self)
+        #             if goal:
+        #                 self.numerical_checked_eqangle.append(goal)
+        eqangles = geometry.findeqangle(point_coords, angle_ids)
+        for eqangle in eqangles:
+            tokens = ('eqangle', points[eqangle[0]].name, points[eqangle[1]].name, points[eqangle[2]].name, points[eqangle[3]].name, points[eqangle[4]].name, points[eqangle[5]].name, points[eqangle[6]].name, points[eqangle[7]].name)
+            goal = Statement.from_tokens(tokens, self)
+            if goal:
+                self.numerical_checked_eqangle.append(goal)
+        
+        midpoints = geometry.findmidp(point_coords, ratio_ids)
+        for midp in midpoints:
+            tokens = ('midp', points[midp[0]].name, points[midp[1]].name, points[midp[2]].name)
+            goal = Statement.from_tokens(tokens, self)
+            if goal:
+                self.numerical_checked_midp.append(goal)
+
+
+        # eqratios = geometry.findeqratio(point_coords, ratio_ids)
+        # for eqratio in eqratios:
+        #     tokens = ('eqratio', points[eqratio[0]].name, points[eqratio[1]].name, points[eqratio[2]].name, points[eqratio[3]].name, points[eqratio[4]].name, points[eqratio[5]].name, points[eqratio[6]].name, points[eqratio[7]].name)
+        #     goal = Statement.from_tokens(tokens, self)
+        #     if goal:
+        #         self.numerical_checked_eqratio.append(goal)
 
         for (i, A) in enumerate(ratios):
             for B in ratios[i + 1:]:
                 if not close_enough(A[0], B[0]):
                     break
                 if goal_filter('eqratio', [item.name for item in list(A[1:] + B[1:])]):
-                    # tokens = transform(list(A[1:] + B[1:]))
-                    # if not tokens:
-                    #     break
-                    # tokens = tuple(['eqratio'] + tokens)
-                    # # tokens = tuple(['eqratio']+list(A[1:] + B[1:]))
-                    # goal = Statement.from_tokens(tokens, self)
-                    # if goal:
-                    #     self.numerical_checked_eqratio.append(goal)
                     tokens = tuple(['eqratio']+[item.name for item in list(A[1:] + B[1:])])
-                    # goal = Statement.from_tokens(tokens, self)
                     pred = NAME_TO_PREDICATE[tokens[0]]
                     preparsed = pred.preparse(tokens[1:])
 
@@ -184,6 +160,8 @@ class DependencyGraph:
         self.numerical_checked_midp = list(set(self.numerical_checked_midp))
         self.numerical_checked_simtri = list(set(self.numerical_checked_simtri))
         self.numerical_checked_simtrir = list(set(self.numerical_checked_simtrir))
+        # self.numerical_checked_cong = list(set(self.numerical_checked_cong))
+        # self.numerical_checked_para = list(set(self.numerical_checked_para))
         
         # print("eqangle",len(self.numerical_checked_eqangle))
         # print("eqratio",len(self.numerical_checked_eqratio))
