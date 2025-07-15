@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-def get_first_predicate(fl_statement: str):
-    if '?' in fl_statement:
-        predicates_part, _ = fl_statement.split('?', 1)
+def get_first_predicate(fl_problem: str):
+    if '?' in fl_problem:
+        predicates_part, _ = fl_problem.split('?', 1)
     else:
-        predicates_part = fl_statement
-    
+        predicates_part = fl_problem
+        
     first_predicate = ''
     try:
         # 检查是否包含等号，如果有等号则取等号右边的部分
@@ -29,7 +29,7 @@ def get_first_predicate(fl_statement: str):
         first_predicate = predicate_part.split(' ')[0].strip()
         return first_predicate
     except IndexError:
-        logging.warning(f"Could not parse first predicate for: {fl_statement}")
+        logging.warning(f"Could not parse first predicate for: {fl_problem}")
         return None
 
 class Summary:
@@ -100,13 +100,14 @@ class Summary:
 
     def _plot_clauses_num_distribution(self):
         plt.figure(figsize=(10, 6))
-        plt.hist(self.df['n_clauses'], bins=10, edgecolor='black', alpha=0.7, color='lightcoral')
+        clauses = self.df['n_clauses'].explode().dropna()
+        plt.hist(clauses, bins=10, edgecolor='black', alpha=0.7, color='lightcoral')
         plt.xlabel('# Clauses')
         plt.ylabel('Frequency')
         plt.title('# Clauses Distribution')
         plt.grid(True, alpha=0.3)
-        mean_clauses = self.df['n_clauses'].mean()
-        median_clauses = self.df['n_clauses'].median()
+        mean_clauses = clauses.mean()
+        median_clauses = clauses.median()
         plt.axvline(mean_clauses, color='red', linestyle='--', label=f'Mean: {mean_clauses:.2f}')
         plt.axvline(median_clauses, color='orange', linestyle='--', label=f'Median: {median_clauses:.2f}')
         plt.legend()
@@ -155,7 +156,7 @@ class Summary:
             logging.warning("The 'first_predicate' column is missing or empty. Cannot plot first predicate distribution.")
             return
 
-        predicates = self.df['first_predicate'].dropna().tolist()
+        predicates = self.df['first_predicate'].explode().dropna().tolist()
 
         if not predicates:
             print("No first predicates found to plot.")
@@ -200,6 +201,7 @@ class Summary:
         ax.set_title('Time Distribution')
         ax.set_xlabel('Time (s)')
         ax.set_ylabel('Frequency')
+        ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -213,6 +215,7 @@ class Summary:
         ax.set_title('#Samples Distribution')
         ax.set_xlabel('#Samples')
         ax.set_ylabel('Frequency')
+        ax.set_yscale('log')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -239,7 +242,7 @@ class Summary:
         # 4. First Predicate Distribution
         ax = axs[1, 1]
         if 'first_predicate' in self.df.columns and not self.df['first_predicate'].empty:
-            predicates = self.df['first_predicate'].dropna().tolist()
+            predicates = self.df['first_predicate'].explode().dropna().tolist()
             if predicates:
                 counter = Counter(predicates)
                 sorted_items = sorted(counter.items(), key=lambda x: x[1], reverse=True)
@@ -273,12 +276,14 @@ class Summary:
         # 6. Clauses Num Distribution
         ax = axs[2, 1]
         if 'n_clauses' in self.df.columns and not self.df['n_clauses'].empty:
-            ax.hist(self.df['n_clauses'], bins=10, edgecolor='black', alpha=0.7, color=colors[5])
-            mean_clauses = self.df['n_clauses'].mean()
-            median_clauses = self.df['n_clauses'].median()
-            ax.axvline(mean_clauses, color='red', linestyle='--', label=f'Mean: {mean_clauses:.2f}')
-            ax.axvline(median_clauses, color='orange', linestyle='--', label=f'Median: {median_clauses:.2f}')
-            ax.legend()
+            clauses = self.df['n_clauses'].explode().dropna()
+            if not clauses.empty:
+                ax.hist(clauses, bins=10, edgecolor='black', alpha=0.7, color=colors[5])
+                mean_clauses = clauses.mean()
+                median_clauses = clauses.median()
+                ax.axvline(mean_clauses, color='red', linestyle='--', label=f'Mean: {mean_clauses:.2f}')
+                ax.axvline(median_clauses, color='orange', linestyle='--', label=f'Median: {median_clauses:.2f}')
+                ax.legend()
         ax.set_title('# Clauses Distribution')
         ax.set_xlabel('# Clauses')
         ax.set_ylabel('Frequency')
@@ -346,8 +351,8 @@ class Summary:
             summary_stats["Average Proof Steps"] = f"{self.df['n_proof_steps'].explode().mean():.2f}"
             summary_stats["Median Proof Steps"] = f"{self.df['n_proof_steps'].explode().median():.2f}"
         if 'n_clauses' in self.df.columns:
-            summary_stats["Average Clauses"] = f"{self.df['n_clauses'].mean():.2f}"
-            summary_stats["Median Clauses"] = f"{self.df['n_clauses'].median():.2f}"
+            summary_stats["Average Clauses"] = f"{self.df['n_clauses'].explode().mean():.2f}"
+            summary_stats["Median Clauses"] = f"{self.df['n_clauses'].explode().median():.2f}"
 
 
         for key, value in summary_stats.items():
@@ -362,7 +367,7 @@ class Summary:
         # Create aggregated data instead of raw_data
         aggregated_data = {}
         for column in self.df.columns:
-            if column in ['goals', 'n_proof_steps']:
+            if column in ['goals', 'n_proof_steps', 'first_predicate', 'n_clauses']:
                 # For columns with lists that need to be exploded
                 exploded_series = self.df[column].explode().dropna()
                 aggregated_data[f"{column}_distribution"] = exploded_series.value_counts().to_dict()

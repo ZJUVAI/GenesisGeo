@@ -436,6 +436,8 @@ class GeometryGenerator:
             proofs_of_used_rules = {}
             generated_data = []
             goal_collection = [] # 初始化 goal_collection
+            first_predicate_collection = [] # 初始化 first_predicate_collection
+            n_clauses_collection = [] # 初始化 n_clauses_collection
             n_clauses = 0
             for goal in possible_goals:
                 # essential fl_problem
@@ -460,7 +462,6 @@ class GeometryGenerator:
                     logging.debug(f"Naive proof with length {n_proof_steps}")
                     continue
                 
-                goal_collection.append(goal.predicate.NAME) # 收集 goal 类型
                 # solution
                 solver.proof.goals = [goal]
                 aux_points = [p.name for p in aux_points]
@@ -487,12 +488,16 @@ class GeometryGenerator:
                     "llm_output": llm['llm_output'],
                     # "llm_nat_solution": llm_nat_solution,
                 })
+                goal_collection.append(goal.predicate.NAME) # 收集 goal 类型
+                first_predicate_collection.append(get_first_predicate(str(fl_problem)))
+                n_clauses_collection.append(n_clauses)
+                n_clauses = 0
             summary = {
                 'runtime': solver.run_infos['runtime'],
                 'n_samples': len(generated_data),
                 'goals': goal_collection,
-                'first_predicate': get_first_predicate(fl_statement),
-                'n_clauses': n_clauses if generated_data else 0,
+                'first_predicate': first_predicate_collection,
+                'n_clauses': n_clauses_collection,
                 'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
                 'n_filtered_samples': n_filtered_samples
             }
