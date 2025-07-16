@@ -145,7 +145,7 @@ class ClauseGenerator:
 
         # handle special cases
         if clause_relation in ['s_angle', ]:
-            clause_txt += f' {random.choice(range(0, 180, 15))}'
+            clause_txt += f' {random.choice(range(0, 180, 15))}o'
         return clause_txt
 
     def generate_clauses(self, n):

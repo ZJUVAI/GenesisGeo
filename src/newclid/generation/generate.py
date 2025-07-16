@@ -242,7 +242,7 @@ class GeometryGenerator:
                 return False
             if seg_1 == seg_2 or seg_3 == seg_4:
                 return False
-            # case: two parallels
+            # case: two parallels or perp
             arg_set1 = [args[0], args[1], args[2], args[3]]
             arg_set2 = [args[4], args[5], args[6], args[7]]
             arg_set3 = [args[0], args[1], args[4], args[5]]
@@ -261,6 +261,26 @@ class GeometryGenerator:
             sm8 = Statement.from_tokens(['perp']+ arg_set8, dep_graph)
             if sm1.check() or sm2.check() or sm3.check() or sm4.check() or sm5.check() or sm6.check() or sm7.check() or sm8.check():
                 return False
+            # case: simtri
+            a1_args = list(set(args[:4]))
+            a2_args = list(set(args[4:]))
+            if len(a1_args) == 3 and len(a2_args) == 3:
+                sm1 = Statement.from_tokens(['simtri']+a1_args+[a2_args[0], a2_args[1], a2_args[2]], dep_graph)
+                sm2 = Statement.from_tokens(['simtri']+a1_args+[a2_args[0], a2_args[2], a2_args[1]], dep_graph)
+                sm3 = Statement.from_tokens(['simtri']+a1_args+[a2_args[1], a2_args[0], a2_args[2]], dep_graph)
+                sm4 = Statement.from_tokens(['simtri']+a1_args+[a2_args[1], a2_args[2], a2_args[0]], dep_graph)
+                sm5 = Statement.from_tokens(['simtri']+a1_args+[a2_args[2], a2_args[0], a2_args[1]], dep_graph)
+                sm6 = Statement.from_tokens(['simtri']+a1_args+[a2_args[2], a2_args[1], a2_args[0]], dep_graph)
+                if sm1.check() or sm2.check() or sm3.check() or sm4.check() or sm5.check() or sm6.check():
+                    return False
+                sm1 = Statement.from_tokens(['simtrir']+a1_args+[a2_args[0], a2_args[1], a2_args[2]], dep_graph)
+                sm2 = Statement.from_tokens(['simtrir']+a1_args+[a2_args[0], a2_args[2], a2_args[1]], dep_graph)
+                sm3 = Statement.from_tokens(['simtrir']+a1_args+[a2_args[1], a2_args[0], a2_args[2]], dep_graph)
+                sm4 = Statement.from_tokens(['simtrir']+a1_args+[a2_args[1], a2_args[2], a2_args[0]], dep_graph)
+                sm5 = Statement.from_tokens(['simtrir']+a1_args+[a2_args[2], a2_args[0], a2_args[1]], dep_graph)
+                sm6 = Statement.from_tokens(['simtrir']+a1_args+[a2_args[2], a2_args[1], a2_args[0]], dep_graph)
+                if sm1.check() or sm2.check() or sm3.check() or sm4.check() or sm5.check() or sm6.check():
+                    return False
         if name == 'simtri' or name == 'simtrir' or name == 'contri' or name == 'contrir':
             #case: simtri △ABC ≅ △ABC
             tri_1 = {args[0], args[1], args[2]}
@@ -271,7 +291,28 @@ class GeometryGenerator:
             return False
 
         return True
- 
+    
+    def eqangle_goals_filter(self, eqangle_goals, dep_graph):
+        def eqangle_equiv(p1, p2):
+            args1 = [arg.name for arg in p1.args]
+            args2 = [arg.name for arg in p2.args]
+            sm1 = Statement.from_tokens(['para', args1[0], args1[1], args2[0], args2[1]], dep_graph)
+            sm2 = Statement.from_tokens(['para', args1[2], args1[3], args2[2], args2[3]], dep_graph)
+            sm3 = Statement.from_tokens(['para', args1[4], args1[5], args2[4], args2[5]], dep_graph)
+            sm4 = Statement.from_tokens(['para', args1[6], args1[7], args2[6], args2[7]], dep_graph)
+            if sm1.check() and sm2.check() and sm3.check() and sm4.check():
+                return True
+        res = []
+        for eqangle_goal in eqangle_goals:
+            exist = False
+            for p_goals in res:
+                if eqangle_equiv(p_goals, eqangle_goal):
+                    exist = True
+                    break
+            if not exist:
+                res.append(eqangle_goal)
+        return res
+    
     def llm_solution(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
         dep_idx: dict[Statement, str] = {}
         defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
@@ -458,6 +499,7 @@ class GeometryGenerator:
             # self.get_numerical_checked_eqangle_and_eqratio(solver.proof.dep_graph)
             self.all_possible_goals_by_ar(solver.proof.dep_graph)
             possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, [arg.name for arg in goal.args], solver.proof.dep_graph)]
+            possible_goals = [goal for goal in possible_goals if goal.predicate.NAME != 'eqangle'] + self.eqangle_goals_filter([goal for goal in possible_goals if goal.predicate.NAME == 'eqangle'], solver.proof.dep_graph)
             logging.info(f"check goals time: {time.time() - t:.2f}s")
             logging.info(f"{len(possible_goals)=}")
 
@@ -495,11 +537,11 @@ class GeometryGenerator:
                 # llm_nat_solution = self.llm_nat_solution(fl_problem, aux_points, solver.proof)
 
                 # check similarity
-                if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
-                    logging.debug(f"Similar proof found for {goal.predicate.NAME} with clauses {n_clauses} and proof steps {n_proof_steps}. Skipping.")
-                    n_filtered_samples += 1
-                    continue
-
+                # if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
+                #     logging.debug(f"Similar proof found for {goal.predicate.NAME} with clauses {n_clauses} and proof steps {n_proof_steps}. Skipping.")
+                #     n_filtered_samples += 1
+                #     continue
+                
                 generated_data.append({
                     "fl_statement_src": fl_statement,
                     "n_clauses": n_clauses,
