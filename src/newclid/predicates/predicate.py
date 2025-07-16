@@ -3,12 +3,14 @@ from abc import ABC
 from typing import TYPE_CHECKING, Any, Optional
 from numpy.random import Generator
 from fractions import Fraction
+from newclid.tools import fraction_to_angle
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from newclid.dependencies.dependency import Dependency
     from newclid.dependencies.dependency_graph import DependencyGraph
     from newclid.statement import Statement
+
 
 
 class Predicate(ABC):
@@ -69,7 +71,8 @@ class Predicate(ABC):
         res = cls.NAME
         for a in statement.args:
             if isinstance(a, Fraction):
-                res += " " + str(float(a))
+                # res += " " + str(float(a))
+                res += " " + fraction_to_angle(a)
             else:
                 res += " " + repr(a)
         return res

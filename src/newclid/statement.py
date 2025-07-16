@@ -24,6 +24,15 @@ class Statement:
         self.args: tuple[Any, ...] = args
         self.dep_graph = dep_graph
         self._hash = None
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if '_hash' not in self.__dict__:
+            self._hash = None
 
     def check(self) -> bool:
         """Symbolically check if the statement is currently considered True."""
