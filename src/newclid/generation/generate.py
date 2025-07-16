@@ -11,7 +11,6 @@ import itertools
 from collections import defaultdict
 import numpy as np
 from millify import millify
-# import concurrent
 import multiprocessing
 
 from newclid.configs import default_defs_path, default_rules_path
@@ -116,7 +115,6 @@ class GeometryGenerator:
 
     def all_possible_goals_by_ar(self, dep_graph: DependencyGraph) -> list[Statement]:
         def extract_points(s):
-            import re
             return re.findall(r'[a-z][\d]*', s)
 
         def goal_from_tokens(tokens):
@@ -251,15 +249,19 @@ class GeometryGenerator:
             arg_set4 = [args[0], args[1], args[6], args[7]]
             arg_set5 = [args[2], args[3], args[4], args[5]]
             arg_set6 = [args[2], args[3], args[6], args[7]]
+            arg_set7 = [args[0], args[1], args[2], args[3]]
+            arg_set8 = [args[4], args[5], args[6], args[7]]
             sm1 = Statement.from_tokens(['para']+ arg_set1, dep_graph)
             sm2 = Statement.from_tokens(['para']+ arg_set2, dep_graph)
             sm3 = Statement.from_tokens(['para']+ arg_set3, dep_graph)
             sm4 = Statement.from_tokens(['para']+ arg_set4, dep_graph)
             sm5 = Statement.from_tokens(['para']+ arg_set5, dep_graph)
             sm6 = Statement.from_tokens(['para']+ arg_set6, dep_graph)
-            if sm1.check() or sm2.check() or sm3.check() or sm4.check() or sm5.check() or sm6.check():
+            sm7 = Statement.from_tokens(['perp']+ arg_set7, dep_graph)
+            sm8 = Statement.from_tokens(['perp']+ arg_set8, dep_graph)
+            if sm1.check() or sm2.check() or sm3.check() or sm4.check() or sm5.check() or sm6.check() or sm7.check() or sm8.check():
                 return False
-        if name == 'simtri' or name == 'simtrir' or name == 'contrir':
+        if name == 'simtri' or name == 'simtrir' or name == 'contri' or name == 'contrir':
             #case: simtri △ABC ≅ △ABC
             tri_1 = {args[0], args[1], args[2]}
             tri_2 = {args[3], args[4], args[5]}
