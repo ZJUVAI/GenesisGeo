@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import argparse
 import json
 import random
@@ -119,7 +120,7 @@ class GeometryGenerator:
             return re.findall(r'[a-z][\d]*', s)
 
         def goal_from_tokens(tokens):
-            if self.goal_filter(tokens[0], tokens[1:]):
+            if self.goal_filter(tokens[0], tokens[1:], dep_graph):
                 goal = Statement.from_tokens(tokens, dep_graph)
                 if goal and goal.check():
                     return [goal]
@@ -191,7 +192,7 @@ class GeometryGenerator:
             logging.warning(f"error in get_proof_steps {goal}: {e}. Why?")
             return False
 
-    def goal_filter(self, name, args):
+    def goal_filter(self, name, args, dep_graph):
         if args[-1] == '':
             args = args[:-1]
         # AG1 do not support aconst and rconst
@@ -220,6 +221,17 @@ class GeometryGenerator:
             # AB/AB = CD/EF => cong CD = EF
             if seg_1 == seg_2 or seg_3 == seg_4: 
                 return False
+            # case: exist two segments with the same length
+            arg_set1 = [args[0], args[1], args[2], args[3]]
+            arg_set2 = [args[0], args[1], args[4], args[5]]
+            arg_set3 = [args[2], args[3], args[6], args[7]]
+            arg_set4 = [args[4], args[5], args[6], args[7]]
+            sm11 = Statement.from_tokens(['cong']+ arg_set1, dep_graph)
+            sm22 = Statement.from_tokens(['cong']+ arg_set2, dep_graph)
+            sm33 = Statement.from_tokens(['cong']+ arg_set3, dep_graph)
+            sm44 = Statement.from_tokens(['cong']+ arg_set4, dep_graph)
+            if sm11.check() or sm22.check() or sm33.check() or sm44.check():
+                return False
         if name == 'eqangle':
             #case: eqangle ∠AB CD = ∠DC/BA
             seg_1 = {args[0], args[1]}
@@ -232,7 +244,22 @@ class GeometryGenerator:
                 return False
             if seg_1 == seg_2 or seg_3 == seg_4:
                 return False
-        if name == 'simtri' or name == 'simtrir':
+            # case: two parallels
+            arg_set1 = [args[0], args[1], args[2], args[3]]
+            arg_set2 = [args[4], args[5], args[6], args[7]]
+            arg_set3 = [args[0], args[1], args[4], args[5]]
+            arg_set4 = [args[0], args[1], args[6], args[7]]
+            arg_set5 = [args[2], args[3], args[4], args[5]]
+            arg_set6 = [args[2], args[3], args[6], args[7]]
+            sm1 = Statement.from_tokens(['para']+ arg_set1, dep_graph)
+            sm2 = Statement.from_tokens(['para']+ arg_set2, dep_graph)
+            sm3 = Statement.from_tokens(['para']+ arg_set3, dep_graph)
+            sm4 = Statement.from_tokens(['para']+ arg_set4, dep_graph)
+            sm5 = Statement.from_tokens(['para']+ arg_set5, dep_graph)
+            sm6 = Statement.from_tokens(['para']+ arg_set6, dep_graph)
+            if sm1.check() or sm2.check() or sm3.check() or sm4.check() or sm5.check() or sm6.check():
+                return False
+        if name == 'simtri' or name == 'simtrir' or name == 'contrir':
             #case: simtri △ABC ≅ △ABC
             tri_1 = {args[0], args[1], args[2]}
             tri_2 = {args[3], args[4], args[5]}
@@ -428,17 +455,13 @@ class GeometryGenerator:
             # self.all_possible_goals_by_goals(solver.proof.dep_graph)
             # self.get_numerical_checked_eqangle_and_eqratio(solver.proof.dep_graph)
             self.all_possible_goals_by_ar(solver.proof.dep_graph)
-            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, goal.args)]
+            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, [arg.name for arg in goal.args], solver.proof.dep_graph)]
             logging.info(f"check goals time: {time.time() - t:.2f}s")
             logging.info(f"{len(possible_goals)=}")
 
             n_filtered_samples = 0
             proofs_of_used_rules = {}
             generated_data = []
-            goal_collection = [] # 初始化 goal_collection
-            first_predicate_collection = [] # 初始化 first_predicate_collection
-            n_clauses_collection = [] # 初始化 n_clauses_collection
-            n_clauses = 0
             for goal in possible_goals:
                 # essential fl_problem
                 essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
@@ -475,7 +498,6 @@ class GeometryGenerator:
                     n_filtered_samples += 1
                     continue
 
-                # output
                 generated_data.append({
                     "fl_statement_src": fl_statement,
                     "n_clauses": n_clauses,
@@ -488,16 +510,12 @@ class GeometryGenerator:
                     "llm_output": llm['llm_output'],
                     # "llm_nat_solution": llm_nat_solution,
                 })
-                goal_collection.append(goal.predicate.NAME) # 收集 goal 类型
-                first_predicate_collection.append(get_first_predicate(str(fl_problem)))
-                n_clauses_collection.append(n_clauses)
-                n_clauses = 0
             summary = {
                 'runtime': solver.run_infos['runtime'],
                 'n_samples': len(generated_data),
-                'goals': goal_collection,
-                'first_predicate': first_predicate_collection,
-                'n_clauses': n_clauses_collection,
+                'goals': [re.search(r'\?\s*(\w+)', d['fl_problem']).group(1) for d in generated_data],
+                'first_predicate': [get_first_predicate(d['fl_problem']) for d in generated_data],
+                'n_clauses': [d['n_clauses'] for d in generated_data],
                 'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
                 'n_filtered_samples': n_filtered_samples
             }

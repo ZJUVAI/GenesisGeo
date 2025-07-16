@@ -11,6 +11,7 @@ from openai import OpenAI
 import torch
 from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import heapq
 
 from newclid.agent.agents_interface import (
     DeductiveAgent,
@@ -241,7 +242,6 @@ class LMAgent(DeductiveAgent):
             result += ', '.join(result_constructions)
             return result
 
-    
     def translate_dsl_to_construction(self, point: str, predicate: str, args: list[str]
         ) -> tuple[str, list[str]]:
         """ Translate a predicate into construction
