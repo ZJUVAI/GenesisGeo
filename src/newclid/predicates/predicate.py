@@ -3,7 +3,7 @@ from abc import ABC
 from typing import TYPE_CHECKING, Any, Optional
 from numpy.random import Generator
 from fractions import Fraction
-from newclid.tools import fraction_to_angle
+from newclid.tools import fraction_to_angle, fraction_to_ratio
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -72,7 +72,10 @@ class Predicate(ABC):
         for a in statement.args:
             if isinstance(a, Fraction):
                 # res += " " + str(float(a))
-                res += " " + fraction_to_angle(a)
+                if cls.NAME == "aconst":
+                    res += " " + fraction_to_angle(a)
+                if cls.NAME == "rconst":
+                    res += " " + fraction_to_ratio(a)
             else:
                 res += " " + repr(a)
         return res

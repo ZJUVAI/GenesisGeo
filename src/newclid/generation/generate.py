@@ -313,6 +313,28 @@ class GeometryGenerator:
                 res.append(eqangle_goal)
         return res
     
+    def eqratio_goals_filter(self, eqratio_goals, dep_graph):
+        def eqratio_equiv(p1, p2):
+            args1 = [arg.name for arg in p1.args]
+            args2 = [arg.name for arg in p2.args]
+            sm1 = Statement.from_tokens(['cong', args1[0], args1[1], args2[0], args2[1]], dep_graph)
+            sm2 = Statement.from_tokens(['cong', args1[2], args1[3], args2[2], args2[3]], dep_graph)
+            sm3 = Statement.from_tokens(['cong', args1[4], args1[5], args2[4], args2[5]], dep_graph)
+            sm4 = Statement.from_tokens(['cong', args1[6], args1[7], args2[6], args2[7]], dep_graph)
+            if sm1.check() and sm2.check() and sm3.check() and sm4.check():
+                return True
+        res = []
+        for eqratio_goal in eqratio_goals:
+            exist = False
+            for p_goals in res:
+                if eqratio_equiv(p_goals, eqratio_goal):
+                    exist = True
+                    break
+            if not exist:
+                res.append(eqratio_goal)
+        # print(f'{len(res)} / {len(eqratio_goals)}')
+        return res
+    
     def llm_solution(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
         dep_idx: dict[Statement, str] = {}
         defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
@@ -490,7 +512,11 @@ class GeometryGenerator:
             solver_builder = GeometricSolverBuilder(seed=998244353)
             solver_builder.with_deductive_agent(DDARN())
             solver_builder.load_problem_from_txt(fl_statement)
-            solver = solver_builder.build(max_attempts=100)
+            try:
+                solver = solver_builder.build(max_attempts=100)
+            except Exception as e:
+                logging.debug(f"Error: {e}")
+                return [], {}
             solver.run(timeout=self.timeout)
             logging.info(f"ddar time: {solver.run_infos['runtime']}s")
 
@@ -498,8 +524,11 @@ class GeometryGenerator:
             # self.all_possible_goals_by_goals(solver.proof.dep_graph)
             # self.get_numerical_checked_eqangle_and_eqratio(solver.proof.dep_graph)
             self.all_possible_goals_by_ar(solver.proof.dep_graph)
-            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, [arg.name for arg in goal.args], solver.proof.dep_graph)]
-            possible_goals = [goal for goal in possible_goals if goal.predicate.NAME != 'eqangle'] + self.eqangle_goals_filter([goal for goal in possible_goals if goal.predicate.NAME == 'eqangle'], solver.proof.dep_graph)
+            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.goal_filter(goal.predicate.NAME, [arg.name if hasattr(arg, "name") else arg for arg in goal.args], solver.proof.dep_graph)]
+            possible_goals_others = [goal for goal in possible_goals if goal.predicate.NAME != 'eqangle' and goal.predicate.NAME != 'eqratio'] 
+            possible_goals_eqangle = self.eqangle_goals_filter([goal for goal in possible_goals if goal.predicate.NAME == 'eqangle'], solver.proof.dep_graph) 
+            possible_goals_eqratio = self.eqratio_goals_filter([goal for goal in possible_goals if goal.predicate.NAME == 'eqratio'], solver.proof.dep_graph)
+            possible_goals = possible_goals_others + possible_goals_eqangle + possible_goals_eqratio
             logging.info(f"check goals time: {time.time() - t:.2f}s")
             logging.info(f"{len(possible_goals)=}")
 
@@ -566,7 +595,7 @@ class GeometryGenerator:
 
             return generated_data, summary
         except Exception as e:
-            logging.debug(f"Error generating problem: {e}")
+            logging.info(f"Error generating problem: {e}")
             return [], {}
 
     def generate_problems(self):

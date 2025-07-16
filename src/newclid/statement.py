@@ -69,7 +69,7 @@ class Statement:
         return self.predicate.to_repr(self)
 
     def __hash__(self) -> int:
-        if self._hash is None:
+        if not hasattr(self, '_hash') or self._hash is None:
             self._hash = hash(repr(self))
         return self._hash
 
