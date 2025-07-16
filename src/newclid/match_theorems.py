@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
     from newclid.dependencies.dependency_graph import DependencyGraph
 
-from . import matchinC
+from newclid import matchinC
 
 class Matcher:
     def __init__(
@@ -90,6 +90,87 @@ class Matcher:
             permutations.add(tuple(perm))
         return permutations
 
+    def args_rearrange(self, args: list[Point]) -> list[Point]:
+        a, b, c, d, e, f, g, h = args
+        if a == b or c == d or e == f or g == h:
+            return 
+        if a == c:
+            if e == g:
+                a, b, c, d, e, f, g, h = a, b, c, d, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = a, b, c, d, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = a, b, c, d, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = a, b, c, d, f, e, h, g
+        elif a == d:
+            if e == g:
+                a, b, c, d, e, f, g, h = a, b, d, c, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = a, b, d, c, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = a, b, d, c, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = a, b, d, c, f, e, h, g
+        elif b == c:
+            if e == g:
+                a, b, c, d, e, f, g, h = b, a, c, d, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = b, a, c, d, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = b, a, c, d, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = b, a, c, d, f, e, h, g
+        elif b == d:
+            if e == g:
+                a, b, c, d, e, f, g, h = b, a, d, c, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = b, a, d, c, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = b, a, d, c, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = b, a, d, c, f, e, h, g
+        elif a == e:
+            if c == g:
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = a, b, e, f, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = a, b, e, f, d, c, h, g
+        elif a == f:
+            if c == g:
+                a, b, c, d, e, f, g, h = a, b, f, e, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = a, b, f, e, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = a, b, f, e, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = a, b, f, e, d, c, h, g
+        elif b == e:
+            if c == g:
+                a, b, c, d, e, f, g, h = b, a, e, f, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = b, a, e, f, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = b, a, e, f, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = b, a, e, f, d, c, h, g
+        elif b == f:
+            if c == g:
+                a, b, c, d, e, f, g, h = b, a, f, e, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = b, a, f, e, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = b, a, f, e, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = b, a, f, e, d, c, h, g
+        
+        return [a,b,c,d,e,f,g,h]
+
+
+
     def match_theorem(self, theorem: "Rule") -> Generator["Dependency", None, None]:
         if theorem not in self.cache:
             self.cache_theorem(theorem)
@@ -137,6 +218,7 @@ class Matcher:
         for statement in statement_list:
             args = [p.name for p in statement.args]
             assert len(args) == 8
+            args = self.args_rearrange(args)
             if args[0] != args[4]:
                 args_permutation = {
                     (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
@@ -365,6 +447,7 @@ class Matcher:
         for statement in statement_list:
             args = [p.name for p in statement.args]
             assert len(args) == 8
+            args = self.args_rearrange(args)
             if args[0] != args[4]:
                 args_permutation = {
                     (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),

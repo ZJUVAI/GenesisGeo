@@ -57,6 +57,85 @@ class DependencyGraph:
         # self.numerical_checked_cong: list[Statement] = []
         # self.numerical_checked_para: list[Statement] = []
 
+    def args_rearrange(self, args: list[Point]) -> list[Point]:
+        a, b, c, d, e, f, g, h = args
+        if a == b or c == d or e == f or g == h:
+            return 
+        if a == c:
+            if e == g:
+                a, b, c, d, e, f, g, h = a, b, c, d, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = a, b, c, d, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = a, b, c, d, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = a, b, c, d, f, e, h, g
+        elif a == d:
+            if e == g:
+                a, b, c, d, e, f, g, h = a, b, d, c, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = a, b, d, c, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = a, b, d, c, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = a, b, d, c, f, e, h, g
+        elif b == c:
+            if e == g:
+                a, b, c, d, e, f, g, h = b, a, c, d, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = b, a, c, d, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = b, a, c, d, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = b, a, c, d, f, e, h, g
+        elif b == d:
+            if e == g:
+                a, b, c, d, e, f, g, h = b, a, d, c, e, f, g, h
+            elif e == h:
+                a, b, c, d, e, f, g, h = b, a, d, c, e, f, h, g
+            elif f == g:
+                a, b, c, d, e, f, g, h = b, a, d, c, f, e, g, h
+            elif f == h:
+                a, b, c, d, e, f, g, h = b, a, d, c, f, e, h, g
+        elif a == e:
+            if c == g:
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = a, b, e, f, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = a, b, e, f, d, c, h, g
+        elif a == f:
+            if c == g:
+                a, b, c, d, e, f, g, h = a, b, f, e, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = a, b, f, e, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = a, b, f, e, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = a, b, f, e, d, c, h, g
+        elif b == e:
+            if c == g:
+                a, b, c, d, e, f, g, h = b, a, e, f, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = b, a, e, f, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = b, a, e, f, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = b, a, e, f, d, c, h, g
+        elif b == f:
+            if c == g:
+                a, b, c, d, e, f, g, h = b, a, f, e, c, d, g, h
+            elif c == h:
+                a, b, c, d, e, f, g, h = b, a, f, e, c, d, h, g
+            elif d == g:
+                a, b, c, d, e, f, g, h = b, a, f, e, d, c, g, h
+            elif d == h:
+                a, b, c, d, e, f, g, h = b, a, f, e, d, c, h, g
+        
+        return [a,b,c,d,e,f,g,h]
+
     def obtain_numerical_checked_premises(self):
         points = self.symbols_graph.nodes_of_type(Point)
         point_coords = [(point.num.x, point.num.y) for point in points]
@@ -87,13 +166,17 @@ class DependencyGraph:
             goal = Statement.from_tokens(tokens, self)
             if goal:
                 self.numerical_checked_eqangle.append(goal)
-        
+            # tokens = [points[eqangle[0]].name, points[eqangle[1]].name, points[eqangle[2]].name, points[eqangle[3]].name, points[eqangle[4]].name, points[eqangle[5]].name, points[eqangle[6]].name, points[eqangle[7]].name]
+            # self.numerical_checked_eqangle.append(goal)
+
         midpoints = geometry.findmidp(point_coords, ratio_ids)
         for midp in midpoints:
             tokens = ('midp', points[midp[0]].name, points[midp[1]].name, points[midp[2]].name)
             goal = Statement.from_tokens(tokens, self)
             if goal:
                 self.numerical_checked_midp.append(goal)
+            # tokens = [ points[midp[0]].name, points[midp[1]].name, points[midp[2]].name]
+            # self.numerical_checked_midp.append(tokens)
 
 
         # eqratios = geometry.findeqratio(point_coords, ratio_ids)
@@ -109,8 +192,7 @@ class DependencyGraph:
                     break
                 if goal_filter('eqratio', [item.name for item in list(A[1:] + B[1:])]):
                     tokens = tuple(['eqratio']+[item.name for item in list(A[1:] + B[1:])])
-                    pred = NAME_TO_PREDICATE[tokens[0]]
-                    preparsed = pred.preparse(tokens[1:])
+                    preparsed = self.args_rearrange(tokens[1:])
 
                     if preparsed[0] != preparsed[2] or preparsed[4] != preparsed[6]:
                         continue
