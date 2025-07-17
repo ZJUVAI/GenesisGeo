@@ -502,7 +502,29 @@ class GeometryGenerator:
             proofs_of_used_rules[rules] = []
         proofs_of_used_rules[rules].append(proof_lines)
         return False
-    
+ 
+    def check_aux_predicates_valid(self, llm_output: str) -> bool:
+        # <aux> x00 c : perp k n n s [024] cong k n n s [025]; x00 h : ; x00 i : ; x00 j : perp h i h j [009] cong h i h j [010] ; </aux> <proof> cong a k c k [002] r19 [000] [001] ; cong b k c k [003] r19 [000] [001] ; cong a k b k [004] a00 [002] [003] ; </proof>
+        valid_aux_predicates = set(['perp', 'para', 'cong', 'coll', 'eqangle', 'cyclic'])
+        aux_match = re.match(r"<aux>\s*(.*)\s*</aux>", llm_output)
+        # c : perp a c b c [001] ; c : perp a c b c [001] ;
+        aux_content = aux_match.group(1)
+        contents = [con.strip() for con in aux_content.split(';') if con.strip()]
+        for content_item in contents:
+            prefix_match = re.match(r"(x00 \w+)\s*:\s*(.*)", content_item)
+            if prefix_match:
+                prefix = prefix_match.group(1) # e
+                rest = prefix_match.group(2) # coll a c e [002] coll b d e [003]
+                segments = re.split(r"\s*\[\d+\]", rest)
+                segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
+                # result = [prefix] + segments
+                for segment in segments:
+                    parts = segment.split()
+                    if parts and parts[0] not in valid_aux_predicates:
+                        logging.debug(f"Invalid auxiliary predicate: {parts[0]}")
+                        return False
+        return True
+ 
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
         try:
             """Process a single geometry problem."""
@@ -564,6 +586,10 @@ class GeometryGenerator:
                 nl_solution = write_proof_steps(solver.proof, print_output=False)
                 llm = self.llm_solution(fl_problem, aux_points, solver.proof)
                 # llm_nat_solution = self.llm_nat_solution(fl_problem, aux_points, solver.proof)
+
+                if len(aux_points) > 0:
+                    if not self.check_aux_predicates_valid(llm['llm_output']):
+                        continue
 
                 # check similarity
                 # if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
