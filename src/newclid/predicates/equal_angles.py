@@ -53,6 +53,9 @@ class EqAngle(Predicate):
             groups2 = g2a + g2b
         else:
             groups2 = g2b + g2a
+        groups1 = groups1 if groups1 <= groups2 else groups2  
+        a, b, c, d, e, f, g, h = groups1
+        groups2 = (a, b, e, f, c, d, g, h)
         return groups1 if groups1 <= groups2 else groups2  
         
         # groups: list[tuple[str, str, str, str]] = []
