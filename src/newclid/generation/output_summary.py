@@ -139,7 +139,13 @@ class Summary:
         bars = plt.bar(labels, counts, color='plum', log=ylog)
         for bar, perc in zip(bars, percs):
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width() / 2., height, f'{perc:.1f}%', ha='center', va='bottom')
+            if ylog:
+                # 对于对数坐标，在条形顶部稍微上方放置文本
+                plt.text(bar.get_x() + bar.get_width() / 2., height * 1.1, f'{perc:.1f}%', 
+                        ha='center', va='bottom', fontsize=8)
+            else:
+                plt.text(bar.get_x() + bar.get_width() / 2., height, f'{perc:.1f}%', 
+                        ha='center', va='bottom', fontsize=8)
 
         plt.xlabel('Goal Type')
         plt.ylabel('Count (log scale)' if ylog else 'Count')
@@ -226,10 +232,17 @@ class Summary:
             goals = [str(g) for g in goals]
             if goals:
                 counter = Counter(goals)
+                total_goals = len(goals)
                 sorted_items = sorted(counter.items(), key=lambda x: x[1], reverse=True)
                 labels = [item[0] for item in sorted_items]
                 counts = [item[1] for item in sorted_items]
-                ax.bar(labels, counts, color=colors[2])
+                percs = [(count / total_goals) * 100 for count in counts]
+                
+                bars = ax.bar(labels, counts, color=colors[2])
+                for bar, perc in zip(bars, percs):
+                    height = bar.get_height()
+                    ax.text(bar.get_x() + bar.get_width() / 2., height * 1.1, f'{perc:.1f}%', 
+                           ha='center', va='bottom', fontsize=8)
                 ax.set_yscale('log')
                 ax.set_xticks(np.arange(len(labels)))
                 ax.set_xticklabels(labels, rotation=45, ha='right')
@@ -366,17 +379,19 @@ class Summary:
         
         # Create aggregated data instead of raw_data
         aggregated_data = {}
-        for column in self.df.columns:
-            if column in ['goals', 'n_proof_steps', 'first_predicate', 'n_clauses']:
+        # Only include goals and first_predicate distributions
+        for column in ['goals', 'first_predicate']:
+            if column in self.df.columns:
                 # For columns with lists that need to be exploded
                 exploded_series = self.df[column].explode().dropna()
-                aggregated_data[f"{column}_distribution"] = exploded_series.value_counts().to_dict()
-            elif self.df[column].dtype == 'object':
-                # For other categorical-like data
-                aggregated_data[f"{column}_distribution"] = self.df[column].value_counts().to_dict()
-            else:
-                # For numerical data, we can provide distribution counts as well
-                aggregated_data[f"{column}_distribution"] = self.df[column].value_counts().to_dict()
+                counts_dict = exploded_series.value_counts().to_dict()
+                aggregated_data[f"{column}_distribution"] = counts_dict
+                
+                # Add percentage distribution for goals
+                if column == 'goals':
+                    total_goals = sum(counts_dict.values())
+                    percentage_dict = {k: round((v / total_goals) * 100, 2) for k, v in counts_dict.items()}
+                    aggregated_data[f"{column}_percentage"] = percentage_dict
 
         report_data = {
             "summary_statistics": summary_stats,
