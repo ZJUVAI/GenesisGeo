@@ -508,21 +508,22 @@ class GeometryGenerator:
         valid_aux_predicates = set(['perp', 'para', 'cong', 'coll', 'eqangle', 'cyclic'])
         aux_match = re.match(r"<aux>\s*(.*)\s*</aux>", llm_output)
         # c : perp a c b c [001] ; c : perp a c b c [001] ;
-        aux_content = aux_match.group(1)
-        contents = [con.strip() for con in aux_content.split(';') if con.strip()]
-        for content_item in contents:
-            prefix_match = re.match(r"(x00 \w+)\s*:\s*(.*)", content_item)
-            if prefix_match:
-                prefix = prefix_match.group(1) # e
-                rest = prefix_match.group(2) # coll a c e [002] coll b d e [003]
-                segments = re.split(r"\s*\[\d+\]", rest)
-                segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
-                # result = [prefix] + segments
-                for segment in segments:
-                    parts = segment.split()
-                    if parts and parts[0] not in valid_aux_predicates:
-                        logging.debug(f"Invalid auxiliary predicate: {parts[0]}")
-                        return False
+        if aux_content:
+            aux_content = aux_match.group(1)
+            contents = [con.strip() for con in aux_content.split(';') if con.strip()]
+            for content_item in contents:
+                prefix_match = re.match(r"(x00 \w+)\s*:\s*(.*)", content_item)
+                if prefix_match:
+                    prefix = prefix_match.group(1) # e
+                    rest = prefix_match.group(2) # coll a c e [002] coll b d e [003]
+                    segments = re.split(r"\s*\[\d+\]", rest)
+                    segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
+                    # result = [prefix] + segments
+                    for segment in segments:
+                        parts = segment.split()
+                        if parts and parts[0] not in valid_aux_predicates:
+                            logging.debug(f"Invalid auxiliary predicate: {parts[0]}")
+                            return False
         return True
  
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
