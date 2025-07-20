@@ -508,7 +508,7 @@ class GeometryGenerator:
         valid_aux_predicates = set(['perp', 'para', 'cong', 'coll', 'eqangle', 'cyclic'])
         aux_match = re.match(r"<aux>\s*(.*)\s*</aux>", llm_output)
         # c : perp a c b c [001] ; c : perp a c b c [001] ;
-        if aux_content:
+        if aux_match:
             aux_content = aux_match.group(1)
             contents = [con.strip() for con in aux_content.split(';') if con.strip()]
             for content_item in contents:
@@ -561,17 +561,76 @@ class GeometryGenerator:
             for goal in possible_goals:
                 # essential fl_problem
                 essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
+                
+                essential_clauses_statements = []
+                for clause in solver_builder.problemJGEX.constructions:
+                    if str(clause) in essential_clauses:
+                        essential_clauses_statements.append(str(clause))
+                
+                aux_clauses_statements = []
+                for clause in solver_builder.problemJGEX.constructions:
+                    if str(clause) in essential_aux_clauses:
+                        aux_clauses_statements.append(str(clause))
+                
+                # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
+                minimal_aux_set = set()
+                start_time = time.time()
+                timeout_reached = False
+                found_minimal = False
+                
+                # Search through subsets from size 0 to len-1 (excluding full set)
+                for r in range(len(aux_clauses_statements)):
+                    for aux_subset in itertools.combinations(aux_clauses_statements, r):
+                        # Check timeout for the inner loop
+                        if time.time() - start_time > self.timeout:
+                            logging.debug(f"Timeout reached while searching for minimal auxiliary set for goal: {goal}")
+                            timeout_reached = True
+                            break
+                            
+                        aux_subset_set = set(aux_subset)
+                        statements_test = []
+                        for clause in solver_builder.problemJGEX.constructions:
+                            clause_str = str(clause)
+                            if clause_str in essential_clauses or clause_str in aux_subset_set:
+                                statements_test.append(clause_str)
+                        fl_problem_test = '; '.join(statements_test) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                        
+                        solver_builder_test = GeometricSolverBuilder(seed=998244353)
+                        solver_builder_test.with_deductive_agent(DDARN())
+                        solver_builder_test.load_problem_from_txt(fl_problem_test)
+                        try:
+                            solver_test = solver_builder_test.build(max_attempts=100)
+                            if solver_test.run(timeout=self.timeout):
+                                minimal_aux_set = aux_subset_set
+                                found_minimal = True
+                                break
+                        except Exception as e:
+                            logging.debug(f"Error: {e}")
+                    
+                    if found_minimal or timeout_reached:
+                        break
+                
+                # If no minimal set found and no timeout, use the full auxiliary clause set as fallback
+                if not found_minimal and not timeout_reached:
+                    logging.debug(f"No minimal auxiliary set found for goal: {goal}, using full auxiliary clause set as fallback")
+                    minimal_aux_set = set(aux_clauses_statements)
+                
+                # Skip this goal if timeout was reached during minimal auxiliary set search
+                if timeout_reached:
+                    continue
+                
                 statements = []
                 for clause in solver_builder.problemJGEX.constructions:
-                    if str(clause) in essential_clauses or str(clause) in essential_aux_clauses:
-                        statements.append(str(clause))
+                    clause_str = str(clause)
+                    if clause_str in essential_clauses or clause_str in minimal_aux_set:
+                        statements.append(clause_str)
                 fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
                 fl_problem = ProblemJGEX.from_text(fl_problem)
 
                 # cluases num filter
-                n_clauses = len(essential_clauses | essential_aux_clauses)
+                n_clauses = len(statements)
                 if n_clauses < self.min_clauses_num:
-                    logging.debug(f"Too few clauses: {len(essential_clauses | essential_aux_clauses)}")
+                    logging.debug(f"Too few clauses: {n_clauses}")
                     continue
 
                 # get and filter proof
