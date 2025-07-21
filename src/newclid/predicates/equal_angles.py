@@ -85,6 +85,8 @@ class EqAngle(Predicate):
         angle = None
         for a, b, c, d in reshape(list(args), 4):
             _angle = ((d.num - c.num).angle() - (b.num - a.num).angle()) % np.pi
+            if close_enough(_angle, np.pi):
+                _angle = 0.0
             if angle is not None and not close_enough(angle, _angle):
                 return False
             angle = _angle
