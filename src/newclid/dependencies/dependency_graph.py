@@ -373,19 +373,6 @@ class DependencyGraph:
             proof_steps,
         )
 
-    def get_essential_clauses(
-        self,
-        goals: list[Statement],
-    ) -> tuple[set[str], set[str]]:
-        essential_clauses: set[str] = set()
-        essential_clauses_aux: set[str] = set()
-
-        points, _, _, aux_points, _, _, _ = self.get_proof_steps(goals)
-        for p in points:
-            essential_clauses.add(str(p.clause))
-        for p in aux_points:
-            essential_clauses_aux.add(str(p.clause))
-        return essential_clauses, essential_clauses_aux
 
     def save_pyvis(self, *, path: Path, stars: Collection[Statement] = []):
         if stars:

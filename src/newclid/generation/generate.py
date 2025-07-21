@@ -527,10 +527,40 @@ class GeometryGenerator:
         return True
  
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
+        def find_minimal_aux_clauses(essential_clauses, essential_clauses_aux):
+            # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
+            minimal_aux_set = set()
+            # Search through subsets from size 0 to len-1 (excluding full set)
+            for r in range(len(essential_clauses_aux)):
+                for aux_subset in itertools.combinations(essential_clauses_aux, r):
+                    aux_subset_set = set(aux_subset)
+                    statements_test = []
+                    for clause in solver_builder.problemJGEX.constructions:
+                        clause_str = str(clause)
+                        if clause_str in essential_clauses or clause_str in aux_subset_set:
+                            statements_test.append(clause_str)
+                    fl_problem_test = '; '.join(statements_test) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                    
+                    solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
+                    solver_builder_test.with_deductive_agent(DDARN())
+                    solver_builder_test.load_problem_from_txt(fl_problem_test)
+                    try:
+                        solver_test = solver_builder_test.build(max_attempts=100)
+                        if solver_test.run(timeout=self.timeout):
+                            minimal_aux_set = aux_subset_set
+                            return {
+                                "info": 'success',
+                                "aux_cluases": minimal_aux_set,
+                                "solver": solver_test,
+                            }
+                    except Exception as e:
+                        logging.debug(f"Error: {e}")
+            return {"info": 'failed'}
+
+
         try:
             """Process a single geometry problem."""
             pid, fl_statement = args
-            # fl_statement = "a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b; e = on_line e a c, on_line e b d ? perp a d b c"
             
             solver_builder = GeometricSolverBuilder(seed=998244353)
             solver_builder.with_deductive_agent(DDARN())
@@ -541,7 +571,6 @@ class GeometryGenerator:
                 logging.debug(f"Error: {e}")
                 return [], {}
             solver.run(timeout=self.timeout)
-            logging.info(f"ddar time: {solver.run_infos['runtime']}s")
 
             t = time.time()
             # self.all_possible_goals_by_goals(solver.proof.dep_graph)
@@ -552,103 +581,67 @@ class GeometryGenerator:
             possible_goals_eqangle = self.eqangle_goals_filter([goal for goal in possible_goals if goal.predicate.NAME == 'eqangle'], solver.proof.dep_graph) 
             possible_goals_eqratio = self.eqratio_goals_filter([goal for goal in possible_goals if goal.predicate.NAME == 'eqratio'], solver.proof.dep_graph)
             possible_goals = possible_goals_others + possible_goals_eqangle + possible_goals_eqratio
-            logging.info(f"check goals time: {time.time() - t:.2f}s")
-            logging.info(f"{len(possible_goals)=}")
+            checkgoals_runtime = time.time() - t
+            # logging.info(f"{len(possible_goals)=}")
 
             n_filtered_samples = 0
             proofs_of_used_rules = {}
             generated_data = []
             for goal in possible_goals:
-                # essential fl_problem
-                essential_clauses, essential_aux_clauses = solver.proof.dep_graph.get_essential_clauses([goal])
                 
-                essential_clauses_statements = []
-                for clause in solver_builder.problemJGEX.constructions:
-                    if str(clause) in essential_clauses:
-                        essential_clauses_statements.append(str(clause))
-                
-                aux_clauses_statements = []
-                for clause in solver_builder.problemJGEX.constructions:
-                    if str(clause) in essential_aux_clauses:
-                        aux_clauses_statements.append(str(clause))
-                
-                # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
-                minimal_aux_set = set()
-                start_time = time.time()
-                timeout_reached = False
-                found_minimal = False
-                
-                # Search through subsets from size 0 to len-1 (excluding full set)
-                for r in range(len(aux_clauses_statements)):
-                    for aux_subset in itertools.combinations(aux_clauses_statements, r):
-                        # Check timeout for the inner loop
-                        if time.time() - start_time > self.timeout:
-                            logging.debug(f"Timeout reached while searching for minimal auxiliary set for goal: {goal}")
-                            timeout_reached = True
-                            break
-                            
-                        aux_subset_set = set(aux_subset)
-                        statements_test = []
-                        for clause in solver_builder.problemJGEX.constructions:
-                            clause_str = str(clause)
-                            if clause_str in essential_clauses or clause_str in aux_subset_set:
-                                statements_test.append(clause_str)
-                        fl_problem_test = '; '.join(statements_test) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
-                        
-                        solver_builder_test = GeometricSolverBuilder(seed=998244353)
-                        solver_builder_test.with_deductive_agent(DDARN())
-                        solver_builder_test.load_problem_from_txt(fl_problem_test)
-                        try:
-                            solver_test = solver_builder_test.build(max_attempts=100)
-                            if solver_test.run(timeout=self.timeout):
-                                minimal_aux_set = aux_subset_set
-                                found_minimal = True
-                                break
-                        except Exception as e:
-                            logging.debug(f"Error: {e}")
-                    
-                    if found_minimal or timeout_reached:
+                # find minimal aux clauses
+                solver.proof.goals = [goal]
+                solver_new = solver
+                last_essential_clauses_len = float('inf')
+                last_essential_clauses_aux_len = float('inf')
+                while True:
+                    # get proof and essential_clauses
+                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps([goal])
+                    essential_clauses: set[str] = set()
+                    essential_clauses_aux: set[str] = set()
+                    for p in aux_points:  
+                        essential_clauses_aux.add(str(p.clause)) 
+                    for p in points:
+                         # put all clauses with aux points into essential_clauses_aux for further filtering
+                        if str(p.clause) not in essential_clauses_aux:
+                            essential_clauses.add(str(p.clause))
+                    if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
                         break
-                
-                # If no minimal set found and no timeout, use the full auxiliary clause set as fallback
-                if not found_minimal and not timeout_reached:
-                    logging.debug(f"No minimal auxiliary set found for goal: {goal}, using full auxiliary clause set as fallback")
-                    minimal_aux_set = set(aux_clauses_statements)
-                
-                # Skip this goal if timeout was reached during minimal auxiliary set search
-                if timeout_reached:
-                    continue
-                
-                statements = []
-                for clause in solver_builder.problemJGEX.constructions:
-                    clause_str = str(clause)
-                    if clause_str in essential_clauses or clause_str in minimal_aux_set:
-                        statements.append(clause_str)
-                fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
-                fl_problem = ProblemJGEX.from_text(fl_problem)
+                    last_essential_clauses_len = len(essential_clauses)
+                    last_essential_clauses_aux_len = len(essential_clauses_aux)
+                    res = find_minimal_aux_clauses(essential_clauses, essential_clauses_aux)
+                    if res and res['info'] == 'success':
+                        essential_clauses_aux = res['aux_cluases']
+                        solver_new = res['solver']
 
-                # cluases num filter
-                n_clauses = len(statements)
+                # filter clauses
+                n_clauses = len(essential_clauses | essential_clauses_aux)
                 if n_clauses < self.min_clauses_num:
                     logging.debug(f"Too few clauses: {n_clauses}")
                     continue
 
-                # get and filter proof
-                _, _, _, aux_points, _, _, proof_steps, = solver.proof.dep_graph.get_proof_steps([goal])
+                # get new proof
+                points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
+
+                #  filter proof
                 n_proof_steps = len(proof_steps)
                 if n_proof_steps < self.min_proof_steps:
                     logging.debug(f"Naive proof with length {n_proof_steps}")
                     continue
                 
-                # solution
-                solver.proof.goals = [goal]
+                # create new ProblemJGEX to assistant llm data generation
+                statements = []
+                for clause in solver_builder.problemJGEX.constructions:
+                    clause_str = str(clause)
+                    if clause_str in essential_clauses or clause_str in essential_clauses_aux:
+                        statements.append(clause_str)
+                fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                fl_problem = ProblemJGEX.from_text(fl_problem)
                 aux_points = [p.name for p in aux_points]
-                nl_solution = write_proof_steps(solver.proof, print_output=False)
+                nl_solution = write_proof_steps(solver_new.proof, print_output=False)
                 llm = self.llm_solution(fl_problem, aux_points, solver.proof)
-                # llm_nat_solution = self.llm_nat_solution(fl_problem, aux_points, solver.proof)
 
-                if len(aux_points) > 0:
-                    if not self.check_aux_predicates_valid(llm['llm_output']):
+                if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm['llm_output']):
                         continue
 
                 # check similarity
@@ -658,7 +651,7 @@ class GeometryGenerator:
                 #     continue
                 
                 generated_data.append({
-                    "fl_statement_src": fl_statement,
+                    # "fl_statement_src": fl_statement,
                     "n_clauses": n_clauses,
                     "fl_problem": str(fl_problem),
                     "nl_problem": "",
@@ -671,6 +664,7 @@ class GeometryGenerator:
                 })
             summary = {
                 'runtime': solver.run_infos['runtime'],
+                'checkgoals_runtime': checkgoals_runtime,
                 'n_samples': len(generated_data),
                 'goals': [re.search(r'\?\s*(\w+)', d['fl_problem']).group(1) for d in generated_data],
                 'first_predicate': [get_first_predicate(d['fl_problem']) for d in generated_data],
@@ -704,8 +698,9 @@ class GeometryGenerator:
                     summary_reporter.add(summary)
                     elapsed_time = time.time() - start_time
                     logging.info(
-                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
-                        f"Speed: {(elapsed_time)/all_data_len:.1f}s/sample. "
+                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                        f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
+                        f"Speed: {(elapsed_time)/all_data_len:2.0f}s/sample. "
                         f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
                     )
                 if all_data_len >= self.n_samples:
@@ -720,8 +715,9 @@ class GeometryGenerator:
                             summary_reporter.add(summary)
                             elapsed_time = time.time() - start_time
                             logging.info(
-                                f"Progress: [{all_data_len}/{self.n_samples}] ({len(data)} new) in {elapsed_time:.1f}s. "
-                                f"Speed: {all_data_len / (elapsed_time):.1f} samples/s. "
+                                f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                                f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
+                                f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
                                 f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
                             )
                         if all_data_len >= self.n_samples:
