@@ -216,9 +216,10 @@ class Matcher:
         variables_in_premise = set(premise[1:])
         variables_not_in_premise= list(set(variables) - variables_in_premise)
         for statement in statement_list:
-            args = [p.name for p in statement.args]
+            # args = [p.name for p in statement.args]
+            args = statement
             assert len(args) == 8
-            args = self.args_rearrange(args)
+            # args = self.args_rearrange(args)
             if args[0] != args[4]:
                 args_permutation = {
                     (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
@@ -269,7 +270,8 @@ class Matcher:
         variables_in_premise = set(premise[1:])
         variables_not_in_premise= list(set(variables) - variables_in_premise)
         for statement in statement_list:
-            args = [p.name for p in statement.args]
+            # args = [p.name for p in statement.args]
+            args = statement
             assert len(args) == 3
             args_permutation = {
                 (args[0], args[1], args[2]),
@@ -310,7 +312,8 @@ class Matcher:
         variables_in_premise = set(premise[1:])
         variables_not_in_premise= list(set(variables) - variables_in_premise)
         for statement in statement_list:
-            args = [p.name for p in statement.args]
+            # args = [p.name for p in statement.args]
+            args = statement
             assert len(args) == 6
             args_permutation = {
                 (args[0], args[1], args[2], args[3], args[4], args[5]),
@@ -394,7 +397,8 @@ class Matcher:
         variables_in_premise = set(conclusion[1:])
         variables_not_in_premise= list(set(variables) - variables_in_premise)
         for statement in statement_list:
-            args = [p.name for p in statement.args]
+            # args = [p.name for p in statement.args]
+            args = statement
             assert len(args) == 6
             args_permutation = {
                 (args[0], args[1], args[2], args[3], args[4], args[5]),
@@ -445,9 +449,10 @@ class Matcher:
         variables_in_premise = set(premise[1:])
         variables_not_in_premise= list(set(variables) - variables_in_premise)
         for statement in statement_list:
-            args = [p.name for p in statement.args]
+            # args = [p.name for p in statement.args]
+            args = statement
             assert len(args) == 8
-            args = self.args_rearrange(args)
+            # args = self.args_rearrange(args)
             if args[0] != args[4]:
                 args_permutation = {
                     (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
@@ -527,8 +532,8 @@ class Matcher:
             res = self.cache_simtri_premise_theorem(theorem, points)
         elif theorem.premises[0][0] == 'eqangle' or theorem.premises[0][0] == 'eqratio':
             res = self.cache_eq_premise_theorem(theorem, points)
-        # elif theorem.conclusions[0][0] == 'eqangle' or theorem.conclusions[0][0] == 'eqratio':
-        #     res = self.cache_eq_conclusion_theorem(theorem, points)
+        elif theorem.conclusions[0][0] == 'eqangle' or theorem.conclusions[0][0] == 'eqratio':
+            res = self.cache_eq_conclusion_theorem(theorem, points)
         elif theorem.premises[0][0] == 'midp':
             res = self.cache_midp_premise_theorem(theorem, points)
         else:

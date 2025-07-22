@@ -141,100 +141,45 @@ class DependencyGraph:
         point_coords = [(point.num.x, point.num.y) for point in points]
 
         angle_ids, ratio_ids = geometry.process_points(point_coords)
-        
-        angles = [(angle[0], points[angle[1]], points[angle[2]], points[angle[3]], points[angle[4]])for angle in angle_ids]
-        ratios = [(ratio[0], points[ratio[1]], points[ratio[2]], points[ratio[3]], points[ratio[4]])for ratio in ratio_ids]
 
-        # for (i, A) in enumerate(angles):
-        #     if close_enough(A[0], 0) or close_enough(A[0], np.pi):
-        #         continue
-        #     for B in angles[i + 1:]:
-        #         if not close_enough(A[0], B[0]):
-        #             break
-        #         if goal_filter('eqangle', [item.name for item in list(A[1:] + B[1:])]):
-        #             tokens = tuple(['eqangle']+[item.name for item in list(A[1:] + B[1:])])
-        #             pred = NAME_TO_PREDICATE[tokens[0]]
-        #             preparsed = pred.preparse(tokens[1:])
-        #             if preparsed[0] != preparsed[2] or preparsed[4] != preparsed[6] or preparsed[1] == preparsed[3] or preparsed[5] == preparsed[7]:
-        #                 continue
-        #             goal = Statement.from_tokens(tokens, self)
-        #             if goal:
-        #                 self.numerical_checked_eqangle.append(goal)
-        eqangles = geometry.findeqangle(point_coords, angle_ids)
+        eqangles = geometry.findeq(point_coords, angle_ids)
         for eqangle in eqangles:
-            tokens = ('eqangle', points[eqangle[0]].name, points[eqangle[1]].name, points[eqangle[2]].name, points[eqangle[3]].name, points[eqangle[4]].name, points[eqangle[5]].name, points[eqangle[6]].name, points[eqangle[7]].name)
-            goal = Statement.from_tokens(tokens, self)
-            if goal:
-                self.numerical_checked_eqangle.append(goal)
-            # tokens = [points[eqangle[0]].name, points[eqangle[1]].name, points[eqangle[2]].name, points[eqangle[3]].name, points[eqangle[4]].name, points[eqangle[5]].name, points[eqangle[6]].name, points[eqangle[7]].name]
-            # self.numerical_checked_eqangle.append(goal)
+            # tokens = ('eqangle', points[eqangle[0]].name, points[eqangle[1]].name, points[eqangle[2]].name, points[eqangle[3]].name, points[eqangle[4]].name, points[eqangle[5]].name, points[eqangle[6]].name, points[eqangle[7]].name)
+            # goal = Statement.from_tokens(tokens, self)
+            # if goal:
+            #     self.numerical_checked_eqangle.append(goal)
+            tokens = (points[eqangle[0]].name, points[eqangle[1]].name, points[eqangle[2]].name, points[eqangle[3]].name, points[eqangle[4]].name, points[eqangle[5]].name, points[eqangle[6]].name, points[eqangle[7]].name)
+            self.numerical_checked_eqangle.append(tokens)
 
         midpoints = geometry.findmidp(point_coords, ratio_ids)
         for midp in midpoints:
-            tokens = ('midp', points[midp[0]].name, points[midp[1]].name, points[midp[2]].name)
-            goal = Statement.from_tokens(tokens, self)
-            if goal:
-                self.numerical_checked_midp.append(goal)
-            # tokens = [ points[midp[0]].name, points[midp[1]].name, points[midp[2]].name]
-            # self.numerical_checked_midp.append(tokens)
+            # tokens = ('midp', points[midp[0]].name, points[midp[1]].name, points[midp[2]].name)
+            # goal = Statement.from_tokens(tokens, self)
+            # if goal:
+            #     self.numerical_checked_midp.append(goal)
+            tokens = (points[midp[0]].name, points[midp[1]].name, points[midp[2]].name)
+            self.numerical_checked_midp.append(tokens)
 
 
-        # eqratios = geometry.findeqratio(point_coords, ratio_ids)
-        # for eqratio in eqratios:
-        #     tokens = ('eqratio', points[eqratio[0]].name, points[eqratio[1]].name, points[eqratio[2]].name, points[eqratio[3]].name, points[eqratio[4]].name, points[eqratio[5]].name, points[eqratio[6]].name, points[eqratio[7]].name)
-        #     goal = Statement.from_tokens(tokens, self)
-        #     if goal:
-        #         self.numerical_checked_eqratio.append(goal)
+        eqratios = geometry.findeq(point_coords, ratio_ids)
+        for eqratio in eqratios:
+            # tokens = ('eqratio', points[eqratio[0]].name, points[eqratio[1]].name, points[eqratio[2]].name, points[eqratio[3]].name, points[eqratio[4]].name, points[eqratio[5]].name, points[eqratio[6]].name, points[eqratio[7]].name)
+            # goal = Statement.from_tokens(tokens, self)
+            # if goal:
+            #     self.numerical_checked_eqratio.append(goal)
+            tokens = (points[eqratio[0]].name, points[eqratio[1]].name, points[eqratio[2]].name, points[eqratio[3]].name, points[eqratio[4]].name, points[eqratio[5]].name, points[eqratio[6]].name, points[eqratio[7]].name)
+            self.numerical_checked_eqratio.append(tokens)
+        
+        simtris, simtrirs = geometry.findsimitri(point_coords, eqratios)
 
-        for (i, A) in enumerate(ratios):
-            for B in ratios[i + 1:]:
-                if not close_enough(A[0], B[0]):
-                    break
-                if goal_filter('eqratio', [item.name for item in list(A[1:] + B[1:])]):
-                    tokens = tuple(['eqratio']+[item.name for item in list(A[1:] + B[1:])])
-                    preparsed = self.args_rearrange(tokens[1:])
-
-                    if preparsed[0] != preparsed[2] or preparsed[4] != preparsed[6]:
-                        continue
-
-                    goal = Statement.from_tokens(tokens, self)
-                    if goal:
-                        self.numerical_checked_eqratio.append(goal)
-                    
-                    if preparsed[0] != preparsed[4] and (preparsed[1] == preparsed[3] or preparsed[5] == preparsed[7]):
-                        continue
-                    
-                    name2point = {item.name: item for item in list(A[1:] + B[1:])}
-                    parsedpoints = [name2point[item] for item in preparsed]
-                    
-                    if preparsed[5] != preparsed[7]:    
-                        ratio = parsedpoints[0].num.distance(parsedpoints[1].num)/parsedpoints[4].num.distance(parsedpoints[5].num)
-                        if close_enough(parsedpoints[1].num.distance(parsedpoints[3].num), ratio * parsedpoints[5].num.distance(parsedpoints[7].num)):
-                            if same_clock(parsedpoints[0].num, parsedpoints[1].num, parsedpoints[3].num, parsedpoints[4].num, parsedpoints[5].num, parsedpoints[7].num):
-                                tokens = ('simtri', parsedpoints[0].name, parsedpoints[1].name, parsedpoints[3].name, parsedpoints[4].name, parsedpoints[5].name, parsedpoints[7].name)
-                                goal = Statement.from_tokens(tokens, self)
-                                if goal:
-                                    self.numerical_checked_simtri.append(goal)
-                            if same_clock(parsedpoints[0].num, parsedpoints[1].num, parsedpoints[3].num, parsedpoints[4].num, parsedpoints[7].num, parsedpoints[5].num):
-                                tokens = ('simtrir', parsedpoints[0].name, parsedpoints[1].name, parsedpoints[3].name, parsedpoints[4].name, parsedpoints[5].name, parsedpoints[7].name)
-                                goal = Statement.from_tokens(tokens, self)
-                                if goal:
-                                    self.numerical_checked_simtrir.append(goal)
-
-                    if preparsed[0] == preparsed[4] and preparsed[3] != preparsed[7]: 
-                        ratio = parsedpoints[0].num.distance(parsedpoints[1].num)/parsedpoints[2].num.distance(parsedpoints[3].num)
-                        if close_enough(parsedpoints[1].num.distance(parsedpoints[5].num),ratio * parsedpoints[3].num.distance(parsedpoints[7].num)):
-                            if same_clock(parsedpoints[0].num, parsedpoints[1].num, parsedpoints[5].num, parsedpoints[2].num, parsedpoints[3].num, parsedpoints[7].num):
-                                tokens = ('simtri', parsedpoints[0].name, parsedpoints[1].name, parsedpoints[5].name, parsedpoints[2].name, parsedpoints[3].name, parsedpoints[7].name)
-                                goal = Statement.from_tokens(tokens, self)
-                                if goal:
-                                    self.numerical_checked_simtri.append(goal)
-                            if same_clock(parsedpoints[0].num, parsedpoints[1].num, parsedpoints[5].num, parsedpoints[2].num, parsedpoints[7].num, parsedpoints[3].num):
-                                tokens = ('simtrir', parsedpoints[0].name, parsedpoints[1].name, parsedpoints[5].name, parsedpoints[2].name, parsedpoints[3].name, parsedpoints[7].name)
-                                goal = Statement.from_tokens(tokens, self)
-                                if goal:
-                                    self.numerical_checked_simtrir.append(goal)
-
+        for simtri in simtris:
+            tokens = (points[simtri[0]].name, points[simtri[1]].name, points[simtri[2]].name, points[simtri[3]].name, points[simtri[4]].name, points[simtri[5]].name)
+            self.numerical_checked_simtri.append(tokens)
+        
+        for simtrir in simtrirs:
+            tokens = (points[simtrir[0]].name, points[simtrir[1]].name, points[simtrir[2]].name, points[simtrir[3]].name, points[simtrir[4]].name, points[simtrir[5]].name)
+            self.numerical_checked_simtrir.append(tokens)
+        
 
                         
         self.numerical_checked_eqangle = list(set(self.numerical_checked_eqangle))
@@ -372,7 +317,6 @@ class DependencyGraph:
             numercial_checked_aux,
             proof_steps,
         )
-
 
     def save_pyvis(self, *, path: Path, stars: Collection[Statement] = []):
         if stars:
