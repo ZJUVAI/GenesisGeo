@@ -547,11 +547,13 @@ class GeometryGenerator:
                     try:
                         solver_test = solver_builder_test.build(max_attempts=100)
                         if solver_test.run(timeout=self.timeout):
+                            new_goal = Statement.from_tokens((goal.predicate.NAME,) + goal.predicate.to_tokens(args),solver_test.proof.dep_graph)
                             minimal_aux_set = aux_subset_set
                             return {
                                 "info": 'success',
-                                "aux_cluases": minimal_aux_set,
+                                "aux_clauses": minimal_aux_set,
                                 "solver": solver_test,
+                                "goal": new_goal
                             }
                     except Exception as e:
                         logging.debug(f"Error: {e}")
@@ -602,7 +604,7 @@ class GeometryGenerator:
                     for p in aux_points:  
                         essential_clauses_aux.add(str(p.clause)) 
                     for p in points:
-                         # put all clauses with aux points into essential_clauses_aux for further filtering
+                        # put all clauses with aux points into essential_clauses_aux for further filtering
                         if str(p.clause) not in essential_clauses_aux:
                             essential_clauses.add(str(p.clause))
                     if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
@@ -611,8 +613,9 @@ class GeometryGenerator:
                     last_essential_clauses_aux_len = len(essential_clauses_aux)
                     res = find_minimal_aux_clauses(essential_clauses, essential_clauses_aux)
                     if res and res['info'] == 'success':
-                        essential_clauses_aux = res['aux_cluases']
+                        essential_clauses_aux = res['aux_clauses']
                         solver_new = res['solver']
+                        goal = res['goal']
 
                 # filter clauses
                 n_clauses = len(essential_clauses | essential_clauses_aux)
