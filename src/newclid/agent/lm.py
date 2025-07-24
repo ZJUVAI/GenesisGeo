@@ -29,10 +29,13 @@ if TYPE_CHECKING:
 
 
 class LMAgent(DeductiveAgent):
-    def __init__(self, model_path: Path):
+    def __init__(self, model_path: Path, decoding_size: int, beam_size: int, search_depth: int):
         self.rule_buffer: list[Rule] = []
         self.application_buffer: list[Dependency] = []
         self.any_new_statement_has_been_added = True
+        self.decoding_size = decoding_size
+        self.beam_size = beam_size
+        self.search_depth = search_depth
         
         # Set OpenAI's API key and API base to use vLLM's API server.
         openai_api_key = "EMPTY"
@@ -95,16 +98,16 @@ class LMAgent(DeductiveAgent):
         generated_output = self.model.generate(
             **model_inputs,
             max_new_tokens=100,
-            num_beams=8,
+            num_beams=self.decoding_size,
+            num_return_sequences=self.decoding_size,
             # num_beam_groups=5,
             # diversity_penalty=1.0,
-            num_return_sequences=8,
             # do_sample=True, 
             # # temperature=2, 
             # top_k=50, 
             # top_p=0.9, 
             pad_token_id=151643,
-            eos_token_id=2587, #' ;' #29, # self.tokenizer(['>']) = {'input_ids': [[29]], 'attention_mask': [[1]]}
+            eos_token_id=2587, #' ;' #29
             # bad_words_ids=bad_words_ids,
             return_dict_in_generate=True, 
             output_scores=True
@@ -114,9 +117,7 @@ class LMAgent(DeductiveAgent):
         aux_dsl = self.tokenizer.batch_decode(generated_output, skip_special_tokens=True)
         return aux_dsl, scores
     
-    def run(self, proof: "ProofState", rules: list[Rule], 
-            beam_size: int = 64, search_depth: int = 4, 
-            timeout: int = 3600
+    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600
         ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
         def proof_info(proof: "ProofState"):
@@ -141,11 +142,11 @@ class LMAgent(DeductiveAgent):
         self.run_ddar(proof, rules, t0, timeout)
 
         if not proof.check_goals():
-            beam_queue = BeamQueue(max_size=beam_size)
+            beam_queue = BeamQueue(max_size=self.beam_size)
             beam_queue.add(node=(self.problemJGEX, proof, '<aux>'), val=0)
             p_dsl = self.problem_to_dsl(self.problemJGEX, proof)
-            for depth in range(search_depth):
-                new_queue = BeamQueue(max_size=beam_size)  # to replace beam_queue.
+            for depth in range(self.search_depth):
+                new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
                 for prev_score, (problem, proof, a_dsl) in beam_queue:
                     # seek help from llm
 
@@ -154,7 +155,9 @@ class LMAgent(DeductiveAgent):
                     aux_dsl_list, scores = self.inference2(p_dsl, '<aux> x00')
                     for aux_dsl, score in zip(aux_dsl_list, scores):
                         try:
+                            # print(aux_dsl)
                             aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
+                            # print(aux)
                             if aux:
                                 new_problem = problem.with_more_construction(aux) # will recreate the problem
                                 new_proof = copy.deepcopy(proof)
@@ -171,6 +174,7 @@ class LMAgent(DeductiveAgent):
                     # a_dsl += ' x00'
                     # aux_dsl_list, scores = self.inference2(p_dsl, a_dsl)
                     # for aux_dsl, score in zip(aux_dsl_list, scores):
+                    #     print(aux_dsl)
                     #     # if time.time() - t0 > timeout: 
                     #     #     return proof_info(proof)
                     #     try:
@@ -232,7 +236,8 @@ class LMAgent(DeductiveAgent):
             segments = [seg.strip() for seg in segments if seg.strip()]  # 'coll a c e' , 'coll b d e'
             # result = [prefix] + segments
             if len(segments) > 2:
-                segments = segments[:2]
+                return
+                # segments = segments[:2]
             result = prefix + ' = '
             result_constructions = []
             for segment in segments:
@@ -361,7 +366,8 @@ class LMAgent(DeductiveAgent):
                     mapping = dict(zip(cdef.declare[1:], constr_sentence[1:]))
                 else:
                     assert len(constr_sentence) + len(construction.points) == len(cdef.declare)
-                    mapping = dict(zip(cdef.declare[1:], construction.points + constr_sentence[1:]))
+                    points = [p.split('@')[0] for p in construction.points]
+                    mapping = dict(zip(cdef.declare[1:], points + constr_sentence[1:]))
                 for points, bs in cdef.basics:
                     points = tuple([mapping[x] for x in points])
                     for p in points:
@@ -371,6 +377,7 @@ class LMAgent(DeductiveAgent):
                         p2deps[points].append(statement)
 
             points = construction.points
+            points = [p.split('@')[0] for p in points]
             while points:
                 p = points[0]
                 gr = group[p]

@@ -73,7 +73,7 @@ class GeometricSolver:
 
 
 class GeometricSolverBuilder:
-    def __init__(self, seed: int) -> None:
+    def __init__(self, seed: int = None) -> None:
         self.problemJGEX: Optional[ProblemJGEX] = None
         self._defs: Optional[dict[str, DefinitionJGEX]] = None
         self._rules: Optional[list[Rule]] = None
