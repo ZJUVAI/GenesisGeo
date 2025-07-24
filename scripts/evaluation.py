@@ -15,13 +15,13 @@ def solve_problem(args):
     """
     Process a single problem and return whether it was solved successfully along with the time taken.
     """
-    problem_name, problems_path, model_path = args
+    problem_name, problems_path, model_path, decoding_size, beam_size, search_depth = args
     start_time = time.time()
     try:
         solver = (
-            GeometricSolverBuilder(8)
+            GeometricSolverBuilder()
             .load_problem_from_file(problems_path, problem_name)
-            .with_deductive_agent(LMAgent(model_path))
+            .with_deductive_agent(LMAgent(model_path, decoding_size=decoding_size,beam_size=beam_size, search_depth=search_depth))
             .build()
         )
         is_solved = solver.run()
@@ -31,17 +31,8 @@ def solve_problem(args):
         print(f"Warning: solver crashed on problem '{problem_name}' : ({type(e)}) {e}")
         elapsed_time = time.time() - start_time 
         return (problem_name, False, elapsed_time)
-    # solver = (
-    #     GeometricSolverBuilder(8)
-    #     .load_problem_from_file(problems_path, problem_name)
-    #     .with_deductive_agent(LMAgent())
-    #     .build()
-    # )
-    # is_solved = solver.run()
-    # elapsed_time = time.time() - start_time
-    # return (problem_name, is_solved, elapsed_time) 
 
-def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4):
+def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4, decoding_size: int = 1, beam_size: int = 1, search_depth: int = 1):
     """
     Main function, read the file and execute tasks using ProcessPoolExecutor.
     
@@ -73,7 +64,7 @@ def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4):
     if max_workers == 1:
         # Single-threaded execution
         for problem_name in problem_names:
-            problem_name, is_solved, elapsed_time = solve_problem((problem_name, filepath, modelpath))
+            problem_name, is_solved, elapsed_time = solve_problem(problem_name, filepath, modelpath, decoding_size, beam_size, search_depth)
             solved_count += 1 if is_solved else 0
             processed_count += 1  
             total_time += elapsed_time 
@@ -88,7 +79,7 @@ def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4):
         # Multi-threaded execution using ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit tasks and collect futures
-            futures = {executor.submit(solve_problem, (name, filepath, modelpath)): name for name in problem_names}
+            futures = {executor.submit(solve_problem, (name, filepath, modelpath, decoding_size, beam_size, search_depth)): name for name in problem_names}
 
             # Process completed tasks
             for future in as_completed(futures):
@@ -119,15 +110,11 @@ if __name__ == "__main__":
                         help="Path to the problems dataset file")
     parser.add_argument("--model_path", type=str, help="Path to the model checkpoint")
     parser.add_argument("--max_workers", type=int, default=8, help="Number of worker processes to use")
+    parser.add_argument("--decoding_size", type=int, default=8)
+    parser.add_argument("--beam_size", type=int, default=64)
+    parser.add_argument("--search_depth", type=int, default=4)
     args = parser.parse_args()
+    
     problems_path = Path(args.problems_path)
     model_path = Path(args.model_path)
-    run_newclid(problems_path, model_path, max_workers=args.max_workers)
-
-    # problems_path = Path("problems_datasets/examples.txt")
-    # problems_path = Path("problems_datasets/imo_ag_30.txt")
-    # problems_path = Path("problems_datasets/dev7.txt")
-    # problems_path = Path("problems_datasets/dev_jgex.txt")
-    # # problems_path = Path("problems_datasets/dev.txt")
-    # model_path = "/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft10/checkpoint-10000"
-    # run_newclid(problems_path, max_workers=8)  # You can adjust the value of max_workers as needed
+    run_newclid(problems_path, model_path, max_workers=args.max_workers, decoding_size=args.decoding_size, beam_size=args.beam_size, search_depth=args.search_depth)
