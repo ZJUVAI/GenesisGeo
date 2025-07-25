@@ -20,7 +20,7 @@ def solve_problem(args):
     try:
         solver = (
             GeometricSolverBuilder()
-            .load_problem_from_file(problems_path, problem_name)
+            .load_problem_from_file(problems_path, problem_name)#, rename=True)
             .with_deductive_agent(LMAgent(model_path, decoding_size=decoding_size,beam_size=beam_size, search_depth=search_depth))
             .build()
         )
@@ -64,7 +64,7 @@ def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4, decoding_
     if max_workers == 1:
         # Single-threaded execution
         for problem_name in problem_names:
-            problem_name, is_solved, elapsed_time = solve_problem(problem_name, filepath, modelpath, decoding_size, beam_size, search_depth)
+            problem_name, is_solved, elapsed_time = solve_problem((problem_name, filepath, modelpath, decoding_size, beam_size, search_depth))
             solved_count += 1 if is_solved else 0
             processed_count += 1  
             total_time += elapsed_time 

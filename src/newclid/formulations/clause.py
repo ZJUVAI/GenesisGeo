@@ -31,7 +31,8 @@ class Clause(NamedTuple):
 
     def renamed(self, mp: dict[str, str]) -> Clause:
         return Clause(
-            tuple(mp[p] if p in mp else p for p in self.points),
+            # tuple(mp[p] if p in mp else p for p in self.points),
+            tuple(mp[p.split('@')[0]] + '@' + p.split('@')[1] if '@' in p and p.split('@')[0] in mp else mp[p] if p in mp else p for p in self.points),
             tuple(translate_sentence(mp, s) for s in self.sentences),
         )
 

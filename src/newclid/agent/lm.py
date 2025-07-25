@@ -174,7 +174,7 @@ class LMAgent(DeductiveAgent):
                     # a_dsl += ' x00'
                     # aux_dsl_list, scores = self.inference2(p_dsl, a_dsl)
                     # for aux_dsl, score in zip(aux_dsl_list, scores):
-                    #     print(aux_dsl)
+                    #     # print(aux_dsl)
                     #     # if time.time() - t0 > timeout: 
                     #     #     return proof_info(proof)
                     #     try:
@@ -366,7 +366,7 @@ class LMAgent(DeductiveAgent):
                     mapping = dict(zip(cdef.declare[1:], constr_sentence[1:]))
                 else:
                     assert len(constr_sentence) + len(construction.points) == len(cdef.declare)
-                    points = [p.split('@')[0] for p in construction.points]
+                    points = tuple(p.split('@')[0] for p in construction.points)
                     mapping = dict(zip(cdef.declare[1:], points + constr_sentence[1:]))
                 for points, bs in cdef.basics:
                     points = tuple([mapping[x] for x in points])
