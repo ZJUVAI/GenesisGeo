@@ -78,7 +78,8 @@ class LMAgent(DeductiveAgent):
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 torch_dtype="auto",
-                device_map="auto"
+                device_map="cuda",
+                attn_implementation='flash_attention_2', # 'eager' 'sdpa'
             )
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         messages = [
@@ -117,7 +118,7 @@ class LMAgent(DeductiveAgent):
         aux_dsl = self.tokenizer.batch_decode(generated_output, skip_special_tokens=True)
         return aux_dsl, scores
     
-    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600
+    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 1800
         ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
         def proof_info(proof: "ProofState"):
@@ -149,15 +150,15 @@ class LMAgent(DeductiveAgent):
                 new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
                 for prev_score, (problem, proof, a_dsl) in beam_queue:
                     # seek help from llm
+                    if time.time() - t0 > timeout:
+                        break
 
                     # Stragety 1: insert the aux string into problem and predict the next aux
                     p_dsl = self.problem_to_dsl(problem, proof)
                     aux_dsl_list, scores = self.inference2(p_dsl, '<aux> x00')
                     for aux_dsl, score in zip(aux_dsl_list, scores):
                         try:
-                            # print(aux_dsl)
                             aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
-                            # print(aux)
                             if aux:
                                 new_problem = problem.with_more_construction(aux) # will recreate the problem
                                 new_proof = copy.deepcopy(proof)

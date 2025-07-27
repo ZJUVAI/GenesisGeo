@@ -116,5 +116,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     problems_path = Path(args.problems_path)
-    model_path = Path(args.model_path)
+    model_path = Path(args.model_path).resolve()
     run_newclid(problems_path, model_path, max_workers=args.max_workers, decoding_size=args.decoding_size, beam_size=args.beam_size, search_depth=args.search_depth)
