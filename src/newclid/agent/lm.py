@@ -78,8 +78,8 @@ class LMAgent(DeductiveAgent):
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 torch_dtype="auto",
-                device_map="cuda",
-                attn_implementation='flash_attention_2', # 'eager' 'sdpa'
+                device_map="auto",#"sequential",
+                attn_implementation="flash_attention_2" # Sliding Window Attention is enabled but not implemented for others
             )
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         messages = [

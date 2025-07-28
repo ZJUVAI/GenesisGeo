@@ -527,7 +527,7 @@ class GeometryGenerator:
         return True
  
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
-        def find_minimal_aux_clauses(essential_clauses, essential_clauses_aux):
+        def find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, essential_clauses_aux):
             # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
             minimal_aux_set = set()
             # Search through subsets from size 0 to len-1 (excluding full set)
@@ -535,30 +535,28 @@ class GeometryGenerator:
                 for aux_subset in itertools.combinations(essential_clauses_aux, r):
                     aux_subset_set = set(aux_subset)
                     statements_test = []
-                    for clause in solver_builder.problemJGEX.constructions:
+                    for clause in all_constructions:
                         clause_str = str(clause)
                         if clause_str in essential_clauses or clause_str in aux_subset_set:
                             statements_test.append(clause_str)
-                    fl_problem_test = '; '.join(statements_test) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                    fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
                     
                     solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
                     solver_builder_test.with_deductive_agent(DDARN())
                     solver_builder_test.load_problem_from_txt(fl_problem_test)
                     try:
                         solver_test = solver_builder_test.build(max_attempts=100)
-                        if solver_test.run(timeout=self.timeout):
-                            new_goal = Statement.from_tokens((goal.predicate.NAME,) + goal.predicate.to_tokens(args),solver_test.proof.dep_graph)
-                            minimal_aux_set = aux_subset_set
-                            return {
-                                "info": 'success',
-                                "aux_clauses": minimal_aux_set,
-                                "solver": solver_test,
-                                "goal": new_goal
-                            }
                     except Exception as e:
                         logging.debug(f"Error: {e}")
+                        continue
+                    if solver_test.run(timeout=self.timeout):
+                        minimal_aux_set = aux_subset_set
+                        return {
+                            "info": 'success',
+                            "aux_clauses": minimal_aux_set,
+                            "solver": solver_test,
+                        }
             return {"info": 'failed'}
-
 
         try:
             """Process a single geometry problem."""
@@ -598,24 +596,22 @@ class GeometryGenerator:
                 last_essential_clauses_aux_len = float('inf')
                 while True:
                     # get proof and essential_clauses
-                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps([goal])
+                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
                     essential_clauses: set[str] = set()
                     essential_clauses_aux: set[str] = set()
                     for p in aux_points:  
                         essential_clauses_aux.add(str(p.clause)) 
                     for p in points:
-                        # put all clauses with aux points into essential_clauses_aux for further filtering
                         if str(p.clause) not in essential_clauses_aux:
                             essential_clauses.add(str(p.clause))
                     if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
                         break
                     last_essential_clauses_len = len(essential_clauses)
                     last_essential_clauses_aux_len = len(essential_clauses_aux)
-                    res = find_minimal_aux_clauses(essential_clauses, essential_clauses_aux)
-                    if res and res['info'] == 'success':
+                    res = find_minimal_aux_clauses([str(cons) for cons in solver_builder.problemJGEX.constructions], goal.to_str(), essential_clauses, essential_clauses_aux) 
+                    if res['info'] == 'success':
                         essential_clauses_aux = res['aux_clauses']
                         solver_new = res['solver']
-                        goal = res['goal']
 
                 # filter clauses
                 n_clauses = len(essential_clauses | essential_clauses_aux)
@@ -642,7 +638,7 @@ class GeometryGenerator:
                 fl_problem = ProblemJGEX.from_text(fl_problem)
                 aux_points = [p.name for p in aux_points]
                 nl_solution = write_proof_steps(solver_new.proof, print_output=False)
-                llm = self.llm_solution(fl_problem, aux_points, solver.proof)
+                llm = self.llm_solution(fl_problem, aux_points, solver_new.proof)
 
                 if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm['llm_output']):
                         continue
@@ -675,7 +671,6 @@ class GeometryGenerator:
                 'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
                 'n_filtered_samples': n_filtered_samples
             }
-
             return generated_data, summary
         except Exception as e:
             logging.info(f"Error generating problem: {e}")
