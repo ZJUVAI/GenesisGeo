@@ -529,61 +529,32 @@ class GeometryGenerator:
     
     def find_minimal_aux_clauses(self, all_constructions, goal_str, essential_clauses, essential_clauses_aux):
         # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
-        for aux_subset in itertools.combinations(essential_clauses_aux, len(essential_clauses_aux)-1):
-            aux_subset_set = set(aux_subset)
-            statements_test = []
-            for clause in all_constructions:
-                clause_str = str(clause)
-                if clause_str in essential_clauses or clause_str in aux_subset_set:
-                    statements_test.append(clause_str)
-            fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
-            
-            solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
-            solver_builder_test.with_deductive_agent(DDARN())
-            solver_builder_test.load_problem_from_txt(fl_problem_test)
-            try:
-                solver_test = solver_builder_test.build(max_attempts=1000)
-            except Exception as e:
-                logging.debug(f"Error: {e}")
-                continue
-            if solver_test.run(timeout=self.timeout):
-                if len(aux_subset_set) > 0:
-                    return self.find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, list(aux_subset_set))
-                else:
-                    return essential_clauses, list(aux_subset_set)
+        for r in range(len(essential_clauses_aux)):
+            for aux_subset in itertools.combinations(essential_clauses_aux, r):
+                aux_subset_set = set(aux_subset)
+                statements_test = []
+                for clause in all_constructions:
+                    clause_str = str(clause)
+                    if clause_str in essential_clauses or clause_str in aux_subset_set:
+                        statements_test.append(clause_str)
+                fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
+                
+                solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
+                solver_builder_test.with_deductive_agent(DDARN())
+                solver_builder_test.load_problem_from_txt(fl_problem_test)
+                try:
+                    solver_test = solver_builder_test.build(max_attempts=1000)
+                except Exception as e:
+                    logging.debug(f"Error: {e}")
+                    continue
+                if solver_test.run(timeout=self.timeout):
+                    if len(aux_subset_set) > 0:
+                        return self.find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, list(aux_subset_set))
+                    else:
+                        return essential_clauses, list(aux_subset_set)
         return essential_clauses, essential_clauses_aux
 
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
-        def find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, essential_clauses_aux):
-            # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
-            # Search through subsets from size 0 to len-1 (excluding full set)
-            for r in range(len(essential_clauses_aux)):
-                for aux_subset in itertools.combinations(essential_clauses_aux, r):
-                    aux_subset_set = set(aux_subset)
-                    statements_test = []
-                    for clause in all_constructions:
-                        clause_str = str(clause)
-                        if clause_str in essential_clauses or clause_str in aux_subset_set:
-                            statements_test.append(clause_str)
-                    fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
-                    
-                    solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
-                    solver_builder_test.with_deductive_agent(DDARN())
-                    solver_builder_test.load_problem_from_txt(fl_problem_test)
-                    try:
-                        solver_test = solver_builder_test.build(max_attempts=100)
-                    except Exception as e:
-                        logging.debug(f"Error: {e}")
-                        continue
-                    if solver_test.run(timeout=self.timeout):
-                        minimal_aux_set = aux_subset_set
-                        return {
-                            "info": 'success',
-                            "aux_clauses": minimal_aux_set,
-                            "solver": solver_test,
-                        }
-            return {"info": 'failed'}
-
         try:
             """Process a single geometry problem."""
             pid, fl_statement = args
