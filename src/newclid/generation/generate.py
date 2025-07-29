@@ -13,6 +13,7 @@ import numpy as np
 from millify import millify
 import multiprocessing
 import copy
+import string
 
 from newclid.configs import default_defs_path, default_rules_path
 from newclid.formulations.definition import DefinitionJGEX
@@ -29,7 +30,7 @@ from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.formulations.clause import translate_sentence
 from newclid.numerical import close_enough
 from newclid.generation.output_summary import Summary, get_first_predicate
-
+from newclid.dependencies.dependency import IN_PREMISES, NUMERICAL_CHECK, Dependency
 
 class GeometryGenerator: 
     def __init__(self, max_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600, filteration_rate=0.6):
@@ -417,6 +418,222 @@ class GeometryGenerator:
             # "llm_output": data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
             "llm_output": data_aux + data_numerical_check + data_proof,
         }
+    
+    def llm_solution_renamed(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
+        def get_apha_geo_solver_var(va_idx):
+            letter_part = string.ascii_lowercase[va_idx % 26]
+            number_part = va_idx // 26
+
+            # Prepare the point name
+            if number_part == 0:
+                # For the first cycle (A-Z), we don't add a number part
+                point_name = letter_part
+            else:
+                # For subsequent cycles, add the number part (reduced by 1 to start from 0)
+                point_name = f"{letter_part}{number_part - 1}"
+
+            return point_name
+        
+        def statement2str_with_mapping(statement: Statement, mp):
+            res = [statement.predicate.NAME] + [mp[arg.name] if isinstance(arg, Point) else str(arg) for arg in statement.args]
+            return " ".join(res)
+
+        def get_all_premise(problem):
+            defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
+            data_tmp = defaultdict(list)
+            for construction in problem.constructions:
+                group = {}
+                p2deps = defaultdict(list)
+                for constr_sentence in construction.sentences:
+                    cdef = defs[constr_sentence[0]]
+                    if len(constr_sentence) == len(cdef.declare):
+                        mapping = dict(zip(cdef.declare[1:], constr_sentence[1:]))
+                    else:
+                        assert len(constr_sentence) + len(construction.points) == len(cdef.declare)
+                        mapping = dict(zip(cdef.declare[1:], construction.points + constr_sentence[1:]))
+                    for points, bs in cdef.basics:
+                        points = tuple([mapping[x] for x in points])
+                        for p in points:
+                            group[p] = points
+                        for b in bs:
+                            statement = Statement.from_tokens(translate_sentence(mapping, b), proof_state.dep_graph)
+                            p2deps[points].append(statement)
+
+                points = construction.points
+                while points:
+                    p = points[0]
+                    gr = group[p]
+                    points = [x for x in points if x not in gr]
+
+                    deps = []
+                    for dep in p2deps[gr]:
+                        deps.append(dep)
+                    data_tmp[' '.join(gr)] = deps
+            return data_tmp
+        
+        def get_essential_points_and_premise(premises, proof_deps, points, aux_points):
+            # essential_premises
+            essential_premises = []
+            for line in premises:
+                essential_premises.append(line.statement)
+            # essential_points points
+            essential_points = set()
+            for line in proof_deps:
+                for arg in line.statement.args:
+                    if isinstance(arg, Point):
+                        essential_points.add(arg.name)
+            points = set([p.name for p in points]) & essential_points
+            aux_points = set([p.name for p in aux_points]) & essential_points
+            return points, aux_points, essential_premises, essential_points
+        
+        def rediger_new_format(dep, mp, dep_idx) -> str:
+            """Generate proof step in new format: statement [id] rule_id [required_statement_ids]"""
+            for statement in (dep.statement,) + dep.why:
+                statemtn_str = statement2str_with_mapping(statement, mp)
+                if statemtn_str not in dep_idx:
+                    dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
+            
+            # Extract rule ID from reason string and handle special cases
+            reason = dep.reason
+            if "Ratio Chasing" in reason or reason == "Ratio":
+                rule_id = "a00"
+            elif "Angle Chasing" in reason or reason == "Angle":
+                rule_id = "a01"
+            elif "Shortcut Derivation" in reason or reason == "Shortcut":
+                rule_id = "r99"
+            elif reason and ' ' in reason:
+                rule_id = reason.split()[0]
+            else:
+                rule_id = reason if reason else "unknown"
+            
+            # Generate new format: statement [statement_id] rule_id [premise_ids]
+            premise_ids = ' '.join(f"[{dep_idx[statement2str_with_mapping(premise, mp)]}]" for premise in dep.why)
+            conclusion_str = statement2str_with_mapping(dep.statement, mp)
+            return f"{conclusion_str} [{dep_idx[conclusion_str]}] {rule_id} {premise_ids}".strip()
+
+        dep_idx: dict[str, str] = {}
+        # get proof info
+        goals = [goal for goal in proof_state.goals if goal.check()]
+        (
+            points,
+            premises,
+            numercial_checked_premises,
+            aux_points,
+            aux,
+            numercial_checked_aux,
+            proof_steps,
+        ) = proof_state.dep_graph.get_proof_steps(goals)
+        
+        # find essential_premises
+        all_premise = get_all_premise(problem) # all premises from problem
+        essential_points, essential_aux_points, essential_premises, _hhh = get_essential_points_and_premise(premises, proof_state.dep_graph.proof_deps(goals), points, aux_points) # only included in proof steps
+        # mapping
+        mp: dict[str, str] = {}
+        for k, v in all_premise.items():
+            kps = k.split(' ')
+            if any(p in essential_points for p in kps):
+                for dep in v:
+                    if dep in essential_premises:
+                        for arg in dep.args:
+                            if isinstance(arg, Point) and arg.name not in mp:
+                                mp[arg.name] = get_apha_geo_solver_var(len(mp))
+                for p in kps:
+                    if p not in mp:
+                        mp[p] = get_apha_geo_solver_var(len(mp))
+                
+        for k, v in all_premise.items():
+            ps = k.split(' ')
+            if any(p in essential_aux_points for p in ps):
+                for p in ps:
+                    if p not in mp:
+                        mp[p] = get_apha_geo_solver_var(len(mp))
+        
+        # <problem> </problem>
+        try:
+            string_premise = []
+            for k, v in all_premise.items():
+                # if not all(p in essential_aux_points for p in k.split(' ')):
+                if any(p in essential_points for p in k.split(' ')):
+                    k_renamed = " ".join(mp[p] for p in k.split(' '))
+                    tmp_string = k_renamed + ' : '
+                    for dep in v:
+                        if dep in essential_premises: # only select useful premise and free points withou useful premises
+                            dep_str_renamed = statement2str_with_mapping(dep, mp)
+                            if dep_str_renamed not in dep_idx:
+                                dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
+                            tmp_string += dep_str_renamed + f' [{dep_idx[dep_str_renamed]}] '
+                    string_premise.append(tmp_string)
+            data_problem = '<problem> '
+            data_problem += ' ; '.join([s.strip() for s in string_premise]) + ' ? '
+            data_problem += ' ;'.join([statement2str_with_mapping(goal, mp) for goal in proof_state.goals])
+            data_problem += ' </problem>'
+
+            # <aux> </aux>
+            data_aux = ''
+            string_aux = []
+            for k, v in all_premise.items():
+                # if all(p in aux_points for p in k.split(' ')):
+                if all(p in essential_aux_points for p in k.split(' ')):
+                    k_renamed = " ".join(mp[p] for p in k.split(' '))
+                    tmp_string = 'x00 ' + k_renamed + ' : '
+                    for dep in v:
+                        if dep in essential_premises: # free points withou useful premises
+                            dep_str_renamed = statement2str_with_mapping(dep, mp)
+                            if dep_str_renamed not in dep_idx:
+                                dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
+                            tmp_string += dep_str_renamed + f' [{dep_idx[dep_str_renamed]}] '
+                    string_aux.append(tmp_string)
+            if len(string_aux) > 0:
+                data_aux += '<aux> '
+                data_aux += ' ; '.join([s.strip() for s in string_aux])
+                data_aux += ' ; </aux> '
+
+            # <numerical_check> </numerical_check>
+            numerical_check_items = []
+            # numercial_checked_premises
+            for line in numercial_checked_premises:
+                statemtn_str = statement2str_with_mapping(line.statement, mp)
+                if statemtn_str not in dep_idx:
+                    dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
+            sorted_numercial_checked_premises = sorted(numercial_checked_premises, key=lambda line: dep_idx[statement2str_with_mapping(line.statement, mp)])
+            for line in sorted_numercial_checked_premises:
+                statemtn_str = statement2str_with_mapping(line.statement, mp)
+                numerical_check_items.append(f"{statemtn_str} [{dep_idx[statemtn_str]}]")
+            # numercial_checked_premises
+            for line in numercial_checked_aux:
+                statemtn_str = statement2str_with_mapping(line.statement, mp)
+                if statemtn_str not in dep_idx:
+                    dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
+            sorted_numercial_checked_aux = sorted(numercial_checked_aux, key=lambda line: dep_idx[statement2str_with_mapping(line.statement, mp)])
+            for line in sorted_numercial_checked_aux:
+                statemtn_str = statement2str_with_mapping(line.statement, mp)
+                numerical_check_items.append(f"{statemtn_str} [{dep_idx[statemtn_str]}]")
+            if len(numerical_check_items) > 0:
+                numerical_check = "<numerical_check> " + " ; ".join(numerical_check_items) + " ; </numerical_check>"
+            else:
+                numerical_check = ""
+
+            # <proof> </proof>
+            proof = "<proof> "
+            proof_steps_formatted = []
+            for k, line in enumerate(proof_steps):
+                if NUMERICAL_CHECK not in line.reason and IN_PREMISES not in line:
+                    proof_steps_formatted.append(rediger_new_format(line, mp, dep_idx))
+            proof += " ; ".join(proof_steps_formatted) + " ; </proof>"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(essential_points)
+            print(essential_aux_points)
+            print(essential_premises)
+            print(_hhh)
+            print(mp)
+            print(all_premise)
+            # import pdb; pdb.set_trace()
+        return {
+            "llm_input": data_problem,
+            "llm_output": data_aux + numerical_check + proof,
+        }
 
     def llm_nat_solution(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
         defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
@@ -527,34 +744,39 @@ class GeometryGenerator:
                             return False
         return True
     
-    def find_minimal_aux_clauses(self, all_constructions, goal_str, essential_clauses, essential_clauses_aux):
-        # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
-        for r in range(len(essential_clauses_aux)):
-            for aux_subset in itertools.combinations(essential_clauses_aux, r):
-                aux_subset_set = set(aux_subset)
-                statements_test = []
-                for clause in all_constructions:
-                    clause_str = str(clause)
-                    if clause_str in essential_clauses or clause_str in aux_subset_set:
-                        statements_test.append(clause_str)
-                fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
-                
-                solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
-                solver_builder_test.with_deductive_agent(DDARN())
-                solver_builder_test.load_problem_from_txt(fl_problem_test)
-                try:
-                    solver_test = solver_builder_test.build(max_attempts=1000)
-                except Exception as e:
-                    logging.debug(f"Error: {e}")
-                    continue
-                if solver_test.run(timeout=self.timeout):
-                    if len(aux_subset_set) > 0:
-                        return self.find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, list(aux_subset_set))
-                    else:
-                        return essential_clauses, list(aux_subset_set)
-        return essential_clauses, essential_clauses_aux
-
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
+        def find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, essential_clauses_aux):
+            # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
+            minimal_aux_set = set()
+            # Search through subsets from size 0 to len-1 (excluding full set)
+            for r in range(len(essential_clauses_aux)):
+                for aux_subset in itertools.combinations(essential_clauses_aux, r):
+                    aux_subset_set = set(aux_subset)
+                    statements_test = []
+                    for clause in all_constructions:
+                        clause_str = str(clause)
+                        if clause_str in essential_clauses or clause_str in aux_subset_set:
+                            statements_test.append(clause_str)
+                    fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
+
+                    solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
+                    solver_builder_test.with_deductive_agent(DDARN())
+                    solver_builder_test.load_problem_from_txt(fl_problem_test)
+                    try:
+                        solver_test = solver_builder_test.build(max_attempts=100)
+                    except Exception as e:
+                        logging.debug(f"Error: {e}")
+                        continue
+                    if solver_test.run(timeout=self.timeout):
+                        minimal_aux_set = aux_subset_set
+                        return {
+                            "info": 'success',
+                            "aux_clauses": minimal_aux_set,
+                            "solver": solver_test,
+                            "problem": solver_builder_test.problemJGEX
+                        }
+            return {"info": 'failed'}
+        
         try:
             """Process a single geometry problem."""
             pid, fl_statement = args
@@ -585,36 +807,34 @@ class GeometryGenerator:
             proofs_of_used_rules = {}
             generated_data = []
             for goal in possible_goals:
+                
+                # find minimal aux clauses
+                solver.proof.goals = [goal]
+                solver_new = solver
+                problem_new = str(solver_builder.problemJGEX) + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                problem_new = ProblemJGEX.from_text(problem_new)
 
-                points, _, _, aux_points, _, _, proof_steps = solver.proof.dep_graph.get_proof_steps([goal])
-                essential_clauses: set[str] = set()
-                essential_clauses_aux: set[str] = set()
-                for p in aux_points:  
-                    essential_clauses_aux.add(str(p.clause)) 
-                for p in points:
-                    if str(p.clause) not in essential_clauses_aux:
-                        essential_clauses.add(str(p.clause))
-
-                if len(essential_clauses_aux) > 0:
-                    essential_clauses, essential_clauses_aux = self.find_minimal_aux_clauses([str(cons) for cons in solver_builder.problemJGEX.constructions], goal.to_str(), list(essential_clauses), list(essential_clauses_aux))
-                    # find minimal_aux_clauses, then recreate solver
-                    essential_clauses = set(essential_clauses)
-                    essential_clauses_aux = set(essential_clauses_aux)
-                    clauses_new = []
-                    for clause in [str(cons) for cons in solver_builder.problemJGEX.constructions]:
-                        clause_str = str(clause)
-                        if clause_str in essential_clauses or clause_str in essential_clauses_aux:
-                            clauses_new.append(clause_str)
-                    fl_problem_new = '; '.join(clauses_new) + ' ? ' + goal.to_str()
-                    try:
-                        solver_new = GeometricSolverBuilder().load_problem_from_txt(fl_problem_new).build(max_attempts=1000)
-                    except Exception as e:
-                        logging.debug(f"Error: {e}")
-                    if not solver_new.run(timeout=self.timeout):     
-                        continue
-                else:
-                    solver.proof.goals = [goal]
-                    solver_new = solver
+                last_essential_clauses_len = float('inf')
+                last_essential_clauses_aux_len = float('inf')
+                while True:
+                    # get proof and essential_clauses
+                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
+                    essential_clauses: set[str] = set()
+                    essential_clauses_aux: set[str] = set()
+                    for p in aux_points:  
+                        essential_clauses_aux.add(str(p.clause)) 
+                    for p in points:
+                        if str(p.clause) not in essential_clauses_aux:
+                            essential_clauses.add(str(p.clause))
+                    if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
+                        break
+                    last_essential_clauses_len = len(essential_clauses)
+                    last_essential_clauses_aux_len = len(essential_clauses_aux)
+                    res = find_minimal_aux_clauses([str(cons) for cons in solver_builder.problemJGEX.constructions], goal.to_str(), essential_clauses, essential_clauses_aux) 
+                    if res['info'] == 'success':
+                        essential_clauses_aux = res['aux_clauses']
+                        solver_new = res['solver']
+                        problem_new = res['problem']
 
                 # filter clauses
                 n_clauses = len(essential_clauses | essential_clauses_aux)
@@ -632,16 +852,17 @@ class GeometryGenerator:
                     continue
                 
                 # create new ProblemJGEX to assistant llm data generation
-                statements = []
-                for clause in solver_builder.problemJGEX.constructions:
-                    clause_str = str(clause)
-                    if clause_str in essential_clauses or clause_str in essential_clauses_aux:
-                        statements.append(clause_str)
-                fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
-                fl_problem = ProblemJGEX.from_text(fl_problem)
+                # statements = []
+                # for clause in solver_builder.problemJGEX.constructions:
+                #     clause_str = str(clause)
+                #     if clause_str in essential_clauses or clause_str in essential_clauses_aux:
+                #         statements.append(clause_str)
+                # fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
+                # fl_problem_new = ProblemJGEX.from_text(fl_problem)
                 aux_points = [p.name for p in aux_points]
                 nl_solution = write_proof_steps(solver_new.proof, print_output=False)
-                llm = self.llm_solution(fl_problem, aux_points, solver_new.proof)
+                llm = self.llm_solution(problem_new, aux_points, solver_new.proof)
+                llm_remamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
 
                 if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm['llm_output']):
                         continue
@@ -655,7 +876,7 @@ class GeometryGenerator:
                 generated_data.append({
                     # "fl_statement_src": fl_statement,
                     "n_clauses": n_clauses,
-                    "fl_problem": str(fl_problem),
+                    "fl_problem": str(problem_new),
                     "nl_problem": "",
                     "n_proof_steps": n_proof_steps,
                     # "nl_solution": nl_solution,
@@ -663,7 +884,10 @@ class GeometryGenerator:
                     "llm_input": llm['llm_input'],
                     "llm_output": llm['llm_output'],
                     # "llm_nat_solution": llm_nat_solution,
+                    "llm_input_renamed": llm_remamed['llm_input'],
+                    "llm_output_renamed": llm_remamed['llm_output'],
                 })
+                # import pdb; pdb.set_trace()
             summary = {
                 'runtime': solver.run_infos['runtime'],
                 'checkgoals_runtime': checkgoals_runtime,
@@ -677,8 +901,8 @@ class GeometryGenerator:
             return generated_data, summary
         except Exception as e:
             logging.info(f"Error generating problem: {e}")
-            # import traceback
-            # traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             return [], {}
 
     def generate_problems(self):
