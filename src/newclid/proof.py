@@ -126,7 +126,7 @@ class ProofState:
         new_points = self.symbols_graph.names2points(point_names)
         for p in new_points:
             if p in existing_points:
-                raise Exception("The construction is illegal")
+                raise Exception(f"The new points is already used. existing points: {existing_points}. construction: {construction}")
             p.clause = construction
 
         # draw
@@ -135,7 +135,7 @@ class ProofState:
             for n in numerics:
                 args: list[Union[PointNum, str]] = []
                 for t in n[1:]:
-                    if str.isalpha(t[0]):
+                    if str.isalpha(t[0]): # a1 => a                      
                         args.append(self.symbols_graph.names2points([t])[0].num)
                     else:
                         args.append(t)

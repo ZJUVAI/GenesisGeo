@@ -12,6 +12,7 @@ from collections import defaultdict
 import numpy as np
 from millify import millify
 import multiprocessing
+import copy
 
 from newclid.configs import default_defs_path, default_rules_path
 from newclid.formulations.definition import DefinitionJGEX
@@ -525,11 +526,36 @@ class GeometryGenerator:
                             logging.debug(f"Invalid auxiliary predicate: {parts[0]}")
                             return False
         return True
- 
+    
+    def find_minimal_aux_clauses(self, all_constructions, goal_str, essential_clauses, essential_clauses_aux):
+        # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
+        for aux_subset in itertools.combinations(essential_clauses_aux, len(essential_clauses_aux)-1):
+            aux_subset_set = set(aux_subset)
+            statements_test = []
+            for clause in all_constructions:
+                clause_str = str(clause)
+                if clause_str in essential_clauses or clause_str in aux_subset_set:
+                    statements_test.append(clause_str)
+            fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
+            
+            solver_builder_test = GeometricSolverBuilder(seed=random.randint(0, 998244353))
+            solver_builder_test.with_deductive_agent(DDARN())
+            solver_builder_test.load_problem_from_txt(fl_problem_test)
+            try:
+                solver_test = solver_builder_test.build(max_attempts=1000)
+            except Exception as e:
+                logging.debug(f"Error: {e}")
+                continue
+            if solver_test.run(timeout=self.timeout):
+                if len(aux_subset_set) > 0:
+                    return self.find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, list(aux_subset_set))
+                else:
+                    return essential_clauses, list(aux_subset_set)
+        return essential_clauses, essential_clauses_aux
+
     def process_single_problem(self, args: tuple) -> tuple[list, dict]:
         def find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, essential_clauses_aux):
             # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
-            minimal_aux_set = set()
             # Search through subsets from size 0 to len-1 (excluding full set)
             for r in range(len(essential_clauses_aux)):
                 for aux_subset in itertools.combinations(essential_clauses_aux, r):
@@ -588,30 +614,36 @@ class GeometryGenerator:
             proofs_of_used_rules = {}
             generated_data = []
             for goal in possible_goals:
-                
-                # find minimal aux clauses
-                solver.proof.goals = [goal]
-                solver_new = solver
-                last_essential_clauses_len = float('inf')
-                last_essential_clauses_aux_len = float('inf')
-                while True:
-                    # get proof and essential_clauses
-                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
-                    essential_clauses: set[str] = set()
-                    essential_clauses_aux: set[str] = set()
-                    for p in aux_points:  
-                        essential_clauses_aux.add(str(p.clause)) 
-                    for p in points:
-                        if str(p.clause) not in essential_clauses_aux:
-                            essential_clauses.add(str(p.clause))
-                    if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
-                        break
-                    last_essential_clauses_len = len(essential_clauses)
-                    last_essential_clauses_aux_len = len(essential_clauses_aux)
-                    res = find_minimal_aux_clauses([str(cons) for cons in solver_builder.problemJGEX.constructions], goal.to_str(), essential_clauses, essential_clauses_aux) 
-                    if res['info'] == 'success':
-                        essential_clauses_aux = res['aux_clauses']
-                        solver_new = res['solver']
+
+                points, _, _, aux_points, _, _, proof_steps = solver.proof.dep_graph.get_proof_steps([goal])
+                essential_clauses: set[str] = set()
+                essential_clauses_aux: set[str] = set()
+                for p in aux_points:  
+                    essential_clauses_aux.add(str(p.clause)) 
+                for p in points:
+                    if str(p.clause) not in essential_clauses_aux:
+                        essential_clauses.add(str(p.clause))
+
+                if len(essential_clauses_aux) > 0:
+                    essential_clauses, essential_clauses_aux = self.find_minimal_aux_clauses([str(cons) for cons in solver_builder.problemJGEX.constructions], goal.to_str(), list(essential_clauses), list(essential_clauses_aux))
+                    # find minimal_aux_clauses, then recreate solver
+                    essential_clauses = set(essential_clauses)
+                    essential_clauses_aux = set(essential_clauses_aux)
+                    clauses_new = []
+                    for clause in [str(cons) for cons in solver_builder.problemJGEX.constructions]:
+                        clause_str = str(clause)
+                        if clause_str in essential_clauses or clause_str in essential_clauses_aux:
+                            clauses_new.append(clause_str)
+                    fl_problem_new = '; '.join(clauses_new) + ' ? ' + goal.to_str()
+                    try:
+                        solver_new = GeometricSolverBuilder().load_problem_from_txt(fl_problem_new).build(max_attempts=1000)
+                    except Exception as e:
+                        logging.debug(f"Error: {e}")
+                    if not solver_new.run(timeout=self.timeout):     
+                        continue
+                else:
+                    solver.proof.goals = [goal]
+                    solver_new = solver
 
                 # filter clauses
                 n_clauses = len(essential_clauses | essential_clauses_aux)
@@ -674,6 +706,8 @@ class GeometryGenerator:
             return generated_data, summary
         except Exception as e:
             logging.info(f"Error generating problem: {e}")
+            # import traceback
+            # traceback.print_exc()
             return [], {}
 
     def generate_problems(self):
@@ -749,7 +783,7 @@ def main():
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
     parser.add_argument("--max_clauses", required=False, type=int, default=5)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
-    parser.add_argument("--min_clauses_num", required=False, type=int, default=3)
+    parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
     parser.add_argument("--n_threads", required=False, type=int, default=1)
     parser.add_argument("--n_samples", required=False, type=int, default=100)
     parser.add_argument("--dir", required=False, default="dataset")
