@@ -866,7 +866,7 @@ class GeometryGenerator:
 
                 if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm['llm_output']):
                         continue
-                if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm['llm_output_renamed']):
+                if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm_remamed['llm_output']):
                         continue
 
                 # check similarity
