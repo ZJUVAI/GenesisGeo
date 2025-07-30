@@ -444,6 +444,7 @@ class GeometryGenerator:
             for construction in problem.constructions:
                 group = {}
                 p2deps = defaultdict(list)
+                points_in_basic_order = []
                 for constr_sentence in construction.sentences:
                     cdef = defs[constr_sentence[0]]
                     if len(constr_sentence) == len(cdef.declare):
@@ -454,12 +455,13 @@ class GeometryGenerator:
                     for points, bs in cdef.basics:
                         points = tuple([mapping[x] for x in points])
                         for p in points:
+                            points_in_basic_order.append(p)
                             group[p] = points
                         for b in bs:
                             statement = Statement.from_tokens(translate_sentence(mapping, b), proof_state.dep_graph)
                             p2deps[points].append(statement)
 
-                points = construction.points
+                points = points_in_basic_order
                 while points:
                     p = points[0]
                     gr = group[p]
@@ -560,7 +562,7 @@ class GeometryGenerator:
                             dep_str_renamed = statement2str_with_mapping(dep, mp)
                             if dep_str_renamed not in dep_idx:
                                 dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
-                            tmp_string = dep_str_renamed + f' [{dep_idx[dep_str_renamed]}] '
+                            tmp_string += dep_str_renamed + f' [{dep_idx[dep_str_renamed]}] '
                     if tmp_string == "":
                         # if this premise is useless, free all points in it
                         for p in k.split(' '):
