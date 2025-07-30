@@ -554,15 +554,21 @@ class GeometryGenerator:
             for k, v in all_premise.items():
                 # if not all(p in essential_aux_points for p in k.split(' ')):
                 if any(p in essential_points for p in k.split(' ')):
-                    k_renamed = " ".join(mp[p] for p in k.split(' '))
-                    tmp_string = k_renamed + ' : '
+                    tmp_string = ""
                     for dep in v:
                         if dep in essential_premises: # only select useful premise and free points withou useful premises
                             dep_str_renamed = statement2str_with_mapping(dep, mp)
                             if dep_str_renamed not in dep_idx:
                                 dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
-                            tmp_string += dep_str_renamed + f' [{dep_idx[dep_str_renamed]}] '
-                    string_premise.append(tmp_string)
+                            tmp_string = dep_str_renamed + f' [{dep_idx[dep_str_renamed]}] '
+                    if tmp_string == "":
+                        # if this premise is useless, free all points in it
+                        for p in k.split(' '):
+                            string_premise.append(mp[p] + " : ")
+                    else:
+                        k_renamed = " ".join(mp[p] for p in k.split(' '))
+                        tmp_string = k_renamed + ' : ' + tmp_string
+                        string_premise.append(tmp_string)
             data_problem = '<problem> '
             data_problem += ' ; '.join([s.strip() for s in string_premise]) + ' ? '
             data_problem += ' ;'.join([statement2str_with_mapping(goal, mp) for goal in proof_state.goals])
@@ -626,7 +632,6 @@ class GeometryGenerator:
             print(essential_points)
             print(essential_aux_points)
             print(essential_premises)
-            print(_hhh)
             print(mp)
             print(all_premise)
             # import pdb; pdb.set_trace()
@@ -889,7 +894,6 @@ class GeometryGenerator:
                     "llm_input_renamed": llm_remamed['llm_input'],
                     "llm_output_renamed": llm_remamed['llm_output'],
                 })
-                # import pdb; pdb.set_trace()
             summary = {
                 'runtime': solver.run_infos['runtime'],
                 'checkgoals_runtime': checkgoals_runtime,
