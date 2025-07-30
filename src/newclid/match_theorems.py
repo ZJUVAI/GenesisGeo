@@ -72,104 +72,6 @@ class Matcher:
             dep = Dependency.mk(conclusion_statement, reason, tuple(why))
             res.add(dep)
         return res
-    
-    def rearrange(self, args: list[str]) -> set[tuple[str]]:
-        assert len(args) == 8
-        permutations = set()
-        for i in range(64):
-            perm = args.copy()
-            for j in range(4):
-                if (i >> j) & 1:
-                    perm[2 * j], perm[2 * j + 1] = perm[2 * j + 1], perm[2 * j]
-            if (i >> 4) & 1:
-                perm[0], perm[1], perm[2], perm[3] = perm[2], perm[3], perm[0], perm[1]
-                perm[4], perm[5], perm[6], perm[7] = perm[6], perm[7], perm[4], perm[5]
-            if (i >> 5) & 1:
-                perm[0], perm[1], perm[4], perm[5] = perm[4], perm[5], perm[0], perm[1]
-                perm[2], perm[3], perm[6], perm[7] = perm[6], perm[7], perm[2], perm[3]
-            permutations.add(tuple(perm))
-        return permutations
-
-    def args_rearrange(self, args: list[Point]) -> list[Point]:
-        a, b, c, d, e, f, g, h = args
-        if a == b or c == d or e == f or g == h:
-            return 
-        if a == c:
-            if e == g:
-                a, b, c, d, e, f, g, h = a, b, c, d, e, f, g, h
-            elif e == h:
-                a, b, c, d, e, f, g, h = a, b, c, d, e, f, h, g
-            elif f == g:
-                a, b, c, d, e, f, g, h = a, b, c, d, f, e, g, h
-            elif f == h:
-                a, b, c, d, e, f, g, h = a, b, c, d, f, e, h, g
-        elif a == d:
-            if e == g:
-                a, b, c, d, e, f, g, h = a, b, d, c, e, f, g, h
-            elif e == h:
-                a, b, c, d, e, f, g, h = a, b, d, c, e, f, h, g
-            elif f == g:
-                a, b, c, d, e, f, g, h = a, b, d, c, f, e, g, h
-            elif f == h:
-                a, b, c, d, e, f, g, h = a, b, d, c, f, e, h, g
-        elif b == c:
-            if e == g:
-                a, b, c, d, e, f, g, h = b, a, c, d, e, f, g, h
-            elif e == h:
-                a, b, c, d, e, f, g, h = b, a, c, d, e, f, h, g
-            elif f == g:
-                a, b, c, d, e, f, g, h = b, a, c, d, f, e, g, h
-            elif f == h:
-                a, b, c, d, e, f, g, h = b, a, c, d, f, e, h, g
-        elif b == d:
-            if e == g:
-                a, b, c, d, e, f, g, h = b, a, d, c, e, f, g, h
-            elif e == h:
-                a, b, c, d, e, f, g, h = b, a, d, c, e, f, h, g
-            elif f == g:
-                a, b, c, d, e, f, g, h = b, a, d, c, f, e, g, h
-            elif f == h:
-                a, b, c, d, e, f, g, h = b, a, d, c, f, e, h, g
-        elif a == e:
-            if c == g:
-                a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
-            elif c == h:
-                a, b, c, d, e, f, g, h = a, b, e, f, c, d, h, g
-            elif d == g:
-                a, b, c, d, e, f, g, h = a, b, e, f, d, c, g, h
-            elif d == h:
-                a, b, c, d, e, f, g, h = a, b, e, f, d, c, h, g
-        elif a == f:
-            if c == g:
-                a, b, c, d, e, f, g, h = a, b, f, e, c, d, g, h
-            elif c == h:
-                a, b, c, d, e, f, g, h = a, b, f, e, c, d, h, g
-            elif d == g:
-                a, b, c, d, e, f, g, h = a, b, f, e, d, c, g, h
-            elif d == h:
-                a, b, c, d, e, f, g, h = a, b, f, e, d, c, h, g
-        elif b == e:
-            if c == g:
-                a, b, c, d, e, f, g, h = b, a, e, f, c, d, g, h
-            elif c == h:
-                a, b, c, d, e, f, g, h = b, a, e, f, c, d, h, g
-            elif d == g:
-                a, b, c, d, e, f, g, h = b, a, e, f, d, c, g, h
-            elif d == h:
-                a, b, c, d, e, f, g, h = b, a, e, f, d, c, h, g
-        elif b == f:
-            if c == g:
-                a, b, c, d, e, f, g, h = b, a, f, e, c, d, g, h
-            elif c == h:
-                a, b, c, d, e, f, g, h = b, a, f, e, c, d, h, g
-            elif d == g:
-                a, b, c, d, e, f, g, h = b, a, f, e, d, c, g, h
-            elif d == h:
-                a, b, c, d, e, f, g, h = b, a, f, e, d, c, h, g
-        
-        return [a,b,c,d,e,f,g,h]
-
-
 
     def match_theorem(self, theorem: "Rule") -> Generator["Dependency", None, None]:
         if theorem not in self.cache:
@@ -203,63 +105,44 @@ class Matcher:
                 result.append([{}])
 
         return result
-    
+
     def cache_eq_premise_theorem(self, theorem, points):
         statement_list = None
         res: set[Dependency] = set()
-        premise = theorem.premises[0]
-        variables = theorem.variables()
+        premises = theorem.premises
+        premise = premises[0]
         if premise[0] == "eqangle":
             statement_list = self.dep_graph.numerical_checked_eqangle
         if premise[0] == "eqratio":
             statement_list = self.dep_graph.numerical_checked_eqratio
-        variables_in_premise = set(premise[1:])
-        variables_not_in_premise= list(set(variables) - variables_in_premise)
-        for statement in statement_list:
-            # args = [p.name for p in statement.args]
-            args = statement
-            assert len(args) == 8
-            # args = self.args_rearrange(args)
-            if args[0] != args[4]:
-                args_permutation = {
-                    (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
-                    (args[2], args[3], args[0], args[1], args[6], args[7], args[4], args[5]),
-                    (args[4], args[5], args[6], args[7], args[0], args[1], args[2], args[3]),
-                    (args[6], args[7], args[4], args[5], args[2], args[3], args[0], args[1])
-                }
-            else:
-                args_permutation = {
-                    (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
-                    (args[2], args[3], args[0], args[1], args[6], args[7], args[4], args[5]),
-                    (args[4], args[5], args[6], args[7], args[0], args[1], args[2], args[3]),
-                    (args[6], args[7], args[4], args[5], args[2], args[3], args[0], args[1]),
-                    (args[0], args[1], args[4], args[5], args[2], args[3], args[6], args[7]),
-                    (args[4], args[5], args[0], args[1], args[6], args[7], args[2], args[3]),
-                    (args[6], args[7], args[2], args[3], args[4], args[5], args[0], args[1]),
-                    (args[2], args[3], args[6], args[7], args[0], args[1], args[4], args[5]),
-                }
+        point_coors = [(p.num.x, p.num.y) for p in self.dep_graph.symbols_graph.nodes_of_type(Point)]
+        list_premises = [list(premise) for premise in premises]
+        mappings = matchinC.mapping_eq_theorem(list_premises, point_coors, statement_list)
 
-            for args in args_permutation:
-                mapping = {}
-                flag = True
-                for v, p in zip(premise[1:], args):
-                    if v not in mapping:
-                        mapping[v] = p
-                    elif mapping[v] != p:
-                        flag = False
-                        break
-                if not flag:
+        for mapping in mappings:
+            why = []
+            flag = False
+            for key in mapping:
+                mapping[key] = points[mapping[key]]
+            for premise in premises:
+                s = Statement.from_tokens(
+                        translate_sentence(mapping, premise), self.dep_graph
+                    )
+                if s is None:
+                    flag = True
+                    break
+                why.append(s)
+            if flag:
+                continue
+            for conclusion in theorem.conclusions:
+                s = Statement.from_tokens(
+                        translate_sentence(mapping, conclusion), self.dep_graph
+                    )
+                if s is None or not s.check_numerical():
                     continue
-                    
-                for extra_mapping in (
-                    {v: p for v, p in zip(variables_not_in_premise, point_list)} 
-                    for point_list in itertools.product(points, repeat=len(variables_not_in_premise))
-                ):
-                    mapping.update(extra_mapping)
-                    # logging.info(f"{theorem} mapping {mapping=}")
-                    new_conclusions = self.apply_theorem(theorem, mapping)
-                    if new_conclusions:
-                        res.update(new_conclusions)
+                dep = Dependency.mk(s, theorem.descrption, tuple(why))
+                res.add(dep)
+                
         return res
     
     def cache_midp_premise_theorem(self, theorem, points):
@@ -437,62 +320,43 @@ class Matcher:
                         res.update(new_conclusions)
         return res
     
-    def cache_eq_conclusion_theorem(self, theorem: "Rule", points):
+    def cache_eq_conclusion_theorem(self, theorem, points):
         statement_list = None
         res: set[Dependency] = set()
+        premises = theorem.premises
         premise = theorem.conclusions[0]
-        variables = theorem.variables()
         if premise[0] == "eqangle":
             statement_list = self.dep_graph.numerical_checked_eqangle
         if premise[0] == "eqratio":
             statement_list = self.dep_graph.numerical_checked_eqratio
-        variables_in_premise = set(premise[1:])
-        variables_not_in_premise= list(set(variables) - variables_in_premise)
-        for statement in statement_list:
-            # args = [p.name for p in statement.args]
-            args = statement
-            assert len(args) == 8
-            # args = self.args_rearrange(args)
-            if args[0] != args[4]:
-                args_permutation = {
-                    (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
-                    (args[2], args[3], args[0], args[1], args[6], args[7], args[4], args[5]),
-                    (args[4], args[5], args[6], args[7], args[0], args[1], args[2], args[3]),
-                    (args[6], args[7], args[4], args[5], args[2], args[3], args[0], args[1])
-                }
-            else:
-                args_permutation = {
-                    (args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
-                    (args[2], args[3], args[0], args[1], args[6], args[7], args[4], args[5]),
-                    (args[4], args[5], args[6], args[7], args[0], args[1], args[2], args[3]),
-                    (args[6], args[7], args[4], args[5], args[2], args[3], args[0], args[1]),
-                    (args[0], args[1], args[4], args[5], args[2], args[3], args[6], args[7]),
-                    (args[4], args[5], args[0], args[1], args[6], args[7], args[2], args[3]),
-                    (args[6], args[7], args[2], args[3], args[4], args[5], args[0], args[1]),
-                    (args[2], args[3], args[6], args[7], args[0], args[1], args[4], args[5]),
-                }
+        point_coors = [(p.num.x, p.num.y) for p in self.dep_graph.symbols_graph.nodes_of_type(Point)]
+        list_premises = [premise]+[list(premise) for premise in premises]
+        mappings = matchinC.mapping_eq_theorem(list_premises, point_coors, statement_list)
 
-            for args in args_permutation:
-                mapping = {}
-                flag = True
-                for v, p in zip(premise[1:], args):
-                    if v not in mapping:
-                        mapping[v] = p
-                    elif mapping[v] != p:
-                        flag = False
-                        break
-                if not flag:
+        for mapping in mappings:
+            why = []
+            flag = False
+            for key in mapping:
+                mapping[key] = points[mapping[key]]
+            for premise in premises:
+                s = Statement.from_tokens(
+                        translate_sentence(mapping, premise), self.dep_graph
+                    )
+                if s is None:
+                    flag = True
+                    break
+                why.append(s)
+            if flag:
+                continue
+            for conclusion in theorem.conclusions:
+                s = Statement.from_tokens(
+                        translate_sentence(mapping, conclusion), self.dep_graph
+                    )
+                if s is None or not s.check_numerical():
                     continue
-                    
-                for extra_mapping in (
-                    {v: p for v, p in zip(variables_not_in_premise, point_list)} 
-                    for point_list in itertools.product(points, repeat=len(variables_not_in_premise))
-                ):
-                    mapping.update(extra_mapping)
-                    # logging.info(f"{theorem} mapping {mapping=}")
-                    new_conclusions = self.apply_theorem(theorem, mapping)
-                    if new_conclusions:
-                        res.update(new_conclusions)
+                dep = Dependency.mk(s, theorem.descrption, tuple(why))
+                res.add(dep)
+                
         return res
 
     def cache_theorem(self, theorem: "Rule"):

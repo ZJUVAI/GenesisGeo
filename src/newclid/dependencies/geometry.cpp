@@ -714,6 +714,129 @@ extern "C"
         }
         return std::make_tuple(simitris, simitrirs);
     }
+
+    std::vector<std::tuple<int, int, int, int>> findpara(const std::vector<Point> &points, std::vector<std::tuple<double, int, int, int, int>> &angles)
+    {
+        std::vector<std::tuple<int, int, int, int>> paras;
+        for (const auto &angle : angles)
+        {
+            double ag = std::get<0>(angle);
+            int a = std::get<1>(angle);
+            int b = std::get<2>(angle);
+            int c = std::get<3>(angle);
+            int d = std::get<4>(angle);
+            if (close_enough(ag, 0) || close_enough(ag, M_PI))
+            {
+                if (a > b)
+                {
+                    int tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+                if (c > d)
+                {
+                    int tmp = c;
+                    c = d;
+                    d = tmp;
+                }
+                if (a == c && b == d)
+                {
+                    continue;
+                }
+                if (a < c || (a == c && b < d))
+                {
+                    paras.push_back({a, b, c, d});
+                }
+                else
+                {
+                    paras.push_back({c, d, a, b});
+                }
+            }
+        }
+        return paras;
+    }
+
+    std::vector<std::tuple<int, int, int, int>> findperp(const std::vector<Point> &points, std::vector<std::tuple<double, int, int, int, int>> &angles)
+    {
+        std::vector<std::tuple<int, int, int, int>> perps;
+        for (const auto &angle : angles)
+        {
+            double ag = std::get<0>(angle);
+            int a = std::get<1>(angle);
+            int b = std::get<2>(angle);
+            int c = std::get<3>(angle);
+            int d = std::get<4>(angle);
+            if (close_enough(ag, M_PI / 2))
+            {
+                if (a > b)
+                {
+                    int tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+                if (c > d)
+                {
+                    int tmp = c;
+                    c = d;
+                    d = tmp;
+                }
+                if (a == c && b == d)
+                {
+                    continue;
+                }
+                if (a < c || (a == c && b < d))
+                {
+                    perps.push_back({a, b, c, d});
+                }
+                else
+                {
+                    perps.push_back({c, d, a, b});
+                }
+            }
+        }
+        return perps;
+    }
+
+    std::vector<std::tuple<int, int, int, int>> findcong(const std::vector<Point> &points, std::vector<std::tuple<double, int, int, int, int>> &ratios)
+    {
+        std::vector<std::tuple<int, int, int, int>> congs;
+        for (const auto &ratio : ratios)
+        {
+            double r = std::get<0>(ratio);
+            int a = std::get<1>(ratio);
+            int b = std::get<2>(ratio);
+            int c = std::get<3>(ratio);
+            int d = std::get<4>(ratio);
+            if (close_enough(r, 1.0))
+            {
+                if (a > b)
+                {
+                    int tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+                if (c > d)
+                {
+                    int tmp = c;
+                    c = d;
+                    d = tmp;
+                }
+                if (a == c && b == d)
+                {
+                    continue;
+                }
+                if (a < c || (a == c && b < d))
+                {
+                    congs.push_back({a, b, c, d});
+                }
+                else
+                {
+                    congs.push_back({c, d, a, b});
+                }
+            }
+        }
+        return congs;
+    }
 }
 
 PYBIND11_MODULE(geometry, m)
@@ -722,4 +845,7 @@ PYBIND11_MODULE(geometry, m)
     m.def("findmidp", &findmidp, "Find midpoints based on ratios");
     m.def("findeq", &findeq, "Find equals based on angle data or ratio data");
     m.def("findsimitri", &findsimitri, "Find similiary triangles based on eqratios");
+    m.def("findpara", &findpara, "Find parallel lines based on angles");
+    m.def("findperp", &findperp, "Find perpendicular lines based on angles");
+    m.def("findcong", &findcong, "Find congruent lines based on ratios");
 }
