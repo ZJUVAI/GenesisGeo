@@ -484,7 +484,7 @@ class GeometryGenerator:
                         essential_points.add(arg.name)
             points = set([p.name for p in points]) & essential_points
             aux_points = set([p.name for p in aux_points]) & essential_points
-            return points, aux_points, essential_premises, essential_points
+            return points, aux_points, essential_premises
         
         def rediger_new_format(dep, mp, dep_idx) -> str:
             """Generate proof step in new format: statement [id] rule_id [required_statement_ids]"""
@@ -526,7 +526,7 @@ class GeometryGenerator:
         
         # find essential_premises
         all_premise = get_all_premise(problem) # all premises from problem
-        essential_points, essential_aux_points, essential_premises, _hhh = get_essential_points_and_premise(premises, proof_state.dep_graph.proof_deps(goals), points, aux_points) # only included in proof steps
+        essential_points, essential_aux_points, essential_premises = get_essential_points_and_premise(premises+aux, proof_state.dep_graph.proof_deps(goals), points, aux_points) # only included in proof steps
         # mapping
         mp: dict[str, str] = {}
         for k, v in all_premise.items():
@@ -547,7 +547,7 @@ class GeometryGenerator:
                 for p in ps:
                     if p not in mp:
                         mp[p] = get_apha_geo_solver_var(len(mp))
-        
+        # import pdb; pdb.set_trace()
         # <problem> </problem>
         try:
             string_premise = []
@@ -567,7 +567,7 @@ class GeometryGenerator:
             data_problem += ' ; '.join([s.strip() for s in string_premise]) + ' ? '
             data_problem += ' ;'.join([statement2str_with_mapping(goal, mp) for goal in proof_state.goals])
             data_problem += ' </problem>'
-
+            # import pdb; pdb.set_trace()
             # <aux> </aux>
             data_aux = ''
             string_aux = []
@@ -587,7 +587,7 @@ class GeometryGenerator:
                 data_aux += '<aux> '
                 data_aux += ' ; '.join([s.strip() for s in string_aux])
                 data_aux += ' ; </aux> '
-
+            # import pdb; pdb.set_trace()
             # <numerical_check> </numerical_check>
             numerical_check_items = []
             # numercial_checked_premises
@@ -609,7 +609,7 @@ class GeometryGenerator:
                 statemtn_str = statement2str_with_mapping(line.statement, mp)
                 numerical_check_items.append(f"{statemtn_str} [{dep_idx[statemtn_str]}]")
             if len(numerical_check_items) > 0:
-                numerical_check = "<numerical_check> " + " ; ".join(numerical_check_items) + " ; </numerical_check>"
+                numerical_check = "<numerical_check> " + " ; ".join(numerical_check_items) + " ; </numerical_check> "
             else:
                 numerical_check = ""
 
