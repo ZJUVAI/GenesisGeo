@@ -20,7 +20,7 @@ def solve_problem(args):
     try:
         solver = (
             GeometricSolverBuilder()
-            .load_problem_from_file(problems_path, problem_name)#, rename=True)
+            .load_problem_from_file(problems_path, problem_name, rename=True)
             .with_deductive_agent(LMAgent(model_path, decoding_size=decoding_size,beam_size=beam_size, search_depth=search_depth))
             .build()
         )

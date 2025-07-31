@@ -858,14 +858,7 @@ class GeometryGenerator:
                     logging.debug(f"Naive proof with length {n_proof_steps}")
                     continue
                 
-                # create new ProblemJGEX to assistant llm data generation
-                # statements = []
-                # for clause in solver_builder.problemJGEX.constructions:
-                #     clause_str = str(clause)
-                #     if clause_str in essential_clauses or clause_str in essential_clauses_aux:
-                #         statements.append(clause_str)
-                # fl_problem = '; '.join(statements) + ' ? ' + goal.predicate.NAME + ' ' + ' '.join([arg.name for arg in goal.args])
-                # fl_problem_new = ProblemJGEX.from_text(fl_problem)
+                #  llm data generation
                 aux_points = [p.name for p in aux_points]
                 nl_solution = write_proof_steps(solver_new.proof, print_output=False)
                 llm = self.llm_solution(problem_new, aux_points, solver_new.proof)

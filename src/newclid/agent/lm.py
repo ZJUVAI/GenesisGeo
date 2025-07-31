@@ -21,7 +21,12 @@ from newclid.proof import ProofState
 from newclid.formulations.clause import Clause
 from newclid.statement import Statement
 from newclid.formulations.clause import translate_sentence
-
+from newclid.predicates.congruence import Cong
+from newclid.predicates.parallelism import Para
+from newclid.predicates.perpendicularity import Perp
+from newclid.predicates.collinearity import Coll
+from newclid.predicates.cyclic import Cyclic
+from newclid.predicates.equal_angles import EqAngle
 
 if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
@@ -91,7 +96,7 @@ class LMAgent(DeductiveAgent):
             tokenize=False,
             add_generation_prompt=True,
         )
-        # text = query + '\n<aux> '
+        # text = query
         model_prompt_inputs = self.tokenizer([text], return_tensors="pt")
         text += response_prefix
         model_inputs = self.tokenizer([text], return_tensors="pt").to('cuda')
@@ -118,7 +123,7 @@ class LMAgent(DeductiveAgent):
         aux_dsl = self.tokenizer.batch_decode(generated_output, skip_special_tokens=True)
         return aux_dsl, scores
     
-    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 1800
+    def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600
         ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
         def proof_info(proof: "ProofState"):
@@ -150,8 +155,8 @@ class LMAgent(DeductiveAgent):
                 new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
                 for prev_score, (problem, proof, a_dsl) in beam_queue:
                     # seek help from llm
-                    if time.time() - t0 > timeout:
-                        break
+                    # if time.time() - t0 > timeout:
+                    #     break
 
                     # Stragety 1: insert the aux string into problem and predict the next aux
                     p_dsl = self.problem_to_dsl(problem, proof)
@@ -163,12 +168,16 @@ class LMAgent(DeductiveAgent):
                                 new_problem = problem.with_more_construction(aux) # will recreate the problem
                                 new_proof = copy.deepcopy(proof)
                                 self.add_construction(new_proof, aux)
+                                # solver = GeometricSolverBuilder().load_problem(new_problem.renamed()).with_deductive_agent(DDARN()).build(max_attempts=1000)
+                                # new_proof = solver.proof
                                 self.run_ddar(new_proof, rules, t0, timeout)
                                 if new_proof.check_goals():
                                     return proof_info(new_proof)
                                 else:
                                     new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
                         except Exception as e:
+                            # import traceback
+                            # traceback.print_exc()
                             continue
 
                     # Stragety 2: extend the aux string
@@ -243,8 +252,8 @@ class LMAgent(DeductiveAgent):
             result_constructions = []
             for segment in segments:
                 parts = segment.split()
-                predicate_name, args = self.translate_dsl_to_construction(prefix, parts[0], parts[1:])
-                result_constructions.append(f"{predicate_name} {' '.join(args)}")
+                construction = self.translate_dsl_to_construction(prefix, parts[0], parts[1:])
+                result_constructions.append(construction)
             result += ', '.join(result_constructions)
             return result
 
@@ -262,95 +271,79 @@ class LMAgent(DeductiveAgent):
         """
         # 直线垂直
         if predicate == 'perp':
-            a, b, c, d = args
-            if point in [c, d]:
-                a, b, c, d = c, d, a, b
-            if point == b:
-                a, b = b, a
-            if point == d:
-                c, d = d, c
-            if a == c and a == point:
-                return 'on_dia', [a, b, d]
-            return 'on_tline', [a, b, c, d]
+            return Perp.to_constructive(point, tuple(args))
 
         # 直线平行
         elif predicate == 'para':
-            a, b, c, d = args
-            if point in [c, d]:
-                a, b, c, d = c, d, a, b
-            if point == b:
-                a, b = b, a
-            return 'on_pline', [a, b, c, d]
+            return Para.to_constructive(point, tuple(args))
 
         # 全等/等距
         elif predicate == 'cong':
-            a, b, c, d = args
-            if a == c and a == point:
-                return 'on_bline', [a, b, d]
-            if point in [c, d]:
-                a, b, c, d = c, d, a, b
-            if point == b:
-                a, b = b, a
-            if point == d:
-                c, d = d, c
-            if b in [c, d]:
-                if b == d:
-                    c, d = d, c
-                return 'on_circle', [a, b, d]
-            return 'eqdistance', [a, b, c, d]
+            return Cong.to_constructive(point, tuple(args))
 
         # 共线
         elif predicate == 'coll':
-            a, b, c = args
-            if point == b:
-                a, b = b, a
-            if point == c:
-                a, b, c = c, a, b
-            return 'on_line', [a, b, c]
+            return Coll.to_constructive(point, tuple(args))
 
         # 等角
         elif predicate == 'eqangle':
-            a1, a2, b1, b2, c1, c2, d1, d2 = args
-            if point in [c1, c2, d1, d2]:
-                a1, a2, b1, b2, c1, c2, d1, d2 = c1, c2, d1, d2, a1, a2, b1, b2
-            if point in [b1, b2]:
-                a1, a2, b1, b2 = b1, b2, a1, a2
-            if point in [d1, d2]:
-                c1, c2, d1, d2 = d1, d2, c1, c2
-            if point == a2:
-                a1, a2 = a2, a1
-            if point == b2:
-                b1, b2 = b2, b1
-            if point == c2:
-                c1, c2 = c2, c1
-            # 1. angle_bisector
-            if point == a1 and point == c1:
-                b = a2
-                a = b1 if b == b2 else b2
-                c = d1 if b == d2 else d2
-                return 'angle_bisector', [point, a, b, c]
-            # 2. eqangle3
-            if point == a1 and point == b1:
+            def dzt(args):
+                a1, a2, b1, b2, c1, c2, d1, d2 = args
+                if point in [c1, c2, d1, d2]:
+                    a1, a2, b1, b2, c1, c2, d1, d2 = c1, c2, d1, d2, a1, a2, b1, b2
+                if point in [b1, b2]:
+                    a1, a2, b1, b2 = b1, b2, a1, a2
+                if point in [d1, d2]:
+                    c1, c2, d1, d2 = d1, d2, c1, c2
+                if point == a2:
+                    a1, a2 = a2, a1
+                if point == b2:
+                    b1, b2 = b2, b1
+                if point == c2:
+                    c1, c2 = c2, c1
+                # 1. angle_bisector
+                if point == a1 and point == c1:
+                    b = a2
+                    a = b1 if b == b2 else b2
+                    c = d1 if b == d2 else d2
+                    return 'angle_bisector', [point, a, b, c]
+                # 2. eqangle3
+                if point == a1 and point == b1:
+                    a = a2
+                    b = b2
+                    d = c1 if c1 == d1 or c1 == d2 else c2
+                    e = c2 if d == c1 else c1
+                    f = d2 if d == d1 else d1
+                    return 'eqangle3', [point, a, b, d, e, f]            
+                # 3. on_aline
                 a = a2
-                b = b2
+                b = b2 if a == b1 else b1
                 d = c1 if c1 == d1 or c1 == d2 else c2
-                e = c2 if d == c1 else c1
-                f = d2 if d == d1 else d1
-                return 'eqangle3', [point, a, b, d, e, f]            
-            # 3. on_aline
-            a = a2
-            b = b2 if a == b1 else b1
-            d = c1 if c1 == d1 or c1 == d2 else c2
-            c = c2 if d == c1 else c1
-            e = d2 if d == d1 else d1
-            return 'on_aline', [point, a, b, c, d, e]
+                c = c2 if d == c1 else c1
+                e = d2 if d == d1 else d1
+                return 'on_aline', [point, a, b, c, d, e]
+            def arrange_angle_points(a, b, c, d):
+                if a == c:
+                    return (b, a, d)
+                elif a == d:
+                    return (b, a, c)
+                elif b == c:
+                    return (a, b, d)
+                elif b == d:
+                    return (a, b, c)
+                else:
+                    return None
+
+            a, b, c, d, e, f, g, h = args
+            res1 = EqAngle.to_constructive(point, arrange_angle_points(a, b, c, d) + arrange_angle_points(e, f, g, h))
+            return res1
+            
         # 四点共圆
         elif predicate == 'cyclic':
-            a, b, c = [x for x in args if x != point]
-            return 'on_circum', [point, a, b, c]
+            return Cyclic.to_constructive(point, tuple(args))
 
         # 其它直接返回
-        return predicate, [point] + args if point not in args else args
+        return f"{predicate} {' '.join(args)}"
     
     def problem_to_dsl(self, problem: "ProblemJGEX", proof_state: "ProofState") -> str:
         """Convert the problem to a DSL string."""

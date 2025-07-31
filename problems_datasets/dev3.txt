@@ -1,6 +1,0 @@
-t1
-a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b ? perp a d b c
-t2
-a b c = triangle a b c; d = on_tline d b a c, on_tline d c a b; e = on_line e a c, on_line e b d ? perp a d b c
-translated_imo_2015_p3
-a b c = triangle a b c; h = orthocenter h a b c; f = on_line f h a, on_line f b c; m = midpoint m b c; o = circle o a b c; q = on_dia q a h, on_circle q o a; k = on_dia k h q, on_circle k o a; o1 = circle o1 k q h; o2 = circle o2 f k m ? coll o1 o2 k
