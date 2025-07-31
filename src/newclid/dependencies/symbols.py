@@ -7,11 +7,11 @@ from typing_extensions import Self
 
 from newclid.formulations.clause import Clause
 from newclid.numerical.geometries import CircleNum, LineNum, PointNum
+from newclid.dependencies.dependency import Dependency
 
 if TYPE_CHECKING:
     from newclid.statement import Statement
     from newclid.dependencies.symbols_graph import SymbolsGraph
-    from newclid.dependencies.dependency import Dependency
 
 S = TypeVar("S", bound="Symbol")
 
@@ -142,7 +142,8 @@ class Line(Symbol):
                     if s <= _target.points and len(_target.points) < len(target.points):
                         target = _target
                 assert target.dep
-                return target.dep.with_new(statement)
+                return Dependency.mk(statement, "points on same line", [target.dep.statement])
+                # return target.dep.with_new(statement)
         raise Exception("why_coll failed")
 
     @property
@@ -198,7 +199,8 @@ class Circle(Symbol):
                     if s <= _target.points and len(_target.points) < len(target.points):
                         target = _target
                 if target.dep:
-                    return target.dep.with_new(statement)
+                    return Dependency.mk(statement, "points on same circle", [target.dep.statement])
+                    # return target.dep.with_new(statement)
                 else:
                     assert False
         raise Exception("why_concyclic failed")

@@ -163,3 +163,11 @@ class EqRatio3(Predicate):
         dep.with_new(eqr1).add()
         dep.with_new(eqr2).add()
         dep.with_new(eqr3).add()
+
+    @classmethod
+    def why(cls, statement: Statement) -> Dependency:
+        a, b, c, d, m, n = statement.args
+        eqr1 = statement.with_new(EqRatio, (m, a, m, c, n, b, n, d))
+        eqr2 = statement.with_new(EqRatio, (m, a, a, c, b, n, b, d))
+        eqr3 = statement.with_new(EqRatio, (m, c, a, c, n, d, b, d))
+        return Dependency.mk(statement, Ratio_Chase, (eqr1, eqr2, eqr3))
