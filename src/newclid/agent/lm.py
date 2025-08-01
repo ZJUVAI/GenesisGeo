@@ -259,7 +259,7 @@ class LMAgent(DeductiveAgent):
         result_constructions = []
         for premise in premises:
             parts = premise.split()
-            construction = self.translate_dsl_to_construction(points, parts[0], parts[1:], content)
+            construction = self.translate_dsl_to_construction(points, parts[0], parts[1:])
             result_constructions.append(construction)
         return points + ' = ' + ', '.join(result_constructions)
 
