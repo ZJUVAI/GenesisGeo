@@ -137,13 +137,29 @@ class Line(Symbol):
         s = set(points)
         for line in symbols_graph.nodes_of_type(Line):
             if s <= line.points:
-                target = line
-                for _target in line.fellows:
-                    if s <= _target.points and len(_target.points) < len(target.points):
-                        target = _target
-                assert target.dep
-                return Dependency.mk(statement, "points on same line", [target.dep.statement])
-                # return target.dep.with_new(statement)
+                fellows = list(line.fellows)
+                fellows.sort(key=lambda x: len(x.points))
+                why = []
+                lines = []
+                for fellow in fellows:
+                    if len(fellow.points) < 3:
+                        continue
+                    why.append(fellow.dep.statement)
+                    current_points = set(fellow.points)
+                    while True:
+                        merged = False
+                        for line in lines:
+                            if not line <= current_points and len(line & current_points) >= 3:
+                                current_points |= line
+                                merged = True
+                        if not merged:
+                            break
+                    if s <= current_points:
+                        break
+                    lines = [line for line in lines if not line <= current_points]
+                    lines.append(current_points)
+                return Dependency.mk(statement, "Same Line", why)
+                # return Dependency.mk(statement, "Same Line", [])
         raise Exception("why_coll failed")
 
     @property
@@ -194,15 +210,27 @@ class Circle(Symbol):
         s = set(points)
         for line in symbols_graph.nodes_of_type(Circle):
             if s <= line.points:
-                target = line
-                for _target in line.fellows:
-                    if s <= _target.points and len(_target.points) < len(target.points):
-                        target = _target
-                if target.dep:
-                    return Dependency.mk(statement, "points on same circle", [target.dep.statement])
-                    # return target.dep.with_new(statement)
-                else:
-                    assert False
+                fellows = list(line.fellows)
+                fellows.sort(key=lambda x: len(x.points))
+                why = []
+                circles = []
+                for fellow in fellows:
+                    why.append(fellow.dep.statement)
+                    current_points = set(fellow.points)
+                    while True:
+                        merged = False
+                        for circle in circles:
+                            if not circle <= current_points and len(circle & current_points) >= 3:
+                                current_points |= circle
+                                merged = True
+                        if not merged:
+                            break
+                    if s <= current_points:
+                        break
+                    circles = [circle for circle in circles if not circle <= current_points]
+                    circles.append(current_points)
+                return Dependency.mk(statement, "Same Circle", why)
+                # return target.dep.with_new(statement)
         raise Exception("why_concyclic failed")
 
     @property
