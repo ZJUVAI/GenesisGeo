@@ -62,7 +62,7 @@ class GeometryGenerator:
             return re.findall(r'[a-z][\d]*', s)
 
         def goal_from_tokens(tokens):
-            if self.goal_filter(tokens[0], tokens[1:], dep_graph):
+            if self.filter.goal_valid_check(tokens[0], tokens[1:], dep_graph):
                 goal = Statement.from_tokens(tokens, dep_graph)
                 if goal and goal.check():
                     return [goal]
@@ -292,12 +292,18 @@ class GeometryGenerator:
 
             # Extract rule ID from reason string and handle special cases
             reason = dep.reason
-            if "Ratio Chasing" in reason or reason == "Ratio":
+            if reason in ['Ratio', 'Angle', 'Shortcut']:
+                print(reason)
+            if "Ratio Chasing" in reason:
                 rule_id = "a00"
-            elif "Angle Chasing" in reason or reason == "Angle":
+            elif "Angle Chasing" in reason:
                 rule_id = "a01"
-            elif "Shortcut Derivation" in reason or reason == "Shortcut":
+            elif "Shortcut Derivation" in reason:
                 rule_id = "r99"
+            elif "Same Circle" in reason:
+                rule_id = "r98"
+            elif "Same Line" in reason:
+                rule_id = "r97"
             elif reason and ' ' in reason:
                 rule_id = reason.split()[0]
             else:

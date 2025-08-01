@@ -149,7 +149,7 @@ class Line(Symbol):
                     while True:
                         merged = False
                         for line in lines:
-                            if not line <= current_points and len(line & current_points) >= 3:
+                            if not line <= current_points and len(line & current_points) >= 2:
                                 current_points |= line
                                 merged = True
                         if not merged:
