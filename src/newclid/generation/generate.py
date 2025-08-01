@@ -862,11 +862,11 @@ class GeometryGenerator:
                 aux_points = [p.name for p in aux_points]
                 nl_solution = write_proof_steps(solver_new.proof, print_output=False)
                 llm = self.llm_solution(problem_new, aux_points, solver_new.proof)
-                llm_remamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
+                llm_renamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
 
                 if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm['llm_output']):
                         continue
-                if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm_remamed['llm_output']):
+                if len(aux_points) > 0 and not self.check_aux_predicates_valid(llm_renamed['llm_output']):
                         continue
 
                 # check similarity
@@ -886,8 +886,8 @@ class GeometryGenerator:
                     "llm_input": llm['llm_input'],
                     "llm_output": llm['llm_output'],
                     # "llm_nat_solution": llm_nat_solution,
-                    "llm_input_renamed": llm_remamed['llm_input'],
-                    "llm_output_renamed": llm_remamed['llm_output'],
+                    "llm_input_renamed": llm_renamed['llm_input'],
+                    "llm_output_renamed": llm_renamed['llm_output'],
                 })
             summary = {
                 'runtime': solver.run_infos['runtime'],
