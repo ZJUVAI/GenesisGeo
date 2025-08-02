@@ -23,7 +23,7 @@ p a b = triangle p a b; o = midpoint o b a; a1 = on_line a1 p a, on_circle a1 o 
 examples/complete2/013/complete_001_6_GDD_FULL_01-20_16.gex
 a b o = triangle a b o; m = on_line m a b; p = foot p m a o; q = foot q m b o; d = foot d b a o; c = foot c a b o; t = foot t q a o; k = foot k p b o; s = on_line s q t, on_line s p k ? perp o s p q
 examples/complete2/013/complete_001_6_GDD_FULL_61-80_67.gex
-m b c = triangle m b c; i = incenter i m b c; i_b = on_tline i_b c c i, on_line i_b b i; i_c = on_tline i_c b b i, on_line i_c c i; a = midpoint a i_b i_c; o = circumcenter o b i c ? perp a b b o
+m b c = triangle m b c; i = incenter i m b c; i0 = on_tline i0 c c i, on_line i0 b i; i1 = on_tline i1 b b i, on_line i1 c i; a = midpoint a i0 i1; o = circumcenter o b i c ? perp a b b o
 examples/complete2/013/complete_000_2_PWW_A018.gex
 o a = segment o a; p = on_circle p a o; q = intersection_cc q a o p; r = lc_tangent r p a, on_circle r o p ? cong p q p r
 examples/complete2/013/complete_004_6_GDD_FULL_81-109_88.gex

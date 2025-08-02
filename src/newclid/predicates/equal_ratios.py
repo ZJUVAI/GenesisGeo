@@ -126,7 +126,9 @@ class EqRatio3(Predicate):
             return None
         groups = ((a, b), (c, d), (m, n))
         groups1 = ((b, a), (d, c), (n, m))
-        return sum(min(sorted(groups), sorted(groups1)), ())
+        sorted_groups = sorted(groups, key=lambda pair: [cls.custom_key(arg) for arg in pair])
+        sorted_groups1 = sorted(groups1, key=lambda pair: [cls.custom_key(arg) for arg in pair])
+        return sum(min(sorted_groups, sorted_groups1, key = lambda pair: [[cls.custom_key(arg[0]), cls.custom_key(arg[1])] for arg in pair]), ())
 
     @classmethod
     def parse(cls, args: tuple[str, ...], dep_graph: DependencyGraph):
@@ -170,4 +172,4 @@ class EqRatio3(Predicate):
         eqr1 = statement.with_new(EqRatio, (m, a, m, c, n, b, n, d))
         eqr2 = statement.with_new(EqRatio, (m, a, a, c, b, n, b, d))
         eqr3 = statement.with_new(EqRatio, (m, c, a, c, n, d, b, d))
-        return Dependency.mk(statement, Ratio_Chase, (eqr1, eqr2, eqr3))
+        return Dependency.mk(statement, Ratio_Chase, [eqr1, eqr2, eqr3])

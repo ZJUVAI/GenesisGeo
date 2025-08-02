@@ -30,7 +30,7 @@ class ConstantLength(Predicate):
         a, b, length = args
         if a == b:
             return None
-        a, b = sorted((a, b))
+        a, b = sorted((a, b), key = lambda pair: [cls.custom_key(arg) for arg in pair])
         return (a, b, fraction_to_len(str_to_fraction(length)))
 
     @classmethod
@@ -100,7 +100,7 @@ class LCompute(Predicate):
         a, b = args
         if a == b:
             return None
-        return tuple(sorted((a, b)))
+        return tuple(sorted((a, b), key = cls.custom_key))
 
     @classmethod
     def parse(

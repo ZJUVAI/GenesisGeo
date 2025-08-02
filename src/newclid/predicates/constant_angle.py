@@ -33,10 +33,10 @@ class ConstantAngle(Predicate):
         a, b, c, d, y = args
         if a == b or c == d:
             return None
-        a, b = sorted((a, b))
-        c, d = sorted((c, d))
+        a, b = sorted((a, b), key = cls.custom_key)
+        c, d = sorted((c, d), key = cls.custom_key)
         f = str_to_fraction(y)
-        if (a, b) > (c, d):
+        if cls.compare((a, b), (c, d)) > 0:
             a, b, c, d = c, d, a, b
             f = -f
         f %= 1
@@ -119,8 +119,8 @@ class ACompute(Predicate):
         a, b, c, d = args
         if a == b or c == d:
             return None
-        a, b = sorted((a, b))
-        c, d = sorted((c, d))
+        a, b = sorted((a, b), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        c, d = sorted((c, d), key = lambda pair: [cls.custom_key(arg) for arg in pair])
         return (a, b, c, d)
 
     @classmethod

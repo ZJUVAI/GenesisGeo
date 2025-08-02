@@ -22,7 +22,7 @@ class MidPoint(Predicate):
         if len(set(args)) != 3:
             return None
         m, a, b = args
-        a, b = sorted((a, b))
+        a, b = sorted((a, b), key = cls.custom_key)
         return (m, a, b)
 
     @classmethod

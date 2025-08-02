@@ -27,9 +27,9 @@ class SameSide(Predicate):
         a, b, c, x, y, z = args
         if a == b or b == c or a == c or x == y or y == z or x == z:
             return None
-        p1 = min((a, b, c), (a, c, b))
-        p2 = min((x, y, z), (x, z, y))
-        return min(p1 + p2, p2 + p1)
+        p1 = min((a, b, c), (a, c, b), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        p2 = min((x, y, z), (x, z, y), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        return min(p1 + p2, p2 + p1, key = lambda pair: [cls.custom_key(arg) for arg in pair])
 
     @classmethod
     def parse(cls, args: tuple[str, ...], dep_graph: DependencyGraph):

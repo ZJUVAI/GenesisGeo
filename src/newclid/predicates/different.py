@@ -23,7 +23,7 @@ class Diff(Predicate):
 
     @classmethod
     def preparse(cls, args: tuple[str, ...]):
-        return tuple(sorted(args))
+        return tuple(sorted(args, key = cls.custom_key))
 
     @classmethod
     def parse(cls, args: tuple[str, ...], dep_graph: DependencyGraph):

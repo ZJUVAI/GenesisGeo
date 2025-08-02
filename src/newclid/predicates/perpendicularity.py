@@ -31,9 +31,9 @@ class Perp(Predicate):
         a, b, c, d = args
         if a == b or c == d:
             return None
-        a, b = sorted((a, b))
-        c, d = sorted((c, d))
-        if (a, b) > (c, d):
+        a, b = sorted((a, b), key = cls.custom_key)
+        c, d = sorted((c, d), key = cls.custom_key)
+        if cls.compare((a, b), (c, d)) > 0:
             a, b, c, d = c, d, a, b
         return (a, b, c, d)
 

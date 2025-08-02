@@ -93,3 +93,23 @@ class Predicate(ABC):
         cls, ax: Axes, args: tuple[Any, ...], dep_graph: DependencyGraph, rng: Generator
     ):
         ...
+    
+    @classmethod
+    def custom_key(cls, s):
+        if len(s) == 1:
+            return ord(s[0]) - ord("a")
+        return (int(s[1:]) + 1) * 26 + ord(s[0]) - ord("a")
+
+    @classmethod
+    def compare(cls, s1, s2):
+        if isinstance(s1, str):
+            return cls.custom_key(s1) - cls.custom_key(s2)
+        elif isinstance(s1, tuple):
+            val1 = [cls.custom_key(arg) for arg in s1]
+            val2 = [cls.custom_key(arg) for arg in s2]
+            if val1 < val2:
+                return -1
+            elif val1 > val2:
+                return 1
+            else:
+                return 0

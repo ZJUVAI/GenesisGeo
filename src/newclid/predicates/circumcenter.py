@@ -30,7 +30,7 @@ class Circumcenter(Predicate):
     def preparse(cls, args: tuple[str, ...]) -> Optional[tuple[str, ...]]:
         if len(args) <= 2 or len(args) != len(set(args)):
             return None
-        return (args[0],) + tuple(sorted(args[1:]))
+        return (args[0],) + tuple(sorted(args[1:], key = cls.custom_key))
 
     @classmethod
     def parse(

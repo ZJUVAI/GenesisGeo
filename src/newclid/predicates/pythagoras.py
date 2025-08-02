@@ -29,7 +29,7 @@ class PythagoreanPremises(Predicate):
         a, b, c = args
         if a == b or a == c:
             return None
-        b, c = sorted((b, c))
+        b, c = sorted((b, c), key = cls.custom_key)
         return (a, b, c)
 
     @classmethod

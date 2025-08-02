@@ -29,7 +29,7 @@ a b c = triangle a b c; o = circle o a b c; i = incenter i a b c; d = on_line d 
 translated_imo_2010_p4
 s c p = iso_triangle s c p; o = on_tline o c s c; a = on_circle a o c; b = on_circle b o c, on_line b s a; m = on_line m c p, on_circle m o c; l = on_line l b p, on_circle l o c; k = on_line k a p, on_circle k o c ? cong m k m l
 translated_imo_2011_p6
-a b c = triangle a b c; o = circle o a b c; p = on_circle p o a; q = on_tline q p o p; pa = reflect pa p b c; pb = reflect pb p c a; pc = reflect pc p a b; qa = reflect qa q b c; qb = reflect qb q c a; qc = reflect qc q a b; a1 = on_line a1 pb qb, on_line a1 pc qc; b1 = on_line b1 pa qa, on_line b1 pc qc; c1 = on_line c1 pa qa, on_line c1 pb qb; o1 = circle o1 a1 b1 c1; x = on_circle x o a, on_circle x o1 a1 ? coll x o o1
+a b c = triangle a b c; o = circle o a b c; p = on_circle p o a; q = on_tline q p o p; p1 = reflect p1 p b c; p2 = reflect p2 p c a; p3 = reflect p3 p a b; q1 = reflect q1 q b c; q2 = reflect q2 q c a; q3 = reflect q3 q a b; a1 = on_line a1 p2 q2, on_line a1 p3 q3; b1 = on_line b1 p1 q1, on_line b1 p3 q3; c1 = on_line c1 p1 q1, on_line c1 p2 q2; o1 = circle o1 a1 b1 c1; x = on_circle x o a, on_circle x o1 a1 ? coll x o o1
 translated_imo_2012_p1
 a b c = triangle a b c; m l k j = excenter2 m l k j a b c; f = on_line f m l, on_line f b j; g = on_line g m k, on_line g c j; s = on_line s f a, on_line s b c; t = on_line t g a, on_line t c b ? cong m s m t
 translated_imo_2012_p5

@@ -25,7 +25,7 @@ class Coll(Predicate):
     def preparse(cls, args: tuple[str, ...]):
         if len(args) <= 2 or len(args) != len(set(args)):
             return None
-        return tuple(sorted(args))
+        return tuple(sorted(args, key = cls.custom_key))
 
     @classmethod
     def parse(cls, args: tuple[str, ...], dep_graph: DependencyGraph):

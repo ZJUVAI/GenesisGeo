@@ -31,12 +31,12 @@ class Cong(Predicate):
         if len(args) % 2 != 0:
             return None
         for a, b in zip(args[::2], args[1::2]):
-            if a > b:
+            if cls.compare(a, b) > 0:
                 a, b = b, a
             if a == b:
                 return None
             segs.append((a, b))
-        segs.sort()
+        segs.sort(key = lambda pair: [cls.custom_key(arg) for arg in pair])
         points: list[str] = []
         for a, b in segs:
             points.append(a)

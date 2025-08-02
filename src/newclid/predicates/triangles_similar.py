@@ -20,9 +20,9 @@ def two_triangles(
 ) -> Optional[tuple[str, str, str, str, str, str]]:
     if a == b or a == c or b == c or p == q or p == r or q == r:
         return None
-    (a0, p0), (b0, q0), (c0, r0) = sorted(((a, p), (b, q), (c, r)))
-    (a1, p1), (b1, q1), (c1, r1) = sorted(((p, a), (q, b), (r, c)))
-    return min((a0, b0, c0, p0, q0, r0), (a1, b1, c1, p1, q1, r1))
+    (a0, p0), (b0, q0), (c0, r0) = sorted(((a, p), (b, q), (c, r)), key = lambda pair: [Predicate.custom_key(arg) for arg in pair])
+    (a1, p1), (b1, q1), (c1, r1) = sorted(((p, a), (q, b), (r, c)), key = lambda pair: [Predicate.custom_key(arg) for arg in pair])
+    return min((a0, b0, c0, p0, q0, r0), (a1, b1, c1, p1, q1, r1), key = lambda pair: [Predicate.custom_key(arg) for arg in pair])
 
 
 class SimtriClock(Predicate):

@@ -32,9 +32,9 @@ class ConstantRatio(Predicate):
         if a == b or c == d:
             return None
         f = str_to_fraction(r)
-        a, b = sorted((a, b))
-        c, d = sorted((c, d))
-        if (a, b) > (c, d):
+        a, b = sorted((a, b), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        c, d = sorted((c, d), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        if cls.compare((a, b), (c, d)) > 0:
             a, b, c, d = c, d, a, b
             f = 1 / f
         return (a, b, c, d, fraction_to_ratio(f))

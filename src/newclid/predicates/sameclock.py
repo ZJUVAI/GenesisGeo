@@ -21,11 +21,11 @@ class SameClock(Predicate):
         a, b, c, x, y, z = args
         if a == b or b == c or a == c or x == y or y == z or x == z:
             return None
-        group = min((a, b, c), (b, c, a), (c, a, b))
-        groupr = min((a, c, b), (c, b, a), (b, a, c))
-        group1 = min((x, y, z), (y, z, x), (z, x, y))
-        group1r = min((x, z, y), (z, y, x), (y, x, z))
-        return min(group + group1, group1 + group, groupr + group1r, group1r + groupr)
+        group = min((a, b, c), (b, c, a), (c, a, b), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        groupr = min((a, c, b), (c, b, a), (b, a, c), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        group1 = min((x, y, z), (y, z, x), (z, x, y), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        group1r = min((x, z, y), (z, y, x), (y, x, z), key = lambda pair: [cls.custom_key(arg) for arg in pair])
+        return min(group + group1, group1 + group, groupr + group1r, group1r + groupr, key = lambda pair: [cls.custom_key(arg) for arg in pair])
 
     @classmethod
     def parse(
