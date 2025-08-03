@@ -24,15 +24,17 @@ def solve_problem(args):
             .with_deductive_agent(LMAgent(model_path, decoding_size=decoding_size,beam_size=beam_size, search_depth=search_depth))
             .build()
         )
-        is_solved = solver.run()
+        is_solved = solver.run(timeout=3600*2)
         elapsed_time = time.time() - start_time
         return (problem_name, is_solved, elapsed_time) 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Warning: solver crashed on problem '{problem_name}' : ({type(e)}) {e}")
         elapsed_time = time.time() - start_time 
         return (problem_name, False, elapsed_time)
 
-def run_newclid(filepath: Path, modelpath: Path, max_workers: int = 4, decoding_size: int = 1, beam_size: int = 1, search_depth: int = 1):
+def run_newclid(filepath: Path, modelpath: list[Path], max_workers: int = 4, decoding_size: int = 1, beam_size: int = 1, search_depth: int = 1):
     """
     Main function, read the file and execute tasks using ProcessPoolExecutor.
     
@@ -108,7 +110,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Newclid evaluation with configurable paths.")
     parser.add_argument("--problems_path", type=str, default="problems_datasets/dev_jgex.txt",
                         help="Path to the problems dataset file")
-    parser.add_argument("--model_path", type=str, help="Path to the model checkpoint")
+    parser.add_argument("--model_path", type=str, nargs='+', help="Path to the model checkpoint")
     parser.add_argument("--max_workers", type=int, default=8, help="Number of worker processes to use")
     parser.add_argument("--decoding_size", type=int, default=8)
     parser.add_argument("--beam_size", type=int, default=64)
@@ -116,5 +118,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     problems_path = Path(args.problems_path)
-    model_path = Path(args.model_path).resolve()
+    model_path = [Path(path).resolve() for path in args.model_path]
     run_newclid(problems_path, model_path, max_workers=args.max_workers, decoding_size=args.decoding_size, beam_size=args.beam_size, search_depth=args.search_depth)

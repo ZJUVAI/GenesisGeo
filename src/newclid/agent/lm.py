@@ -10,8 +10,12 @@ import copy
 from openai import OpenAI
 import torch
 from pathlib import Path
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 import heapq
+from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 from newclid.agent.agents_interface import (
     DeductiveAgent,
@@ -32,11 +36,8 @@ if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
     from newclid.dependencies.dependency import Dependency
 
-
 class LMAgent(DeductiveAgent):
-    def __init__(self, model_path: Path, decoding_size: int, beam_size: int, search_depth: int):
-        self.rule_buffer: list[Rule] = []
-        self.application_buffer: list[Dependency] = []
+    def __init__(self, model_path: list[Path], decoding_size: int, beam_size: int, search_depth: int):
         self.any_new_statement_has_been_added = True
         self.decoding_size = decoding_size
         self.beam_size = beam_size
@@ -52,12 +53,13 @@ class LMAgent(DeductiveAgent):
 
         # transformer
         self.model_path = model_path
-        self.model = None
-        self.tokenizer = None
+        self.models = []
+        self.tokenizers = []
+        
 
     def inference(self, query: str):
         chat_response = self.client.chat.completions.create(
-            model="/c23474/home/zhuminfeng/LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft",
+            model="LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft",
             messages=[
                 {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
                 {"role": "user", "content": query}
@@ -79,50 +81,75 @@ class LMAgent(DeductiveAgent):
     
     @torch.no_grad()
     def inference2(self, query: str, response_prefix: str = '<aux>'):
-        if self.model is None or self.tokenizer is None:
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_path,
-                torch_dtype="auto",
-                device_map="auto",#"sequential",
-                attn_implementation="flash_attention_2" # Sliding Window Attention is enabled but not implemented for others
+        if not self.models or not self.tokenizers:
+            # Clear any existing models/tokenizers
+            self.models.clear()
+            self.tokenizers.clear()
+            
+            # Load all models and tokenizers
+            for path in self.model_path:
+                model = AutoModelForCausalLM.from_pretrained(
+                    path,
+                    torch_dtype="auto",
+                    device_map="auto", #"sequential",
+                    attn_implementation="flash_attention_2"  # Sliding Window Attention is enabled but not implemented for others
+                )
+                tokenizer = AutoTokenizer.from_pretrained(path)
+                self.models.append(model)
+                self.tokenizers.append(tokenizer)
+        
+        aux_dsl_dict = {}
+        # Process each model/tokenizer pair
+        for model, tokenizer in zip(self.models, self.tokenizers):
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": query}
+            ]
+            text = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
             )
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."}, #You are Qwen, created by Alibaba Cloud. 
-            {"role": "user", "content": query}
-        ]
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        # text = query
-        model_prompt_inputs = self.tokenizer([text], return_tensors="pt")
-        text += response_prefix
-        model_inputs = self.tokenizer([text], return_tensors="pt").to('cuda')
-        bad_words_ids = self.tokenizer(["<", " <"]).input_ids
-        generated_output = self.model.generate(
-            **model_inputs,
-            max_new_tokens=100,
-            num_beams=self.decoding_size,
-            num_return_sequences=self.decoding_size,
-            # num_beam_groups=5,
-            # diversity_penalty=1.0,
-            # do_sample=True, 
-            # # temperature=2, 
-            # top_k=50, 
-            # top_p=0.9, 
-            pad_token_id=151643,
-            eos_token_id=2587, #' ;' #29
-            # bad_words_ids=bad_words_ids,
-            return_dict_in_generate=True, 
-            output_scores=True
-        )
-        scores = generated_output.sequences_scores
-        generated_output = generated_output.sequences[:, model_prompt_inputs.input_ids.shape[1]:]
-        aux_dsl = self.tokenizer.batch_decode(generated_output, skip_special_tokens=True)
-        return aux_dsl, scores
+            # text = query
+            model_prompt_inputs = tokenizer([text], return_tensors="pt")
+            text += response_prefix
+            model_inputs = tokenizer([text], return_tensors="pt").to('cuda')
+            bad_words_ids = tokenizer(["<", " <"]).input_ids
+            past_key_values = DynamicCache()
+            generated_output = model.generate(
+                **model_inputs,
+                max_new_tokens=100,
+                num_beams=self.decoding_size,
+                num_return_sequences=self.decoding_size,
+                # num_beam_groups=5,
+                # diversity_penalty=1.0,
+                # do_sample=True, 
+                # # temperature=2, 
+                # top_k=50, 
+                # top_p=0.9, 
+                pad_token_id=151643,
+                eos_token_id=2587, #' ;' #29
+                # bad_words_ids=bad_words_ids,
+                return_dict_in_generate=True, 
+                output_scores=True,
+                # use_cache=True,
+                past_key_values=past_key_values,
+            )
+            scores = generated_output.sequences_scores
+            generated_output = generated_output.sequences[:, model_prompt_inputs.input_ids.shape[1]:]
+            aux_dsls = tokenizer.batch_decode(generated_output, skip_special_tokens=True)
+            for aux_dsl, score in zip(aux_dsls, scores):
+                score = score.item()
+                if aux_dsl in aux_dsl_dict:
+                    if score > aux_dsl_dict[aux_dsl]:
+                        aux_dsl_dict[aux_dsl] = score
+                else:
+                    aux_dsl_dict[aux_dsl] = score
+            
+        return aux_dsl_dict # key: aux, value: score
+
     
+
     def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600
         ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
@@ -145,97 +172,110 @@ class LMAgent(DeductiveAgent):
         t0 = time.time()
         step = 0
 
-        self.run_ddar(proof, rules, t0, timeout)
+        proof = LMAgent.run_ddar(proof, rules, t0, timeout)
 
         if not proof.check_goals():
             beam_queue = BeamQueue(max_size=self.beam_size)
             beam_queue.add(node=(self.problemJGEX, proof, '<aux>'), val=0)
             p_dsl = self.problem_to_dsl(self.problemJGEX, proof)
-            for depth in range(self.search_depth):
-                new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
-                for prev_score, (problem, proof, a_dsl) in beam_queue:
-                    # seek help from llm
-                    # if time.time() - t0 > timeout:
-                    #     break
+            with ProcessPoolExecutor(max_workers=16) as executor:
+                future_info = dict()
+                running_futures = set()
+                for depth in range(self.search_depth):
+                    new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
+                    for prev_score, (problem, proof, a_dsl) in beam_queue:
+                        # seek help from llm
+                        if time.time() - t0 > timeout:
+                            break
 
-                    # Stragety 1: insert the aux string into problem and predict the next aux
-                    p_dsl = self.problem_to_dsl(problem, proof)
-                    aux_dsl_list, scores = self.inference2(p_dsl, '<aux> x00')
-                    for aux_dsl, score in zip(aux_dsl_list, scores):
-                        try:
-                            aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
-                            if aux:
-                                new_problem = problem.with_more_construction(aux) # will recreate the problem
-                                new_proof = copy.deepcopy(proof)
-                                self.add_construction(new_proof, aux)
-                                # solver = GeometricSolverBuilder().load_problem(new_problem.renamed()).with_deductive_agent(DDARN()).build(max_attempts=1000)
-                                # new_proof = solver.proof
-                                self.run_ddar(new_proof, rules, t0, timeout)
-                                if new_proof.check_goals():
-                                    return proof_info(new_proof)
-                                else:
-                                    new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
-                        except Exception as e:
-                            # import traceback
-                            # traceback.print_exc()
-                            continue
+                        # Stragety 1: insert the aux string into problem and predict the next aux
+                        p_dsl = self.problem_to_dsl(problem, proof)
+                        aux_dsl_dict = self.inference2(p_dsl, '<aux> x00')
+                        for aux_dsl, score in aux_dsl_dict.items():
+                            try:
+                                aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
+                                if aux:
+                                    new_problem = problem.with_more_construction(aux)  # will recreate the problem
+                                    new_proof = copy.deepcopy(proof)
+                                    self.add_construction(new_proof, aux)
+                                    # submit multi tasks
+                                    future = executor.submit(LMAgent.run_ddar, new_proof, rules, t0, timeout)
+                                    future_info[future] = (new_problem, prev_score, score, a_dsl)
+                                    running_futures.add(future)
+                                    # check any done futures
+                                    done, running_futures = wait(running_futures, timeout=0, return_when=FIRST_COMPLETED)
+                                    for f in done:
+                                        new_proof = f.result()
+                                        if new_proof.check_goals():
+                                            return proof_info(new_proof)
+                                        else:
+                                            new_problem, prev_score, score, a_dsl = future_info[f]
+                                            new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
 
-                    # Stragety 2: extend the aux string
-                    # a_dsl += ' x00'
-                    # aux_dsl_list, scores = self.inference2(p_dsl, a_dsl)
-                    # for aux_dsl, score in zip(aux_dsl_list, scores):
-                    #     # print(aux_dsl)
-                    #     # if time.time() - t0 > timeout: 
-                    #     #     return proof_info(proof)
-                    #     try:
-                    #         aux = self.try_dsl_to_constructions(aux_dsl[len(a_dsl):])
-                    #         if aux:
-                    #             new_problem = problem.with_more_construction(aux) # will recreate the problem
-                    #             new_proof = copy.deepcopy(proof)
-                    #             self.add_construction(new_proof, aux)
-                    #             self.run_ddar(new_proof, rules, t0, timeout)
-                    #             if new_proof.check_goals():
-                    #                 return proof_info(new_proof)
-                    #             else:
-                    #                 new_queue.add(node=(new_problem, new_proof, aux_dsl), val=prev_score+score)
-                    #     except Exception as e:
-                    #         continue
+                            except Exception as e:
+                                # logging.warning(f"Error processing aux construction: {e}")
+                                # import traceback
+                                # traceback.print_exc()
+                                continue
+                    # check remaining futures/tasks
+                    done, _ = wait(running_futures)
+                    for f in done:
+                        new_proof = f.result()
+                        if new_proof.check_goals():
+                            return proof_info(new_proof)
+                        else:
+                            new_problem, prev_score, score, a_dsl = future_info[f]
+                            new_queue.add((new_problem, new_proof, a_dsl), val=prev_score + score)
 
+
+                        # Stragety 1: insert the aux string into problem and predict the next aux     
+                        # for aux_dsl, score in aux_dsl_dict.items():
+                        #     try:
+                        #         aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
+                        #         if aux:
+                        #             new_problem = problem.with_more_construction(aux) # will recreate the problem
+                        #             new_proof = copy.deepcopy(proof)
+                        #             self.add_construction(new_proof, aux)
+                        #             # solver = GeometricSolverBuilder().load_problem(new_problem.renamed()).with_deductive_agent(DDARN()).build(max_attempts=1000)
+                        #             # new_proof = solver.proof
+                        #             self.run_ddar(new_proof, rules, t0, timeout)
+                        #             if new_proof.check_goals():
+                        #                 return proof_info(new_proof)
+                        #             else:
+                        #                 new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
+                        #     except Exception as e:
+                        #         # import traceback
+                        #         # traceback.print_exc()
+                        #         continue
+
+                        # Stragety 2: extend the aux string
+                        # a_dsl += ' x00'
+                        # aux_dsl_list, scores = self.inference2(p_dsl, a_dsl)
+                        # for aux_dsl, score in zip(aux_dsl_list, scores):
+                        #     # print(aux_dsl)
+                        #     # if time.time() - t0 > timeout: 
+                        #     #     return proof_info(proof)
+                        #     try:
+                        #         aux = self.try_dsl_to_constructions(aux_dsl[len(a_dsl):])
+                        #         if aux:
+                        #             new_problem = problem.with_more_construction(aux) # will recreate the problem
+                        #             new_proof = copy.deepcopy(proof)
+                        #             self.add_construction(new_proof, aux)
+                        #             self.run_ddar(new_proof, rules, t0, timeout)
+                        #             if new_proof.check_goals():
+                        #                 return proof_info(new_proof)
+                        #             else:
+                        #                 new_queue.add(node=(new_problem, new_proof, aux_dsl), val=prev_score+score)
+                        #     except Exception as e:
+                        #         continue
+
+                        
                     
-                beam_queue = new_queue
+                    beam_queue = new_queue
         return proof_info(proof)
 
-    def step(self, proof: ProofState, rules: list[Rule]) -> tuple[bool, bool]:
-        if proof.check_goals():
-            return False
-        if self.rule_buffer:
-            theorem = self.rule_buffer.pop()
-            logging.debug("ddarn matching" + str(theorem))
-            deps = proof.match_theorem(theorem)
-            logging.debug("ddarn matched " + str(len(deps)))
-            self.application_buffer.extend(deps)
-        elif self.application_buffer:
-            dep = self.application_buffer.pop()
-            logging.debug(f"ddarn : apply {dep}")
-            if proof.apply_dep(dep):
-                self.any_new_statement_has_been_added = True
-        else:
-            if not self.any_new_statement_has_been_added:
-                return False
-            self.any_new_statement_has_been_added = False
-            self.rule_buffer = list(rules)
-            logging.debug("ddarn : reload")
-        return True
-
-    def run_ddar(self, proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600):
-        proof.dep_graph.obtain_numerical_checked_premises()
-        self.any_new_statement_has_been_added = True
-        running = True
-        while running and time.time() - start_time < timeout:
-            running = self.step(proof=proof, rules=rules)
-            # TODO: add step later..
-            # step += 1
-
+    def step(self, proof: ProofState, rules: list[Rule]) -> bool:
+        return
     def try_dsl_to_constructions(self, content):
         points, premises = content.split(';')[0].split(' : ')
 
@@ -411,6 +451,36 @@ class LMAgent(DeductiveAgent):
         clauses = Clause.parse_line(s)
         for clause in clauses:
             proof.add_construction(clause)
+    @staticmethod
+    def run_ddar(proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600):   
+        rule_buffer: list[Rule] = []
+        application_buffer: list[Dependency] = []
+        any_new_statement_has_been_added = True
+        proof.dep_graph.obtain_numerical_checked_premises()
+        running = True
+        while running and time.time() - start_time < timeout:
+            if proof.check_goals():
+                running = False
+            if rule_buffer:
+                theorem = rule_buffer.pop()
+                logging.debug("ddarn matching" + str(theorem))
+                deps = proof.match_theorem(theorem)
+                logging.debug("ddarn matched " + str(len(deps)))
+                application_buffer.extend(deps)
+            elif application_buffer:
+                dep = application_buffer.pop()
+                logging.debug(f"ddarn : apply {dep}")
+                if proof.apply_dep(dep):
+                    any_new_statement_has_been_added = True
+            else:
+                if not any_new_statement_has_been_added:
+                    running = False
+                any_new_statement_has_been_added = False
+                rule_buffer = list(rules)
+                logging.debug("ddarn : reload")
+            # TODO: add step later..
+            # step += 1
+        return proof
 
 class BeamQueue:
     """Keep only the top k objects according to their values."""
