@@ -1,6 +1,6 @@
-"""Classical Breadth-First Search based agents."""
-
 from __future__ import annotations
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import time
 import logging
 from typing import TYPE_CHECKING, Any
@@ -12,9 +12,7 @@ import torch
 from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 import heapq
-from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import ray
 
 
 from newclid.agent.agents_interface import (
@@ -35,6 +33,8 @@ from newclid.predicates.equal_angles import EqAngle
 if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
     from newclid.dependencies.dependency import Dependency
+
+
 
 class LMAgent(DeductiveAgent):
     def __init__(self, model_path: list[Path], decoding_size: int, beam_size: int, search_depth: int):
@@ -148,7 +148,6 @@ class LMAgent(DeductiveAgent):
             
         return aux_dsl_dict # key: aux, value: score
 
-    
 
     def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600
         ) -> dict[str, Any]:
@@ -178,100 +177,72 @@ class LMAgent(DeductiveAgent):
             beam_queue = BeamQueue(max_size=self.beam_size)
             beam_queue.add(node=(self.problemJGEX, proof, '<aux>'), val=0)
             p_dsl = self.problem_to_dsl(self.problemJGEX, proof)
-            with ProcessPoolExecutor(max_workers=5) as executor:
-                future_info = dict()
-                running_futures = set()
-                for depth in range(self.search_depth):
-                    new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
-                    for prev_score, (problem, proof, a_dsl) in beam_queue:
-                        # seek help from llm
-                        if time.time() - t0 > timeout:
-                            break
+            
+            # Initialize Ray if not already initialized
+            if not ray.is_initialized():
+                ray.init(ignore_reinit_error=True, logging_level=logging.ERROR)
+            
+            future_info = dict()
+            running_futures = []
+            
+            for depth in range(self.search_depth):
+                new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
+                for prev_score, (problem, proof, a_dsl) in beam_queue:
+                    # seek help from llm
+                    if time.time() - t0 > timeout:
+                        break
 
-                        # Stragety 1: insert the aux string into problem and predict the next aux
-                        p_dsl = self.problem_to_dsl(problem, proof)
-                        aux_dsl_dict = self.inference2(p_dsl, '<aux> x00')
-                        for aux_dsl, score in aux_dsl_dict.items():
-                            try:
-                                aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
-                                if aux:
-                                    new_problem = problem.with_more_construction(aux)  # will recreate the problem
-                                    new_proof = copy.deepcopy(proof)
-                                    self.add_construction(new_proof, aux)
-                                    # submit multi tasks
-                                    future = executor.submit(LMAgent.run_ddar, new_proof, rules, t0, timeout)
-                                    future_info[future] = (new_problem, prev_score, score, a_dsl)
-                                    running_futures.add(future)
-                                    # check any done futures
-                                    done, running_futures = wait(running_futures, timeout=0, return_when=FIRST_COMPLETED)
-                                    for f in done:
-                                        new_proof = f.result()
-                                        if new_proof.check_goals():
-                                            return proof_info(new_proof)
-                                        else:
-                                            new_problem, prev_score, score, a_dsl = future_info[f]
-                                            new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
-
-                            except Exception as e:
-                                # logging.warning(f"Error processing aux construction: {e}")
-                                # import traceback
-                                # traceback.print_exc()
-                                continue
-                    # check remaining futures/tasks
-                    done, _ = wait(running_futures)
-                    for f in done:
-                        new_proof = f.result()
-                        if new_proof.check_goals():
-                            return proof_info(new_proof)
-                        else:
-                            new_problem, prev_score, score, a_dsl = future_info[f]
-                            new_queue.add((new_problem, new_proof, a_dsl), val=prev_score + score)
-
-
-                        # Stragety 1: insert the aux string into problem and predict the next aux     
-                        # for aux_dsl, score in aux_dsl_dict.items():
-                        #     try:
-                        #         aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
-                        #         if aux:
-                        #             new_problem = problem.with_more_construction(aux) # will recreate the problem
-                        #             new_proof = copy.deepcopy(proof)
-                        #             self.add_construction(new_proof, aux)
-                        #             # solver = GeometricSolverBuilder().load_problem(new_problem.renamed()).with_deductive_agent(DDARN()).build(max_attempts=1000)
-                        #             # new_proof = solver.proof
-                        #             self.run_ddar(new_proof, rules, t0, timeout)
-                        #             if new_proof.check_goals():
-                        #                 return proof_info(new_proof)
-                        #             else:
-                        #                 new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
-                        #     except Exception as e:
-                        #         # import traceback
-                        #         # traceback.print_exc()
-                        #         continue
-
-                        # Stragety 2: extend the aux string
-                        # a_dsl += ' x00'
-                        # aux_dsl_list, scores = self.inference2(p_dsl, a_dsl)
-                        # for aux_dsl, score in zip(aux_dsl_list, scores):
-                        #     # print(aux_dsl)
-                        #     # if time.time() - t0 > timeout: 
-                        #     #     return proof_info(proof)
-                        #     try:
-                        #         aux = self.try_dsl_to_constructions(aux_dsl[len(a_dsl):])
-                        #         if aux:
-                        #             new_problem = problem.with_more_construction(aux) # will recreate the problem
-                        #             new_proof = copy.deepcopy(proof)
-                        #             self.add_construction(new_proof, aux)
-                        #             self.run_ddar(new_proof, rules, t0, timeout)
-                        #             if new_proof.check_goals():
-                        #                 return proof_info(new_proof)
-                        #             else:
-                        #                 new_queue.add(node=(new_problem, new_proof, aux_dsl), val=prev_score+score)
-                        #     except Exception as e:
-                        #         continue
-
-                        
+                    # Stragety 1: insert the aux string into problem and predict the next aux
+                    p_dsl = self.problem_to_dsl(problem, proof)
+                    aux_dsl_dict = self.inference2(p_dsl, '<aux> x00')
+                    for aux_dsl, score in aux_dsl_dict.items():
+                        try:
+                            aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
+                            if aux:
+                                # create new problem as new task
+                                new_problem = problem.with_more_construction(aux)  # will recreate the problem
+                                new_proof = copy.deepcopy(proof)
+                                self.add_construction(new_proof, aux)
+                                # submit multi tasks
+                                future = run_ddar_remote.remote(new_proof, rules, t0, timeout)
+                                future_info[future] = (new_problem, prev_score, score, a_dsl)
+                                running_futures.append(future)
+                                # check any done futures
+                                done, running_futures = ray.wait(running_futures, timeout=0)
+                                for f in done:
+                                    new_proof = ray.get(f)
+                                    if new_proof.check_goals():
+                                        for task in running_futures:
+                                            ray.cancel(task, force=True)
+                                        ray.shutdown()
+                                        return proof_info(new_proof)
+                                    else:
+                                        # import pdb; pdb.set_trace()
+                                        new_problem, prev_score, score, a_dsl = future_info[f]
+                                        new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
+                                
+                        except Exception as e:
+                            # logging.warning(f"Error processing aux construction: {e} {aux}")
+                            # import traceback
+                            # traceback.print_exc()
+                            continue
+                            
+                # check remaining futures/tasks
+                done, remaining_futures = ray.wait(running_futures, num_returns=len(running_futures))
+                for f in done:
+                    new_proof = ray.get(f)
+                    if new_proof.check_goals():
+                        for task in remaining_futures:
+                            ray.cancel(task, force=True)
+                        ray.shutdown()
+                        return proof_info(new_proof)
+                    else:
+                        new_problem, prev_score, score, a_dsl = future_info[f]
+                        new_queue.add((new_problem, new_proof, a_dsl), val=prev_score + score)
                     
-                    beam_queue = new_queue
+                    
+                beam_queue = new_queue
+            ray.shutdown()
         return proof_info(proof)
 
     def step(self, proof: ProofState, rules: list[Rule]) -> bool:
@@ -481,6 +452,11 @@ class LMAgent(DeductiveAgent):
             # TODO: add step later..
             # step += 1
         return proof
+
+@ray.remote(num_cpus=1)
+def run_ddar_remote(proof, rules, start_time, timeout):
+    """Ray remote function to run DDAR."""
+    return LMAgent.run_ddar(proof, rules, start_time, timeout)
 
 class BeamQueue:
     """Keep only the top k objects according to their values."""

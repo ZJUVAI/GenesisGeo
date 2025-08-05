@@ -1,9 +1,10 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ["RAY_DEDUP_LOGS"] = "0"
+os.environ["RAY_LOG_LEVEL"] = "WARNING"
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 import argparse 
+import ray
 
 from newclid.agent.ddarn import DDARN
 from newclid.agent.human_agent import HumanAgent
@@ -34,13 +35,16 @@ def solve_problem(args):
         elapsed_time = time.time() - start_time 
         return (problem_name, False, elapsed_time)
 
-def run_newclid(filepath: Path, modelpath: list[Path], max_workers: int = 4, decoding_size: int = 1, beam_size: int = 1, search_depth: int = 1):
+@ray.remote(num_cpus=1, num_gpus=0.125)
+def ray_solve_problem(args):
     """
-    Main function, read the file and execute tasks using ProcessPoolExecutor.
-    
-    Parameters:
-        filepath (Path): The path of the file containing problem names.
-        max_workers (int): The maximum number of processes in the pool, default is 4.
+    Ray remote function to process a single problem.
+    """
+    return solve_problem(args)
+
+def run_newclid(filepath: Path, modelpath: list[Path], num_cpus: int, decoding_size: int, beam_size: int, search_depth: int):
+    """
+    Main function, read the file and execute tasks using Ray.
     """
 
     if not os.path.exists(filepath):
@@ -57,16 +61,36 @@ def run_newclid(filepath: Path, modelpath: list[Path], max_workers: int = 4, dec
     total_problems = len(problem_names)
     print(f"Total problems to solve: {total_problems}")
 
-    # Use ProcessPoolExecutor to process problems concurrently
+    # Use Ray to process problems concurrently
     solved_count = 0
     processed_count = 0  
     total_time = 0 
     total_real_time = time.time()   
 
-    if max_workers == 1:
-        # Single-threaded execution
-        for problem_name in problem_names:
-            problem_name, is_solved, elapsed_time = solve_problem((problem_name, filepath, modelpath, decoding_size, beam_size, search_depth))
+
+    # Multi-threaded execution using Ray with limited concurrent tasks
+    # Initialize Ray with specified number of CPUs
+    if not ray.is_initialized():
+        ray.init(log_to_driver=False, ignore_reinit_error=True, num_cpus=num_cpus)
+
+    pending_tasks = {}
+    completed_tasks = set()
+    
+    # Submit all tasks
+    for i, problem_name in enumerate(problem_names):
+        task = ray_solve_problem.remote((problem_name, filepath, modelpath, decoding_size, beam_size, search_depth))
+        pending_tasks[task] = problem_name
+    
+    # Process tasks as they complete
+    while pending_tasks:
+        # Wait for at least one task to complete
+        done_tasks, _ = ray.wait(list(pending_tasks.keys()), timeout=0)
+        
+        # Process completed tasks
+        for task in done_tasks:
+            problem_name = pending_tasks.pop(task)
+            completed_tasks.add(problem_name)
+            problem_name, is_solved, elapsed_time = ray.get(task)
             solved_count += 1 if is_solved else 0
             processed_count += 1  
             total_time += elapsed_time 
@@ -77,26 +101,7 @@ def run_newclid(filepath: Path, modelpath: list[Path], max_workers: int = 4, dec
                 f"({'Success' if is_solved else 'Failed'}), "
                 f"Time: {elapsed_time:.2f}s"
             )
-    else:
-        # Multi-threaded execution using ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            # Submit tasks and collect futures
-            futures = {executor.submit(solve_problem, (name, filepath, modelpath, decoding_size, beam_size, search_depth)): name for name in problem_names}
-
-            # Process completed tasks
-            for future in as_completed(futures):
-                problem_name = futures[future]
-                problem_name, is_solved, elapsed_time = future.result()
-                solved_count += 1 if is_solved else 0
-                processed_count += 1  
-                total_time += elapsed_time 
-                print(
-                    f"Progress: {processed_count}/{total_problems} processed, "  
-                    f"Solved: {solved_count}, "
-                    f"Current: {problem_name} "
-                    f"({'Success' if is_solved else 'Failed'}), "
-                    f"Time: {elapsed_time:.2f}s"
-                )
+    ray.shutdown()
 
     solved_percentage = (solved_count / total_problems) * 100 if total_problems > 0 else 0
     total_real_time = time.time() - total_real_time
@@ -119,4 +124,4 @@ if __name__ == "__main__":
     
     problems_path = Path(args.problems_path)
     model_path = [Path(path).resolve() for path in args.model_path]
-    run_newclid(problems_path, model_path, max_workers=args.max_workers, decoding_size=args.decoding_size, beam_size=args.beam_size, search_depth=args.search_depth)
+    run_newclid(problems_path, model_path, num_cpus=args.max_workers, decoding_size=args.decoding_size, beam_size=args.beam_size, search_depth=args.search_depth)
