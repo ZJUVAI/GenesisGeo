@@ -178,7 +178,7 @@ class LMAgent(DeductiveAgent):
             beam_queue = BeamQueue(max_size=self.beam_size)
             beam_queue.add(node=(self.problemJGEX, proof, '<aux>'), val=0)
             p_dsl = self.problem_to_dsl(self.problemJGEX, proof)
-            with ProcessPoolExecutor(max_workers=16) as executor:
+            with ProcessPoolExecutor(max_workers=5) as executor:
                 future_info = dict()
                 running_futures = set()
                 for depth in range(self.search_depth):

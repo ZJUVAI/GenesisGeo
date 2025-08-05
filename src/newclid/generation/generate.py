@@ -2,37 +2,35 @@ import logging
 import os
 import re
 import argparse
-import json
-import random
-import time
-from datetime import timedelta
-from pathlib import Path
 import itertools
-from collections import defaultdict
-import numpy as np
-from millify import millify
+import json
+import logging
 import multiprocessing
-import copy
+import os
+import random
+import re
 import string
+import time
+from collections import defaultdict
+from datetime import timedelta
+import ray
+from millify import millify
 
-from newclid.configs import default_defs_path, default_rules_path
-from newclid.formulations.definition import DefinitionJGEX
-from newclid.formulations.rule import Rule
-from newclid.dependencies.symbols import Point
-from newclid.formulations.problem import ProblemJGEX
-from newclid.statement import Statement
-from newclid.api import GeometricSolverBuilder, GeometricSolver
 from newclid.agent.ddarn import DDARN
+from newclid.api import GeometricSolver, GeometricSolverBuilder
+from newclid.configs import default_defs_path
+from newclid.dependencies.dependency import Dependency, IN_PREMISES, NUMERICAL_CHECK
 from newclid.dependencies.dependency_graph import DependencyGraph
-from newclid.generation.clause_generation import CompoundClauseGen
-from newclid.proof import ProofState
-from newclid.proof_writing import get_structured_proof, write_proof_steps
+from newclid.dependencies.symbols import Point
 from newclid.formulations.clause import translate_sentence
-from newclid.numerical import close_enough
+from newclid.formulations.definition import DefinitionJGEX
+from newclid.formulations.problem import ProblemJGEX
+from newclid.generation.clause_generation import CompoundClauseGen
 from newclid.generation.goal_filter import GeometryGoalFilter
 from newclid.generation.output_summary import Summary, get_first_predicate
-from newclid.dependencies.dependency import IN_PREMISES, NUMERICAL_CHECK, Dependency
-
+from newclid.proof import ProofState
+from newclid.proof_writing import get_structured_proof, write_proof_steps
+from newclid.statement import Statement
 
 class GeometryGenerator:
     def __init__(self, max_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600, filteration_rate=0.6):
@@ -47,6 +45,7 @@ class GeometryGenerator:
         self.path_prefix = os.path.join(
             self.output_dir, f"geometry_clauses{self.max_clauses}_samples{millify(self.n_samples)}")
         self.write_buffer = []
+        self.writer_hash = set()
         self.clauses_generator = CompoundClauseGen(
             max_comma_sep_clause=2,
             max_single_clause=1,
@@ -592,10 +591,8 @@ class GeometryGenerator:
                     "nl_problem": "",
                     "n_proof_steps": n_proof_steps,
                     # "nl_solution": nl_solution,
-                    # "llm_data": llm['llm_data'],
                     "llm_input": llm['llm_input'],
                     "llm_output": llm['llm_output'],
-                    # "llm_nat_solution": llm_nat_solution,
                     "llm_input_renamed": llm_renamed['llm_input'],
                     "llm_output_renamed": llm_renamed['llm_output'],
                 })
@@ -629,8 +626,8 @@ class GeometryGenerator:
         start_time = time.time()
         if self.n_threads == 1:
             while True:
-                data, summary = self.process_single_problem(
-                    next(task_iterator))
+                data, summary = self.process_single_problem(next(task_iterator))
+                data = self.writer_hash_filter(data, "llm_input_renamed")
                 if data:
                     self.write_data(data)
                     all_data_len += len(data)
@@ -646,26 +643,59 @@ class GeometryGenerator:
                     break
         else:
             try:
-                with multiprocessing.Pool(self.n_threads) as pool:
-                    for data, summary in pool.imap_unordered(self.process_single_problem, task_generator()):
-                        if data:
-                            self.write_data(data)
-                            all_data_len += len(data)
-                            summary_reporter.add(summary)
-                            elapsed_time = time.time() - start_time
-                            logging.info(
-                                f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                                f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
-                                f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
-                                f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                            )
-                        if all_data_len >= self.n_samples:
-                            pool.terminate()
-                            break
-                    pool.close()
-                    pool.join()
+                if not ray.is_initialized():
+                    ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
+                @ray.remote(num_cpus=1)
+                def ray_process_single_problem(args):
+                    return self.process_single_problem(args)
+                pending_tasks = []
+                max_pending = self.n_threads * 2
+                while len(pending_tasks) < max_pending:
+                    pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
+
+                while all_data_len < self.n_samples:
+                    done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
+                    result = ray.get(done[0])
+                    data, summary = result
+                    data = self.writer_hash_filter(data, "llm_input_renamed")
+                    if data:
+                        self.write_data(data)
+                        all_data_len += len(data)
+                        summary_reporter.add(summary)
+                        elapsed_time = time.time() - start_time
+                        logging.info(
+                            f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                            f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
+                            f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
+                            f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                        )
+                    if len(pending_tasks) < max_pending:
+                        pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
+                for task in pending_tasks:
+                    ray.cancel(task, force=True)
+                ray.shutdown()
+
+                # with multiprocessing.Pool(self.n_threads) as pool:
+                #     for data, summary in pool.imap_unordered(self.process_single_problem, task_generator()):
+                #         if data:
+                #             data = self.writer_hash_filter(data, "llm_input_renamed")
+                #             self.write_data(data)
+                #             all_data_len += len(data)
+                #             summary_reporter.add(summary)
+                #             elapsed_time = time.time() - start_time
+                #             logging.info(
+                #                 f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                #                 f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
+                #                 f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
+                #                 f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                #             )
+                #         if all_data_len >= self.n_samples:
+                #             pool.terminate()
+                #             break
+                #     pool.close()
+                #     pool.join()
             except Exception as e:
-                logging.error(f"multiprocessing Pool error: {e}")
+                logging.error(f"multiprocessing error: {e}")
 
         self.write_data([], force=True)
         final_elapsed_time = time.time() - start_time
@@ -675,6 +705,16 @@ class GeometryGenerator:
             f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
         summary_reporter.output_report()
 
+    def writer_hash_filter(self, data: list, key: str) -> bool:
+        """Check if the input has already been written to the output file."""
+        filtered_data = []
+        for d in data:
+            key_hash = hash(d[key])
+            if key_hash not in self.writer_hash:
+                self.writer_hash.add(key_hash)
+                filtered_data.append(d)
+        return filtered_data
+        
     def write_data(self, all_data: list, force: bool = False):
         """Append a single JSON object to a .jsonl file."""
         self.write_buffer.extend(all_data)
