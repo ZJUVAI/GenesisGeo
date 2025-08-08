@@ -198,7 +198,7 @@ class GeometryGoalFilter:
 
         # <aux> x00 c : perp k n n s [024] cong k n n s [025]; x00 h : ; x00 i : ; x00 j : perp h i h j [009] cong h i h j [010] ; </aux> <proof> cong a k c k [002] r19 [000] [001] ; cong b k c k [003] r19 [000] [001] ; cong a k b k [004] a00 [002] [003] ; </proof>
         valid_aux_predicates = {'perp', 'para',
-                                'cong', 'coll', 'eqangle', 'cyclic'}
+                                'cong', 'coll', 'eqangle', 'cyclic', 'midp'}
         aux_match = re.match(r"<aux>\s*(.*)\s*</aux>", llm_output)
         # c : perp a c b c [001] ; c : perp a c b c [001] ;
         if aux_match:

@@ -7,7 +7,7 @@ AuxChecker
 3. pipeline: 完整验证流水线
 使用示例:
 python scripts/aux_checker.py validate-translation input.jsonl
-python scripts/aux_checker.py validate-aux input.jsonl --output-dir results/
+python scripts/aux_checker.py validate-aux input.jsonl
 python scripts/aux_checker.py pipeline input.jsonl
 """
 import json

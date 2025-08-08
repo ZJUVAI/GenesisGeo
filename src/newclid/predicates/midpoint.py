@@ -39,6 +39,11 @@ class MidPoint(Predicate):
         return m.num.close_enough((a.num + b.num) / 2)
 
     @classmethod
+    def to_constructive(cls, point: str, args: tuple[str, ...]) -> str:
+        a, b, c = args
+        return f"midpoint {a} {b} {c}"
+    
+    @classmethod
     def pretty(cls, statement: Statement) -> str:
         args: tuple[Point, ...] = statement.args
         m, a, b = args

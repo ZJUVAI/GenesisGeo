@@ -24,6 +24,7 @@ from newclid.formulations.clause import Clause
 from newclid.statement import Statement
 from newclid.formulations.clause import translate_sentence
 from newclid.predicates.congruence import Cong
+from newclid.predicates.midpoint import MidPoint
 from newclid.predicates.parallelism import Para
 from newclid.predicates.perpendicularity import Perp
 from newclid.predicates.collinearity import Coll
@@ -299,6 +300,10 @@ class LMAgent(DeductiveAgent):
         elif predicate == 'cong':
             return Cong.to_constructive(point, tuple(args))
 
+        # 中点
+        elif predicate == 'midp':
+            return MidPoint.to_constructive(point, tuple(args))
+
         # 共线
         elif predicate == 'coll':
             return Coll.to_constructive(point, tuple(args))
@@ -353,6 +358,9 @@ class LMAgent(DeductiveAgent):
                     return None
 
             a, b, c, d, e, f, g, h = args
+            # Handle diagonal line exchange
+            if(len(set([a, b, c, d])) == 4 and len(set([a, b, e, f])) == 3): 
+                a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
             res1 = EqAngle.to_constructive(point, arrange_angle_points(a, b, c, d) + arrange_angle_points(e, f, g, h))
             return res1
             
