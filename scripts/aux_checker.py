@@ -42,16 +42,21 @@ class AuxChecker:
         # 创建LMAgent实例来调用translate函数
         # 使用空的模型路径，因为我们只需要调用translate方法
         self.lm_agent = LMAgent(model_path=[], decoding_size=1, beam_size=1, search_depth=1)
-    def extract_aux_from_llm_output(self, llm_output: str) -> Optional[str]:
+    def extract_aux_from_llm_output(self, llm_output: str):
         """从LLM输出中提取aux部分的内容"""
         aux_pattern = r'<aux>\s*(.*?)\s*</aux>'
         match = re.search(aux_pattern, llm_output, re.DOTALL)
         if match:
-            aux_content = match.group(1).strip()
-            # 移除开头可能的编号，如 "x00 "
-            aux_content = re.sub(r'^x\d+\s+', '', aux_content)
-            return aux_content
-        return None
+            aux_raw_contents = match.group(1).strip().split(';')
+            aux_contents = []
+            for aux_raw_content in aux_raw_contents:
+                if aux_raw_content == '':
+                    continue
+                # 移除开头可能的编号，如 "x00 "
+                aux_content = re.sub(r'^x\d+\s+', '', aux_raw_content)
+                aux_contents.append(aux_content)
+            return aux_contents
+        return []
     def extract_aux_points(self, llm_output: str) -> Set[str]:
         """从llm_output的<aux>标签中提取点名"""
         aux_match = re.search(r'<aux>(.*?)</aux>', llm_output, re.DOTALL)
@@ -116,11 +121,11 @@ class AuxChecker:
                         llm_output_renamed = data.get('llm_output_renamed', '')
                         fl_problem = data.get('fl_problem', '')
                         llm_output = data.get('llm_output', '')
-                        if not llm_output_renamed:
+                        if not llm_output:
                             continue
                         # 提取aux内容
-                        aux_content = self.extract_aux_from_llm_output(llm_output_renamed)
-                        if not aux_content:
+                        aux_contents = self.extract_aux_from_llm_output(llm_output_renamed)
+                        if not aux_contents:
                             continue
                         total_processed += 1
                         # 初始化变量用于错误日志记录
@@ -130,60 +135,69 @@ class AuxChecker:
                         aux_clauses = None
                         aux_constructions = []
                         retranslated_premises = []
+                        preparsed_texts = []
+                        retranslated_texts = []
                         try:
                             # 解析aux内容
-                            aux_points, aux_premises = aux_content.split(';')[0].split(' : ')
-                            aux_points = aux_points.strip().split()
-                            # 目前只支持一个点（遵循alphageometry）
-                            if len(aux_points) == 0 or len(aux_points) > 1:
-                                continue
-                            aux_points = aux_points[0]
-                            # 解析premises
-                            aux_premises = re.split(r"\s*\[\d+\]", aux_premises.strip())
-                            preparsed_premises = []
-                            for aux_premise in aux_premises:
-                                aux_premise = aux_premise.strip()
-                                if aux_premise == '':
+                            for aux_content in aux_contents:
+                                aux_points, aux_premises = aux_content.split(';')[0].split(':')
+                                aux_points = aux_points.strip().split()
+                                if len(aux_points) == 0:
                                     continue
-                                aux_premise_parts = aux_premise.split(" ")
-                                if aux_premise_parts[0] in NAME_TO_PREDICATE:
-                                    pred = NAME_TO_PREDICATE[aux_premise_parts[0]]
-                                    preparsed = pred.preparse(aux_premise_parts[1:])
-                                    preparsed_aux_premise = aux_premise_parts[0] + ' ' + ' '.join(preparsed)
-                                    preparsed_premises.append(preparsed_aux_premise)
-                            # 使用lm.py的函数进行翻译
-                            aux_clauses = self.lm_agent.try_dsl_to_constructions(aux_content)
-                            if aux_clauses is None:
-                                continue
-                            aux_constructions = aux_clauses.split(" = ")[1].split(", ")
-                            retranslated_premises = []
-                            for con in aux_constructions:
-                                con_items = con.split(' ')
-                                if con_items[0] in self.defs:
-                                    cdef = self.defs[con_items[0]]
-                                    if len(con_items) == len(cdef.declare):
-                                        mapping = dict(zip(cdef.declare[1:], con_items[1:]))
-                                        for aux_points_def, bs in cdef.basics:
-                                            for b in bs:
-                                                premise = b[0] + ' ' + ' '.join([mapping[x] for x in b[1:]])
-                                                if b[0] in NAME_TO_PREDICATE:
-                                                    pred = NAME_TO_PREDICATE[b[0]]
-                                                    preparsed = pred.preparse([mapping[x] for x in b[1:]])
-                                                    preparsed_premise = b[0] + ' ' + ' '.join(preparsed)
-                                                    retranslated_premises.append(preparsed_premise)
-                            # 检查一致性：只有当原始predicates中有不被重译predicates包含的情况才认为是不一致
-                            preparsed_set = set(preparsed_premises)
-                            retranslated_set = set(retranslated_premises)
-                            missing_in_retranslated = preparsed_set - retranslated_set
-                            if missing_in_retranslated:
-                                inconsistencies_found += 1
-                                log_entry = f"\n--- 第{line_num}行发现翻译不一致 ---\n"
-                                log_entry += f"原始: {', '.join(preparsed_premises)}\n"
-                                log_entry += f"重译: {', '.join(retranslated_premises)}\n"
-                                log_entry += f"构造: {aux_constructions}\n"
-                                log_entry += f"缺失的predicates: {', '.join(missing_in_retranslated)}\n"
-                                log_entries.append(log_entry)
-                                print(log_entry)
+                                aux_points = aux_points[0]
+                                # 解析premises
+                                aux_premises = re.split(r"\s*\[\d+\]", aux_premises.strip())
+                                preparsed_premises = []
+                                for aux_premise in aux_premises:
+                                    aux_premise = aux_premise.strip()
+                                    if aux_premise == '':
+                                        continue
+                                    aux_premise_parts = aux_premise.split(" ")
+                                    if aux_premise_parts[0] in NAME_TO_PREDICATE:
+                                        pred = NAME_TO_PREDICATE[aux_premise_parts[0]]
+                                        preparsed = pred.preparse(aux_premise_parts[1:])
+                                        preparsed_aux_premise = aux_premise_parts[0] + ' ' + ' '.join(preparsed)
+                                        preparsed_premises.append(preparsed_aux_premise)
+                                # 使用lm.py的函数进行翻译
+                                aux_clauses = self.lm_agent.try_dsl_to_constructions(aux_content)
+                                if aux_clauses is None:
+                                    continue
+                                aux_constructions = aux_clauses.split(" = ")[1].split(", ")
+                                retranslated_premises = []
+                                for con in aux_constructions:
+                                    con_items = con.split(' ')
+                                    if con_items[0] in self.defs:
+                                        cdef = self.defs[con_items[0]]
+                                        if len(con_items) == len(cdef.declare):
+                                            mapping = dict(zip(cdef.declare[1:], con_items[1:]))
+                                            for aux_points_def, bs in cdef.basics:
+                                                for b in bs:
+                                                    premise = b[0] + ' ' + ' '.join([mapping[x] for x in b[1:]])
+                                                    if b[0] in NAME_TO_PREDICATE:
+                                                        pred = NAME_TO_PREDICATE[b[0]]
+                                                        preparsed = pred.preparse([mapping[x] for x in b[1:]])
+                                                        preparsed_premise = b[0] + ' ' + ' '.join(preparsed)
+                                                        retranslated_premises.append(preparsed_premise)
+                                # 检查一致性：只有当原始predicates中有不被重译predicates包含的情况才认为是不一致
+                                preparsed_set = set(preparsed_premises)
+                                retranslated_set = set(retranslated_premises)
+                                preparsed_text = aux_points + ' ' + ', '.join(preparsed_premises)
+                                retranslated_text = aux_points + ' ' + ', '.join(retranslated_premises)
+                                preparsed_texts.append(preparsed_text)
+                                retranslated_texts.append(retranslated_text)
+                                missing_in_retranslated = preparsed_set - retranslated_set
+                                if missing_in_retranslated:
+                                    inconsistencies_found += 1
+                                    log_entry = f"\n--- 第{line_num}行发现翻译不一致 ---\n"
+                                    log_entry += f"原始: {preparsed_text}\n"
+                                    log_entry += f"重译: {retranslated_text}\n"
+                                    log_entry += f"构造: {aux_constructions}\n"
+                                    log_entry += f"缺失的predicates: {', '.join(missing_in_retranslated)}\n"
+                                    log_entry += f"fl_problem: {fl_problem}\n"
+                                    log_entry += f"llm_output: {llm_output}\n"
+                                    log_entry += f"llm_output_renamed: {llm_output_renamed}\n"
+                                    log_entries.append(log_entry)
+                                    print(log_entry)
                         except Exception as e:
                             inconsistencies_found += 1
                             # 构建详细的错误日志条目
@@ -191,12 +205,12 @@ class AuxChecker:
                             error_entry += f"错误信息: {e}\n"
                             error_entry += f"fl_problem: {fl_problem}\n"
                             error_entry += f"llm_output: {llm_output}\n"
-                            error_entry += f"原始aux内容: {aux_content}\n"
+                            error_entry += f"原始aux内容: {'; '.join(aux_contents)}\n"
                             error_entry += f"解析得到的aux点: {aux_points}\n"
-                            error_entry += f"原始premises: {', '.join(preparsed_premises)}\n"
                             error_entry += f"lm.py返回的aux_clauses: {aux_clauses}\n"
                             error_entry += f"解析得到的构造: {aux_constructions}\n"
-                            error_entry += f"重译premises: {', '.join(retranslated_premises)}\n"
+                            error_entry += f"原始premises: {'; '.join(preparsed_texts)}\n"
+                            error_entry += f"重译premises: {'; '.join(retranslated_texts)}\n"
                             error_entry += f"原始llm_output_renamed:\n{llm_output_renamed}\n"
                             error_entry += "-" * 50 + "\n"
                             log_entries.append(error_entry)

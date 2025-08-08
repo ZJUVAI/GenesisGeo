@@ -30,6 +30,7 @@ from newclid.predicates.perpendicularity import Perp
 from newclid.predicates.collinearity import Coll
 from newclid.predicates.cyclic import Cyclic
 from newclid.predicates.equal_angles import EqAngle
+from newclid.predicates.equal_ratios import EqRatio
 
 if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
@@ -358,15 +359,36 @@ class LMAgent(DeductiveAgent):
                     return None
 
             a, b, c, d, e, f, g, h = args
-            # Handle diagonal line exchange
-            if(len(set([a, b, c, d])) == 4 and len(set([a, b, e, f])) == 3): 
-                a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
-            res1 = EqAngle.to_constructive(point, arrange_angle_points(a, b, c, d) + arrange_angle_points(e, f, g, h))
+            if(len(set([a, b, c, d, e, f, g, h]))) == 8:
+                        if point == h:
+                            res1 = f"on_aline0 {h} {a} {b} {c} {d} {e} {f} {g}"
+                        if point == g:
+                            res1 = f"on_aline0 {g} {a} {b} {c} {d} {e} {f} {h}"
+                        if point == f:
+                            res1 = f"on_aline0 {f} {c} {d} {a} {b} {g} {h} {e}"
+                        if point == e:
+                            res1 = f"on_aline0 {e} {c} {d} {a} {b} {g} {h} {f}"
+                        if point == d:
+                            res1 = f"on_aline0 {d} {e} {f} {g} {h} {a} {b} {c}"
+                        if point == c:
+                            res1 = f"on_aline0 {c} {e} {f} {g} {h} {a} {b} {d}"
+                        if point == b:
+                            res1 = f"on_aline0 {b} {g} {h} {e} {f} {c} {d} {a}"
+                        if point == a:
+                            res1 = f"on_aline0 {a} {g} {h} {e} {f} {c} {d} {b}"
+            else:
+                # Handle diagonal line exchange
+                if(len(set([a, b, c, d])) == 4 and len(set([a, b, e, f])) == 3): 
+                    a, b, c, d, e, f, g, h = a, b, e, f, c, d, g, h
+                res1 = EqAngle.to_constructive(point, arrange_angle_points(a, b, c, d) + arrange_angle_points(e, f, g, h))
             return res1
             
         # 四点共圆
         elif predicate == 'cyclic':
             return Cyclic.to_constructive(point, tuple(args))
+
+        elif predicate == 'eqratio':
+            return EqRatio.to_constructive(point, tuple(args))
 
         # 其它直接返回
         return f"{predicate} {' '.join(args)}"

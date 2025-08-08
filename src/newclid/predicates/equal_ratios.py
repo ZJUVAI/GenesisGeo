@@ -87,6 +87,27 @@ class EqRatio(Predicate):
         return all(table.expr_delta(eq) for eq in eqs)
 
     @classmethod
+    def to_constructive(cls, point: str, args: tuple[str, ...]) -> str:
+        a, b, c, d, e, f, g, h = args
+
+        if point == h:
+            return f"eqratio {h} {a} {b} {c} {d} {e} {f} {g}"
+        if point == g:
+            return f"eqratio {g} {a} {b} {c} {d} {e} {f} {h}"
+        if point == f:
+            return f"eqratio {f} {c} {d} {a} {b} {g} {h} {e}"
+        if point == e:
+            return f"eqratio {e} {c} {d} {a} {b} {g} {h} {f}"
+        if point == d:
+            return f"eqratio {d} {e} {f} {g} {h} {a} {b} {c}"
+        if point == c:
+            return f"eqratio {c} {e} {f} {g} {h} {a} {b} {d}"
+        if point == b:
+            return f"eqratio {b} {g} {h} {e} {f} {c} {d} {a}"
+        if point == a:
+            return f"eqratio {a} {g} {h} {e} {f} {c} {d} {b}"
+
+    @classmethod
     def to_tokens(cls, args: tuple[Any, ...]) -> tuple[str, ...]:
         return tuple(p.name for p in args)
 
