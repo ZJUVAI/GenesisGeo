@@ -47,11 +47,8 @@ class GeometryGenerator:
         self.write_buffer = []
         self.writer_hash = set()
         self.clauses_generator = CompoundClauseGen(
-            max_comma_sep_clause=2,
-            max_single_clause=1,
             max_sets=self.max_clauses,
-            seed=0,
-            shuffle_var_names=False,
+            shuffle=False,
         )
         self.filter = GeometryGoalFilter(max_clauses=max_clauses, min_proof_steps=min_proof_steps,
                                          min_clauses_num=min_clauses_num, filteration_rate=filteration_rate)
@@ -495,7 +492,14 @@ class GeometryGenerator:
 
         try:
             """Process a single geometry problem."""
-            pid, fl_statement = args
+            pid = args
+            
+            clause_generator = CompoundClauseGen(
+                max_sets=self.max_clauses,
+                shuffle=False,
+            )
+            
+            fl_statement = clause_generator.generate_clauses()
 
             solver_builder = GeometricSolverBuilder(seed=998244353)
             solver_builder.with_deductive_agent(DDARN())
@@ -503,7 +507,8 @@ class GeometryGenerator:
             try:
                 solver = solver_builder.build(max_attempts=100)
             except Exception as e:
-                logging.debug(f"Error: {e}")
+                logging.info(f"Error: {e}")
+                # print(fl_statement)
                 return [], {}
             solver.run(timeout=self.timeout)
 
@@ -617,8 +622,7 @@ class GeometryGenerator:
         """Generate geometry problems one at a time using a generator."""
         def task_generator():
             for i in range(10**9):
-                clauses = self.clauses_generator.generate_clauses()
-                yield (i, clauses)
+                yield i
         task_iterator = task_generator()
 
         all_data_len = 0
@@ -734,8 +738,8 @@ def main():
     parser.add_argument("--max_clauses", required=False, type=int, default=5)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
     parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
-    parser.add_argument("--n_threads", required=False, type=int, default=1)
-    parser.add_argument("--n_samples", required=False, type=int, default=100)
+    parser.add_argument("--n_threads", required=False, type=int, default=2)
+    parser.add_argument("--n_samples", required=False, type=int, default=1000)
     parser.add_argument("--dir", required=False, default="dataset")
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
