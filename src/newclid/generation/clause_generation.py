@@ -97,16 +97,6 @@ def get_var_name(va_idx):
     number_part = va_idx // 26
     return f"{letter_part}{number_part - 1}" if number_part else letter_part  # a, b, ..., z, a0, b0, ...
 
-def get_ordering_index(first_list, second_list):
-    """Return the indices that will reorder secondary_list based on primary_list"""
-    index_map = {element: index for index, element in enumerate(first_list)}
-    return [index_map[element] for element in second_list]
-
-def get_wrapped_points(all_points, start, num_points):
-    """Handle the wrap-around and get a specified number of points from a list"""
-    list_len = len(all_points)
-    return [all_points[(start + i) % list_len] for i in range(num_points)]
-
 class PointGenerator:
     def __init__(self, max_points=260, shuffle = False, seed = None):
         """Point generator, creates unique point names"""
@@ -135,20 +125,6 @@ class PointGenerator:
             if point not in self.defined_points:
                 self.defined_points.append(point)
                 return point
-    
-    def update_defined_points(self, new_points):
-        """Add new points to the list of defined points"""
-        for point in new_points:
-            if point not in self.defined_points:
-                self.defined_points.append(point)
-
-    def copy(self):
-        """Create a shallow copy of the object"""
-        new_obj = PointGenerator(self.max_points)
-        new_obj.point_counter = self.point_counter
-        new_obj.var_idx = self.var_idx[:]
-        new_obj.defined_points = self.defined_points.copy()
-        return new_obj
 
 class ClauseGenerator:
     def __init__(self, defs, clause_relations, is_single_point, point_generator):
@@ -207,7 +183,8 @@ class ClauseGenerator:
             if time.time() - start_time > 60:
                 return None
             clauses = []
-            origin_pt_gen = self.point_generator.copy()
+            origin_pt_gen_pc = self.point_generator.point_counter
+            origin_pt_gen_dfp = self.point_generator.defined_points[:]
             if self.is_single_point:
                 new_point = self.point_generator.generate_unique_point()
                 for _ in range(n):
@@ -223,7 +200,8 @@ class ClauseGenerator:
             try:
                 solver = solver_builder.build(max_attempts=100)
             except Exception as e:
-                self.point_generator = origin_pt_gen
+                self.point_generator.point_counter = origin_pt_gen_pc
+                self.point_generator.defined_points = origin_pt_gen_dfp
                 continue
             return new_clause
                 
@@ -231,9 +209,10 @@ class CompoundClauseGen:
     def __init__(self, max_sets, seed = None, shuffle=False):
         """Initialize the compound clause generator"""
         definitions = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
-        self.max_basic_clause = int(0.2 * max_sets)
+        self.max_basic_clause = int(0.3 * max_sets)
         self.sets = 0
         point_generator = PointGenerator(seed=seed, shuffle=shuffle)
+        self.point_generator = point_generator
         self.basic_cg = ClauseGenerator(definitions, BASIC, False, point_generator)
         self.single_cg = ClauseGenerator(definitions, SINGLE, False, point_generator)
         self.comma_cg = ClauseGenerator(definitions, COMMA, True, point_generator)
@@ -260,7 +239,7 @@ class CompoundClauseGen:
                     break
                 clause_text += new_clause
             self.sets += 1
-        return clause_text.strip()
+        return clause_text.strip().rstrip(';')
 
 if __name__ == "__main__":
     for _ in range(5):

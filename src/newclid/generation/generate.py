@@ -4,11 +4,7 @@ import re
 import argparse
 import itertools
 import json
-import logging
-import multiprocessing
-import os
 import random
-import re
 import string
 import time
 from collections import defaultdict
@@ -26,11 +22,164 @@ from newclid.formulations.clause import translate_sentence
 from newclid.formulations.definition import DefinitionJGEX
 from newclid.formulations.problem import ProblemJGEX
 from newclid.generation.clause_generation import CompoundClauseGen
-from newclid.generation.goal_filter import GeometryGoalFilter
 from newclid.generation.output_summary import Summary, get_first_predicate
 from newclid.proof import ProofState
 from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.statement import Statement
+
+class GeometryGoalFilter:
+    def goal_valid_check(self, name, args, dep_graph):
+        if args[-1] == '':
+            args = args[:-1]
+        # AG1 do not support aconst and rconst
+        if name in ('aconst', 'rconst'):  # rconst AB:AB=1, aconst ∠AB AB=0
+            return False
+        # case: cong AB = AB,
+        if name == 'cong':
+            left = {args[0], args[1]}
+            right = {args[2], args[3]}
+            if left == right:
+                return False
+        # para AB ∥ AB, AB ∥ AC
+        if name == 'para':
+            if len({args[0], args[1], args[2], args[3]}) < 4:
+                return False
+        if name == 'eqratio':
+            seg_1, seg_2, seg_3, seg_4 = {args[0], args[1]}, {
+                args[2], args[3]}, {args[4], args[5]}, {args[6], args[7]}
+            # case: eqratio AB/CD = AB/CD
+            # case: eqratio AB/CD = CD/AB => cong AB = CD
+            # case: eqratio AB/AB = CD/EF => cong CD = EF
+            if seg_1 == seg_2 or seg_1 == seg_3 or seg_3 == seg_4 or seg_2 == seg_4:
+                return False
+            # case: exist two segments with the same length
+            sm1 = Statement.from_tokens(['cong'] + list(args[:4]), dep_graph)
+            sm2 = Statement.from_tokens(
+                ['cong'] + list(args[0:2])+list(args[4:6]), dep_graph)
+            if sm1.check() or sm2.check():
+                return False
+        if name == 'eqangle':
+            seg_1, seg_2, seg_3, seg_4 = {args[0], args[1]}, {
+                args[2], args[3]}, {args[4], args[5]}, {args[6], args[7]}
+            # case: eqangle ∠(AB,CD) = ∠(AB,CD)
+            # case: eqangle ∠(AB,CD) = ∠(CD,AB) => perp AB⊥CD
+            # case: eqangle ∠(AB,AB) = ∠(CD,EF) => para CD∥EF
+            if seg_1 == seg_2 or seg_1 == seg_3 or seg_3 == seg_4 or seg_2 == seg_4:
+                return False
+            # case: two parallels or perp
+            parallel_sets = [
+                [args[0], args[1], args[2], args[3]],
+                [args[0], args[1], args[4], args[5]],
+                [args[0], args[1], args[6], args[7]],
+                [args[4], args[5], args[6], args[7]],
+                [args[2], args[3], args[4], args[5]],
+                [args[2], args[3], args[6], args[7]]
+            ]
+            for arg_set in parallel_sets:
+                sm = Statement.from_tokens(['para'] + arg_set, dep_graph)
+                if sm.check():
+                    return False
+            sm = Statement.from_tokens(['perp'] + list(args[:4]), dep_graph)
+            if sm.check():
+                return False
+            # case: simtri
+            a1_args = list(set(args[:4]))
+            a2_args = list(set(args[4:]))
+            if len(a1_args) == 3 and len(a2_args) == 3:
+                simtri_sets = [
+                    [*a1_args, *a2_args],
+                    [*a1_args, a2_args[0], a2_args[2], a2_args[1]],
+                    [*a1_args, a2_args[1], a2_args[0], a2_args[2]],
+                    [*a1_args, a2_args[1], a2_args[2], a2_args[0]],
+                    [*a1_args, a2_args[2], a2_args[0], a2_args[1]],
+                    [*a1_args, a2_args[2], a2_args[1], a2_args[0]]
+                ]
+                for simtri_set in simtri_sets:
+                    sm = Statement.from_tokens(
+                        ['simtri']+simtri_set, dep_graph)
+                    if sm.check():
+                        return False
+                for simtri_set in simtri_sets:
+                    sm = Statement.from_tokens(
+                        ['simtrir']+simtri_set, dep_graph)
+                    if sm.check():
+                        return False
+        if name in ('simtri', 'simtrir', 'contri', 'contrir'):
+            # case: simtri △ABC ≅ △ABC
+            tri_1 = {args[0], args[1], args[2]}
+            tri_2 = {args[3], args[4], args[5]}
+            if tri_1 == tri_2:
+                return False
+        if name == 'sameclock':
+            return False
+
+        return True
+
+    def goal_filter(self, possible_goals, dep_graph):
+        """filter the equivalent eq goals"""
+
+        def check_equivalence(p1, p2, token_type):
+            args1 = [arg.name for arg in p1.args]
+            args2 = [arg.name for arg in p2.args]
+            statements = [
+                Statement.from_tokens(
+                    [token_type, args1[i], args1[i + 1], args2[i], args2[i + 1]], dep_graph)
+                for i in range(0, len(args1), 2)
+            ]
+            return all(sm.check() for sm in statements)
+
+        def remove_duplicates(goals, equivalence_fn, token_type):
+            unique_goals = []
+            for goal in goals:
+                if not any(equivalence_fn(existing_goal, goal, token_type) for existing_goal in unique_goals):
+                    unique_goals.append(goal)
+            return unique_goals
+
+        eqangle_goals = [
+            goal for goal in possible_goals if goal.predicate.NAME == 'eqangle']
+        eqratio_goals = [
+            goal for goal in possible_goals if goal.predicate.NAME == 'eqratio']
+        other_goals = [goal for goal in possible_goals if goal.predicate.NAME not in (
+            'eqangle', 'eqratio')]
+
+        eqangle_goals = remove_duplicates(
+            eqangle_goals, check_equivalence, 'para')
+        eqratio_goals = remove_duplicates(
+            eqratio_goals, check_equivalence, 'cong')
+
+        return other_goals + eqangle_goals + eqratio_goals
+
+    def aux_predicates_valid_check(self, llm_output: str) -> bool:
+
+        def is_valid(statement: str, valid_predicates: set) -> bool:
+            prefix_match = re.match(r"(x00 \w+)\s*:\s*(.*)", statement)
+            if prefix_match:
+                # coll a c e [002] coll b d e [003]
+                rest = prefix_match.group(2)
+                segments = re.split(r"\s*\[\d+\]", rest)
+                # 'coll a c e' , 'coll b d e'
+                segments = [seg.strip() for seg in segments if seg.strip()]
+                for segment in segments:
+                    parts = segment.split()
+                    if parts and parts[0] not in valid_predicates:
+                        logging.debug(
+                            f"Invalid auxiliary predicate: {parts[0]}")
+                        return False
+            return True
+
+        # <aux> x00 c : perp k n n s [024] cong k n n s [025]; x00 h : ; x00 i : ; x00 j : perp h i h j [009] cong h i h j [010] ; </aux> <proof> cong a k c k [002] r19 [000] [001] ; cong b k c k [003] r19 [000] [001] ; cong a k b k [004] a00 [002] [003] ; </proof>
+        valid_aux_predicates = {'perp', 'para',
+                                'cong', 'coll', 'eqangle', 'cyclic', 'midp'}
+        aux_match = re.match(r"<aux>\s*(.*)\s*</aux>", llm_output)
+        # c : perp a c b c [001] ; c : perp a c b c [001] ;
+        if aux_match:
+            aux_content = aux_match.group(1)
+            for content_item in aux_content.split(';'):
+                content_item = content_item.strip()
+                if content_item:
+                    if not is_valid(content_item, valid_aux_predicates):
+                        return False
+        return True
 
 class GeometryGenerator:
     def __init__(self, max_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600, filteration_rate=0.6):
@@ -46,12 +195,7 @@ class GeometryGenerator:
             self.output_dir, f"geometry_clauses{self.max_clauses}_samples{millify(self.n_samples)}")
         self.write_buffer = []
         self.writer_hash = set()
-        self.clauses_generator = CompoundClauseGen(
-            max_sets=self.max_clauses,
-            shuffle=False,
-        )
-        self.filter = GeometryGoalFilter(max_clauses=max_clauses, min_proof_steps=min_proof_steps,
-                                         min_clauses_num=min_clauses_num, filteration_rate=filteration_rate)
+        self.filter = GeometryGoalFilter()
 
     def all_possible_goals_by_ar(self, dep_graph: DependencyGraph) -> list[Statement]:
         def extract_points(s):
@@ -203,7 +347,7 @@ class GeometryGenerator:
             # "llm_output": data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
             "llm_output": data_aux + data_numerical_check + data_proof,
         }
-
+    
     def llm_solution_renamed(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
         def get_apha_geo_solver_var(va_idx):
             letter_part = string.ascii_lowercase[va_idx % 26]
@@ -221,7 +365,7 @@ class GeometryGenerator:
 
         def statement2str_with_mapping(statement: Statement, mp):
             res = [statement.predicate.NAME] + [mp[arg.name]
-                                                if isinstance(arg, Point) else str(arg) for arg in statement.args]
+                                                if isinstance(arg, Point) else mp[str(arg)] for arg in statement.args]
             return " ".join(res)
 
         def get_all_premise(problem):
@@ -288,8 +432,6 @@ class GeometryGenerator:
 
             # Extract rule ID from reason string and handle special cases
             reason = dep.reason
-            if reason in ['Ratio', 'Angle', 'Shortcut']:
-                print(reason)
             if "Ratio Chasing" in reason:
                 rule_id = "a00"
             elif "Angle Chasing" in reason:
@@ -499,7 +641,8 @@ class GeometryGenerator:
                 shuffle=False,
             )
             
-            fl_statement = clause_generator.generate_clauses()
+            fl_statement = clause_generator.generate_clauses(self.max_clauses)
+            last_goal_len = 0
 
             solver_builder = GeometricSolverBuilder(seed=998244353)
             solver_builder.with_deductive_agent(DDARN())
@@ -508,7 +651,6 @@ class GeometryGenerator:
                 solver = solver_builder.build(max_attempts=100)
             except Exception as e:
                 logging.info(f"Error: {e}")
-                # print(fl_statement)
                 return [], {}
             solver.run(timeout=self.timeout)
 
@@ -519,13 +661,11 @@ class GeometryGenerator:
             possible_goals = self.filter.goal_filter(
                 possible_goals, solver.proof.dep_graph)
             checkgoals_runtime = time.time() - t
-            # logging.info(f"{len(possible_goals)=}")
 
             n_filtered_samples = 0
             proofs_of_used_rules = {}
             generated_data = []
             for goal in possible_goals:
-
                 # find minimal aux clauses
                 solver.proof.goals = [goal]
                 solver_new = solver
@@ -574,7 +714,6 @@ class GeometryGenerator:
                     continue
                 #  llm data generation
                 aux_points = [p.name for p in aux_points]
-                nl_solution = write_proof_steps(solver_new.proof, print_output=False)
                 llm = self.llm_solution(problem_new, aux_points, solver_new.proof)
                 llm_renamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
 
@@ -582,12 +721,6 @@ class GeometryGenerator:
                     continue
                 if len(aux_points) > 0 and not self.filter.aux_predicates_valid_check(llm_renamed['llm_output']):
                     continue
-
-                # check similarity
-                # if self.similarity_check(llm['llm_output'], proofs_of_used_rules):
-                #     logging.debug(f"Similar proof found for {goal.predicate.NAME} with clauses {n_clauses} and proof steps {n_proof_steps}. Skipping.")
-                #     n_filtered_samples += 1
-                #     continue
 
                 generated_data.append({
                     # "fl_statement_src": fl_statement,
@@ -601,6 +734,11 @@ class GeometryGenerator:
                     "llm_input_renamed": llm_renamed['llm_input'],
                     "llm_output_renamed": llm_renamed['llm_output'],
                 })
+            
+            start_time = time.time()
+            
+            generated_data = self.writer_hash_filter(generated_data, "llm_input_renamed")
+
             summary = {
                 'runtime': solver.run_infos['runtime'],
                 'checkgoals_runtime': checkgoals_runtime,
@@ -609,7 +747,8 @@ class GeometryGenerator:
                 'first_predicate': [get_first_predicate(d['fl_problem']) for d in generated_data],
                 'n_clauses': [d['n_clauses'] for d in generated_data],
                 'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
-                'n_filtered_samples': n_filtered_samples
+                'n_filtered_samples': n_filtered_samples,
+                'hashfilter_runtime': time.time() - start_time
             }
             return generated_data, summary
         except Exception as e:
@@ -617,99 +756,8 @@ class GeometryGenerator:
             import traceback
             traceback.print_exc()
             return [], {}
-
-    def generate_problems(self):
-        """Generate geometry problems one at a time using a generator."""
-        def task_generator():
-            for i in range(10**9):
-                yield i
-        task_iterator = task_generator()
-
-        all_data_len = 0
-        summary_reporter = Summary(prefix=self.path_prefix)
-        start_time = time.time()
-        if self.n_threads == 1:
-            while True:
-                data, summary = self.process_single_problem(next(task_iterator))
-                data = self.writer_hash_filter(data, "llm_input_renamed")
-                if data:
-                    self.write_data(data)
-                    all_data_len += len(data)
-                    summary_reporter.add(summary)
-                    elapsed_time = time.time() - start_time
-                    logging.info(
-                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                        f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
-                        f"Speed: {(elapsed_time)/all_data_len:2.0f}s/sample. "
-                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                    )
-                if all_data_len >= self.n_samples:
-                    break
-        else:
-            try:
-                if not ray.is_initialized():
-                    ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
-                @ray.remote(num_cpus=1)
-                def ray_process_single_problem(args):
-                    return self.process_single_problem(args)
-                pending_tasks = []
-                max_pending = self.n_threads * 2
-                while len(pending_tasks) < max_pending:
-                    pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
-
-                while all_data_len < self.n_samples:
-                    done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
-                    result = ray.get(done[0])
-                    data, summary = result
-                    data = self.writer_hash_filter(data, "llm_input_renamed")
-                    if data:
-                        self.write_data(data)
-                        all_data_len += len(data)
-                        summary_reporter.add(summary)
-                        elapsed_time = time.time() - start_time
-                        logging.info(
-                            f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                            f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
-                            f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
-                            f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                        )
-                    if len(pending_tasks) < max_pending:
-                        pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
-                for task in pending_tasks:
-                    ray.cancel(task, force=True)
-                ray.shutdown()
-
-                # with multiprocessing.Pool(self.n_threads) as pool:
-                #     for data, summary in pool.imap_unordered(self.process_single_problem, task_generator()):
-                #         if data:
-                #             data = self.writer_hash_filter(data, "llm_input_renamed")
-                #             self.write_data(data)
-                #             all_data_len += len(data)
-                #             summary_reporter.add(summary)
-                #             elapsed_time = time.time() - start_time
-                #             logging.info(
-                #                 f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                #                 f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
-                #                 f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
-                #                 f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                #             )
-                #         if all_data_len >= self.n_samples:
-                #             pool.terminate()
-                #             break
-                #     pool.close()
-                #     pool.join()
-            except Exception as e:
-                logging.error(f"multiprocessing error: {e}")
-
-        self.write_data([], force=True)
-        final_elapsed_time = time.time() - start_time
-        summary_reporter.total_elapsed_time = final_elapsed_time
-        summary_reporter.total_samples_generated = all_data_len
-        logging.info(
-            f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
-        summary_reporter.output_report()
-
-    def writer_hash_filter(self, data: list, key: str) -> bool:
+    
+    def writer_hash_filter(self, data: list, key: str) -> list[str]:
         """Check if the input has already been written to the output file."""
         filtered_data = []
         for d in data:
@@ -718,7 +766,7 @@ class GeometryGenerator:
                 self.writer_hash.add(key_hash)
                 filtered_data.append(d)
         return filtered_data
-        
+
     def write_data(self, all_data: list, force: bool = False):
         """Append a single JSON object to a .jsonl file."""
         self.write_buffer.extend(all_data)
@@ -731,19 +779,107 @@ class GeometryGenerator:
                     f.write('\n')
             self.write_buffer.clear()
 
+    def generate_problems(self, load_from: str = None): 
+        def task_generator():
+            for i in range(10**9):
+                yield i
+        
+        if load_from:
+            print("Loading from ", load_from)
+            from tqdm import tqdm
+            with open(load_from, 'r') as f:
+                total_lines = sum(1 for _ in f)
+            self.n_samples -= total_lines
+            with open(load_from, 'r') as f:
+                for line in tqdm(f, total=total_lines, desc="Processing"):
+                    data = json.loads(line)
+                    key_hash = hash(data['llm_input_renamed'])
+                    if key_hash not in self.writer_hash:
+                        self.writer_hash.add(key_hash)
+            print("Loaded ", total_lines, " samples")
+
+        task_iterator = task_generator()
+
+        all_data_len = 0
+        summary_reporter = Summary(prefix = self.path_prefix)
+        start_time = time.time()
+        if self.n_threads == 1:
+            while all_data_len < self.n_samples:
+                data, summary = self.process_single_problem(next(task_iterator))
+                if data:
+                    self.write_data(data)
+                    all_data_len += len(data)
+                    summary_reporter.add(summary)
+                    elapsed_time = time.time() - start_time
+                    logging.info(
+                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                        f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. Hashfilter: {summary['hashfilter_runtime']:2.0f}s. "
+                        f"Speed: {(elapsed_time)/all_data_len:2.0f}s/sample. "
+                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                    )
+        else:
+            try:
+                if not ray.is_initialized():
+                    ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
+                
+                @ray.remote(num_cpus=1)
+                def ray_process_single_problem(args):
+                    return self.process_single_problem(args)
+                
+                pending_tasks = []
+                max_pending = self.n_threads * 2
+                while len(pending_tasks) < max_pending:
+                    pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
+
+                while all_data_len < self.n_samples:
+                    done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
+                    result = ray.get(done[0])
+                    data, summary = result
+                    
+                    if data:
+                        self.write_data(data)
+                        all_data_len += len(data)
+                        summary_reporter.add(summary)
+                        elapsed_time = time.time() - start_time
+                        logging.info(
+                            f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                            f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. Hashfilter: {summary['hashfilter_runtime']:2.0f}s. "
+                            f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
+                            f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                        )
+
+                    if len(pending_tasks) < max_pending:
+                        pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
+
+                # Cancel any remaining tasks
+                for task in pending_tasks:
+                    ray.cancel(task, force=True)
+                ray.shutdown()
+
+            except Exception as e:
+                logging.error(f"multiprocessing error: {e}")
+
+        self.write_data([], force=True)
+        final_elapsed_time = time.time() - start_time
+        summary_reporter.total_elapsed_time = final_elapsed_time
+        summary_reporter.total_samples_generated = all_data_len
+        logging.info(
+            f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
+        summary_reporter.output_report()
 
 def main():
     parser = argparse.ArgumentParser(
         description="Create problem fl - nl dataset")
-    parser.add_argument("--max_clauses", required=False, type=int, default=5)
+    parser.add_argument("--max_clauses", required=False, type=int, default=10)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
     parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
-    parser.add_argument("--n_threads", required=False, type=int, default=2)
+    parser.add_argument("--n_threads", required=False, type=int, default=1)
     parser.add_argument("--n_samples", required=False, type=int, default=1000)
     parser.add_argument("--dir", required=False, default="dataset")
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
     parser.add_argument("--filteration_rate", required=False, type=float, default=0.6)
+    parser.add_argument("--load_from", required=False, type=str, default='/c23474/home/math/dubhe/Newclid/src/newclid/generation/dataset/22.jsonl')
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
@@ -759,8 +895,7 @@ def main():
         filteration_rate=args.filteration_rate
     )
 
-    generator.generate_problems()
-
+    generator.generate_problems(args.load_from)
 
 if __name__ == "__main__":
     main()
