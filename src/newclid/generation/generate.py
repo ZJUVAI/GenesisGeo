@@ -879,7 +879,7 @@ def main():
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
     parser.add_argument("--filteration_rate", required=False, type=float, default=0.6)
-    parser.add_argument("--load_from", required=False, type=str, default='/c23474/home/math/dubhe/Newclid/src/newclid/generation/dataset/22.jsonl')
+    parser.add_argument("--load_from", required=False, type=str, default=None)
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
