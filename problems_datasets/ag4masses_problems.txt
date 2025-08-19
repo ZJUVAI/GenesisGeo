@@ -1,0 +1,44 @@
+angbisec_bline_cyclic
+a b c = triangle; f = on_bline f b c, angle_bisector f b a c ? cyclic a b c f
+9point_part1
+a b c = triangle a b c; d = foot d a b c; e = midpoint e b a; f = midpoint f c b; g = midpoint g a c ? cyclic d g e f
+9point_part2
+a b c = triangle a b c; o = orthocenter o a b c; e = midpoint e b a; f = midpoint f c b; g = midpoint g a c; h = midpoint h a o ? cyclic e f g h
+castillon_4p
+a b c d = quadrangle; o z = segment; x = on_line a z, on_circle o z; u = on_circum z b x, on_line a b; y = on_line d z, on_circle o z; v = on_circum z c y, on_line c d; w = on_line a b, on_line c d; p = on_circum w u v, on_circle o z; q = on_line p a, on_circle o z; s = on_line p d, on_circle o z; r = on_line q b, on_line s c ? cong o z o r
+castillon_lemma_ddar_ok
+a c = segment; b = on_circle b a c; d = on_line a c, lc_tangent d b a; e = foot e b a c; f = on_circle f a c; g = on_tline g d a c, lc_tangent g f a; h = on_line d g, on_line e f; i = on_circle a c; j = on_circle a c, on_line i g; k = on_circle a c, on_line i h ? coll e j k
+napoleon_ddar_ok
+a1 a2 a3 = triangle; b3 = on_circle a1 a2, s_angle a1 a2 b3 60; b1 = on_circle a2 a3, s_angle a2 a3 b1 60; b2 = on_circle a3 a1, s_angle a3 a1 b2 60; c1 = circumcenter b1 a2 a3; c2 = circumcenter b2 a3 a1; c3 = circumcenter b3 a1 a2 ? cong c1 c2 c1 c3
+napoleon2
+a1 a2 a3 = triangle; c3 = s_angle a1 a2 c3 30, s_angle a2 a1 c3 150; c1 = s_angle a2 a3 c1 30, s_angle a3 a2 c1 150; c2 = s_angle a3 a1 c2 30, s_angle a1 a3 c2 150 ? cong c1 c2 c1 c3
+ceva
+a b c = triangle; d = free; e = on_line b c, on_line a d; f = on_line c a, on_line b d; g = on_line a b, on_line c d; h = on_line c a, on_pline h b e f ? eqratio f h f a g b g a
+ceva_hint_ddar_ok
+a b c = triangle; d = free; e = on_line b c, on_line a d; f = on_line c a, on_line b d; g = on_line a b, on_line c d; h = on_line c a, on_pline h b e f; i = on_line b d, on_pline i a b c; j = on_line a i, on_line c d ? eqratio f h f a g b g a
+ceva_menelaus_hint_ddar_ok
+a b c = triangle; d = free; e = on_line b c, on_line a d; f = on_line c a, on_line b d; g = on_line a b, on_line c d; h = on_line c a, on_pline h b e f; i = on_line c d, on_pline i e a b; j = on_line b f, on_pline j e a c ? eqratio f h f a g b g a
+square_angle15
+a b c d = isquare a b c d; e = s_angle c d e 15, s_angle d c e -15 ? cong e a a b
+5circles_ddar_ok
+p1 p2 p3 p4 p5 = pentagon; q1 = on_line p2 p5, on_line p1 p3; q2 = on_line p1 p3, on_line p2 p4; q3 = on_line p2 p4, on_line p3 p5; q4 = on_line p3 p5, on_line p4 p1; q5 = on_line p4 p1, on_line p2 p5; o1 = circumcenter p1 q1 q5; o2 = circumcenter p2 q1 q2; o3 = circumcenter p3 q2 q3; o4 = circumcenter p4 q3 q4; o5 = circumcenter p5 q4 q5; m1 = on_circle o1 q1, on_circle o2 q1; m2 = on_circle o2 q2, on_circle o3 q2; m3 = on_circle o3 q3, on_circle o4 q3; m4 = on_circle o4 q4, on_circle o5 q4; m5 = on_circle o5 q5, on_circle o1 q5 ? cyclic m1 m2 m3 m5
+butterfly
+a = free; b = free; c = on_circle a b; d = midpoint b c; e = on_circle a b; f = on_line d e, on_circle a b; g = on_circle a b; h = on_line d g, on_circle a b; i = on_line b c, on_line f g; j = on_line b c, on_line e h ? cong d i d j
+gaolian100-6-lemma_ddar_ok
+a = free; b = free; c = on_circle a b; d = on_circle a b; e = lc_tangent c a, lc_tangent d a; f = midpoint c d; g = on_line e b, on_circle a b ? eqangle f d f g f b f d
+gaolian100-6
+a = free; b = free; c = on_circle a b; d = on_circle a b; e = lc_tangent c a, lc_tangent d a; f = foot d a b; g = on_line d f, on_line e b; h = on_line d f, on_line c b ? cong d g g h
+gaolian100-12
+a = free; b = free; c = midpoint a b; d = on_circle c a; e = on_circle c a; f = on_tline f b b a, on_line d e; g = on_line a e, on_line c f; h = on_line a d, on_line c f ? cong c g c h
+gaolian100-26
+a b c = triangle a b c; d = angle_bisector d b a c, on_circum d a b c; e = circumcenter e a b c; f = on_line f a b, on_pline f e b d; g = on_line g a c, on_pline g e c d; h = orthocenter h a b c; i = on_line i b c, on_pline i h a d ? cong f b f i
+gaolian100-26-hint_ddar_ok
+a b c = triangle a b c; d = angle_bisector d b a c, on_circum d a b c; e = circumcenter e a b c; f = on_line f a b, on_pline f e b d; g = on_line g a c, on_pline g e c d; h = orthocenter h a b c; i = on_line i b c, on_pline i h a d; j = on_line e c, eqdistance j e e c ? cong f b f i
+gaolian100-98
+a b c d = quadrangle; e = on_line b c; f = on_line c d, on_aline f a d b a e; g = on_line b f, on_line d e ? eqangle a e a c a g a f
+pascal
+a = free; b = free; c = on_circle a b; d = on_circle a b; e = on_circle a b; f = on_circle a b; g = on_circle a b; h = intersection_ll b c e f; i = intersection_ll c d f g; j = intersection_ll d e g b ? coll h i j
+pascal_3p
+a = free; b = free; c = on_circle a b; d = on_circle a b; e = lc_tangent b a, on_line c d; f = lc_tangent c a, on_line d b; g = lc_tangent d a, on_line b c ? coll e f g
+imo-2024-q4
+a b c = triangle; i = incenter a b c; f = foot i a c; g = foot i a b; m = on_line i f, on_circle i f; n = on_line i g, on_circle i g; x = on_line b c, on_pline x m a c; y = on_line b c, on_pline y n a b; k = midpoint a c; l = midpoint a b; p = on_line a i, on_circum a b c ? eqangle p y p x i l i k
