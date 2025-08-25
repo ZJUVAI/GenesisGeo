@@ -38,14 +38,14 @@ class GSpanBranchedTests(unittest.TestCase):
         return g
 
     def test_branched_mining(self):
-        pg = self.build_pg_with_branch()
-        miner = GSpanMiner(pg, min_support=2, min_rule_nodes=1, min_edges=2, sample_embeddings=3)
-        patterns = miner.run_branched(min_rule_indeg2_count=0, max_edges=10)
-        self.assertTrue(len(patterns) >= 1)
-        expr, vmap = miner.pattern_to_schema_branched(patterns[0])
-        self.assertIsInstance(expr, str)
-        self.assertIn("=>", expr)
-        self.assertTrue(len(vmap) >= 0)
+    pg = self.build_pg_with_branch()
+    miner = GSpanMiner(pg, min_support=2, min_rule_nodes=1, min_edges=2, sample_embeddings=3)
+    patterns = miner.run_branched(min_rule_indeg2_count=0)
+    self.assertTrue(len(patterns) >= 1)
+    expr, vmap = miner.pattern_to_schema_branched(patterns[0])
+    self.assertIsInstance(expr, str)
+    self.assertIn("=>", expr)
+    self.assertTrue(len(vmap) >= 0)
 
 
 if __name__ == "__main__":

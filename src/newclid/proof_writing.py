@@ -65,6 +65,12 @@ def get_structured_proof(proof_state: "ProofState", id: dict[Statement, str]) ->
     analysis_items = []
     for line in sorted_premises:
         analysis_items.append(pure_predicate(line))
+    for line in aux:
+        if line.statement not in id:
+            id[line.statement] = f"{len(id):03d}"
+    sorted_aux = sorted(aux, key=lambda line: id[line.statement])
+    for line in sorted_aux:
+        analysis_items.append(pure_predicate(line))
     analysis += " ; ".join(analysis_items) + " ; </analysis>"
 
     numerical_check = ""

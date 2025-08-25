@@ -39,11 +39,11 @@ class GSpanBranchedStepTests(unittest.TestCase):
     def test_stepwise_limit(self):
         pg = self.build_pg_small()
         miner = GSpanMiner(pg, min_support=2, min_rule_nodes=1, min_edges=2, sample_embeddings=2)
-        # 开很小的扩展上限，确保函数能正常返回而不挂起
-        patterns = miner.run_branched(min_rule_indeg2_count=0, max_edges=8, debug_limit_expansions=1000, debug_log_every=200)
-        self.assertIsInstance(patterns, list)
-        # 即使受限，也应当能返回一些基础模式
-        self.assertTrue(len(patterns) >= 1)
+    # 开很小的扩展上限，确保函数能正常返回而不挂起
+    patterns = miner.run_branched(min_rule_indeg2_count=0, debug_limit_expansions=1000, debug_log_every=200)
+    self.assertIsInstance(patterns, list)
+    # 即使受限，也应当能返回一些基础模式
+    self.assertTrue(len(patterns) >= 1)
 
 
 if __name__ == "__main__":

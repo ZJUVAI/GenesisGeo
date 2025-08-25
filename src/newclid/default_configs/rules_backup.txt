@@ -46,6 +46,8 @@ r56 Properties of midpoint (coll)
 midp M A B => coll M A B
 r54 Definition of midpoint
 cong M A M B, coll M A B => midp M A B
+r07 Thales Theorem I
+para A B C D, coll O A C, ncoll O A B, coll O B D => eqratio3 A B C D O O
 r28 Overlapping parallels
 para A B A C => coll A B C
 r43 Orthocenter theorem

@@ -46,6 +46,8 @@ class ProofGraph:
         self.edges: List[Tuple[str, str]] = []
         self.fact_id_map: Dict[str, Dict[str, str]] = {}
         self.rule_step_map: Dict[str, Dict[int, str]] = {}
+        # 每题的点依赖映射：{problem_id: {point: set(deps)}}
+        self.point_rely_on: Dict[str, Dict[str, Set[str]]] = {}
 
         # 统计/诊断
         self.stats = {
@@ -334,6 +336,23 @@ class ProofGraph:
         numerical_text = proof_block.get("numerical_check", "")
         proof_text = proof_block.get("proof", "")
 
+        # 解析点依赖 point_rely_on（支持放在 proof_block 或顶层 result_obj）
+        rely_src = proof_block.get("point_rely_on") or result_obj.get("point_rely_on") or {}
+        if isinstance(rely_src, dict):
+            mapping: Dict[str, Set[str]] = {}
+            for pt, deps in rely_src.items():
+                if isinstance(deps, str):
+                    vals = [x.strip() for x in deps.split(",")] if deps else []
+                elif isinstance(deps, list):
+                    vals = [str(x).strip() for x in deps]
+                else:
+                    vals = []
+                mapping[str(pt).strip()] = {v for v in vals if v}
+            self.point_rely_on[str(problem_id)] = mapping
+        else:
+            # 若无依赖信息，记录空映射
+            self.point_rely_on[str(problem_id)] = {}
+
         # 初始事实（layer=1）
         self.parse_facts_from_text(problem_id, analysis_text)
         self.parse_facts_from_text(problem_id, numerical_text)
@@ -384,7 +403,7 @@ class ProofGraph:
         self.logger.info(
             f"all problems processed: total_nodes={len(self.nodes)} total_edges={len(self.edges)}"
         )
-        # 追加：按题目统计平均节点/边数量，便于配置 max_nodes / max_edges
+    # 追加：按题目统计平均节点/边数量，便于配置 max_nodes
         try:
             problem_ids: Set[str] = {nd.get("problem_id") for nd in self.nodes.values() if nd.get("problem_id") is not None}
             num_problems = len(problem_ids) if problem_ids else 0
@@ -780,7 +799,6 @@ class GSpanMiner:
         self,
         *,
         min_rule_indeg2_count: int = 0,
-        max_edges: Optional[int] = None,
         debug_limit_expansions: Optional[int] = None,
         debug_log_every: int = 10000,
         time_budget_seconds: Optional[float] = None,
@@ -798,7 +816,7 @@ class GSpanMiner:
         start_time = time.time()
 
         min_sup = self._min_sup_abs()
-        max_edges = int(max_edges) if max_edges is not None else (self.max_nodes * 2)
+        # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         def make_signature(labels: List[str], edges: List[Tuple[int, int]]):
             return (tuple(labels), tuple(sorted(edges)))
@@ -919,7 +937,7 @@ class GSpanMiner:
             if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
                 finalize(labels, edges, pobj)
                 return
-            if len(labels) >= self.max_nodes or len(edges) >= max_edges:
+            if len(labels) >= self.max_nodes:
                 finalize(labels, edges, pobj)
                 return
             sig = make_signature(labels, edges)
@@ -1123,8 +1141,7 @@ class GSpanMiner:
                         if low:
                             continue
                     # edges check
-                    if len(edges) + (1 + len(prem_lbs) + 1) > max_edges:
-                        continue
+                    # 不再单独限制边数
                     # build new pattern
                     base = len(labels)
                     new_labels = list(labels) + [r_lb] + list(prem_lbs) + [f_lb]
@@ -1202,8 +1219,7 @@ class GSpanMiner:
                                         low = True; break
                             if low:
                                 continue
-                        if len(edges) + (len(prem_lbs) + 1) > max_edges:
-                            continue
+                        # 不再单独限制边数
                         base = len(labels)
                         new_labels = list(labels) + [r_lb] + list(prem_lbs)
                         new_edges = list(edges)
@@ -1380,10 +1396,9 @@ class GSpanMiner:
 
     def expand_branched_from_seed(
         self,
-        seed: Dict[str, Any],
-        *,
-        min_rule_indeg2_count: int = 0,
-        max_edges: Optional[int] = None,
+    seed: Dict[str, Any],
+    *,
+    min_rule_indeg2_count: int = 0,
         debug_limit_expansions: Optional[int] = None,
         debug_log_every: int = 10000,
         time_budget_seconds: Optional[float] = None,
@@ -1393,6 +1408,7 @@ class GSpanMiner:
         max_producer_depth: int = 1,
         skip_unknown: bool = True,
         enable_var_closure_check: bool = False,
+        global_budget: Optional[Any] = None,
         emit: Optional[Any] = None,
     ) -> None:
         """从一个 seed 开始扩展（分叉挖掘变体），在满足 finalize 条件时通过 emit 回传模式对象。
@@ -1402,7 +1418,7 @@ class GSpanMiner:
         start_time = _time.time()
 
         min_sup = self._min_sup_abs()
-        max_edges = int(max_edges) if max_edges is not None else (self.max_nodes * 2)
+    # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         def make_signature(labels: List[str], edges: List[Tuple[int, int]]):
             return (tuple(labels), tuple(sorted(edges)))
@@ -1421,6 +1437,15 @@ class GSpanMiner:
 
         def compute_pids(emb_list: List[Dict[str, Any]]) -> Set[str]:
             return {e["pid"] for e in emb_list}
+
+        # 全局预算：跨进程扩展总步数上限（seeds_mproc 中启用）
+        def try_consume_budget() -> bool:
+            if global_budget is None:
+                return True
+            try:
+                return bool(global_budget.acquire(block=False))
+            except Exception:
+                return False
 
         def degrees(labels: List[str], edges: List[Tuple[int,int]]):
             indeg = [0]*len(labels)
@@ -1510,7 +1535,7 @@ class GSpanMiner:
             if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
                 finalize(labels, edges, pobj)
                 return
-            if len(labels) >= self.max_nodes or len(edges) >= max_edges:
+            if len(labels) >= self.max_nodes:
                 finalize(labels, edges, pobj)
                 return
             sig = make_signature(labels, edges)
@@ -1592,6 +1617,9 @@ class GSpanMiner:
                     base = len(labels0)
                     for i in range(added_nodes):
                         new_edges.append((base + i, r_idx))
+                    # 预算检查
+                    if not try_consume_budget():
+                        continue
                     expansions += 1
                     if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
                         self.logger.info(f"branched-debug: expansions={expansions} complete-rule r_idx={r_idx} add={list(key_labels)}")
@@ -1692,8 +1720,7 @@ class GSpanMiner:
                                     low = True; break
                         if low:
                             continue
-                    if len(edges) + (1 + len(prem_lbs) + 1) > max_edges:
-                        continue
+                    # 不再单独限制边数
                     base = len(labels)
                     new_labels = list(labels) + [r_lb] + list(prem_lbs) + [f_lb]
                     new_edges = list(edges)
@@ -1701,6 +1728,9 @@ class GSpanMiner:
                     for i in range(len(prem_lbs)):
                         new_edges.append((base + 1 + i, base))
                     new_edges.append((base, base + 1 + len(prem_lbs)))
+                    # 预算检查
+                    if not try_consume_budget():
+                        continue
                     expansions += 1
                     if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
                         self.logger.info(f"branched-debug: expansions={expansions} FRF from f_idx={f_idx} add={[r_lb, *prem_lbs, f_lb]}")
@@ -1766,14 +1796,16 @@ class GSpanMiner:
                                         low = True; break
                             if low:
                                 continue
-                        if len(edges) + (len(prem_lbs) + 1) > max_edges:
-                            continue
+                        # 不再单独限制边数
                         base = len(labels)
                         new_labels = list(labels) + [r_lb] + list(prem_lbs)
                         new_edges = list(edges)
                         for i in range(len(prem_lbs)):
                             new_edges.append((base + 1 + i, base))
                         new_edges.append((base, f_idx))
+                        # 预算检查
+                        if not try_consume_budget():
+                            continue
                         expansions += 1
                         if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
                             self.logger.info(f"branched-debug: expansions={expansions} attach-producer f_idx={f_idx} add={[r_lb, *prem_lbs]}")
@@ -1788,7 +1820,6 @@ class GSpanMiner:
     def run_rules_only(
         self,
         *,
-        max_edges: Optional[int] = None,
         debug_limit_expansions: Optional[int] = None,
         debug_log_every: int = 10000,
         time_budget_seconds: Optional[float] = None,
@@ -1803,7 +1834,7 @@ class GSpanMiner:
         assert self._rule_out_rules is not None and self._rule_in_rules is not None
 
         min_sup = self._min_sup_abs()
-        max_edges = int(max_edges) if max_edges is not None else (self.max_nodes * 2)
+    # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         # 全局标签支持（仅规则标签）
         label_pid_support: Dict[str, int] = {}
@@ -1927,7 +1958,7 @@ class GSpanMiner:
             if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
                 finalize(labels, edges, pobj)
                 return
-            if len(labels) >= self.max_nodes or len(edges) >= max_edges:
+            if len(labels) >= self.max_nodes:
                 finalize(labels, edges, pobj)
                 return
             sig = signature(labels, edges)
@@ -2007,7 +2038,7 @@ class GSpanMiner:
                     if any((prune_by_rule and label_pid_support.get(lb, 0) < min_sup) for lb in cand["labels"] if lb.startswith("R:")):
                         continue
                 # 结构限界
-                if len(cand["labels"]) > self.max_nodes or len(cand["edges"]) > max_edges:
+                if len(cand["labels"]) > self.max_nodes:
                     finalize(cand["labels"], cand["edges"], cand_pobj)
                 else:
                     # 若支持已达阈值，继续扩展以寻更大结构；否则也可尝试扩展，但会在 finalize 处过滤
@@ -2095,13 +2126,13 @@ class GSpanMiner:
         self,
         seed: Dict[str, Any],
         *,
-        max_edges: Optional[int] = None,
         debug_limit_expansions: Optional[int] = None,
         debug_log_every: int = 10000,
         time_budget_seconds: Optional[float] = None,
         prune_low_support_labels: bool = True,
         prune_by_rule: bool = True,
         enable_var_closure_check: bool = False,  # 仅用于后续 schema 层过滤，这里保持与 run_rules_only 一致
+        global_budget: Optional[Any] = None,
         emit: Optional[Any] = None,
     ) -> None:
         """从一个 rules-only 种子开始扩展，达到 finalize 条件时 emit 模式对象。"""
@@ -2111,7 +2142,7 @@ class GSpanMiner:
         assert self._rule_out_rules is not None and self._rule_in_rules is not None
 
         min_sup = self._min_sup_abs()
-        max_edges = int(max_edges) if max_edges is not None else (self.max_nodes * 2)
+    # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         # 标签支持
         label_pid_support: Dict[str, int] = {}
@@ -2135,6 +2166,14 @@ class GSpanMiner:
 
         visited: Set[Tuple[Tuple[str,...], Tuple[Tuple[int,int], ...]]] = set()
         expansions = 0
+
+        def try_consume_budget() -> bool:
+            if global_budget is None:
+                return True
+            try:
+                return bool(global_budget.acquire(block=False))
+            except Exception:
+                return False
 
         def support_ok(pobj: Dict[str, Any]) -> bool:
             return len(pobj.get("pids", set())) >= min_sup
@@ -2187,13 +2226,17 @@ class GSpanMiner:
             if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
                 finalize(labels, edges, pobj)
                 return
-            if len(labels) >= self.max_nodes or len(edges) >= max_edges:
+            if len(labels) >= self.max_nodes:
                 finalize(labels, edges, pobj)
                 return
             sig = signature(labels, edges)
             if sig in visited:
                 return
             visited.add(sig)
+            if not try_consume_budget():
+                # 没有预算，直接 finalize 当前结构
+                finalize(labels, edges, pobj)
+                return
             expansions += 1
             if debug_log_every and expansions % max(1, debug_log_every) == 0:
                 self.logger.info(f"rules-only expand step={expansions}, cur_nodes={len(labels)}, cur_edges={len(edges)}")
@@ -2243,7 +2286,7 @@ class GSpanMiner:
                 if prune_low_support_labels or prune_by_rule:
                     if any((prune_by_rule and label_pid_support.get(lb, 0) < min_sup) for lb in cand["labels"] if lb.startswith("R:")):
                         continue
-                if len(cand["labels"]) > self.max_nodes or len(cand["edges"]) > max_edges:
+                if len(cand["labels"]) > self.max_nodes:
                     finalize(cand["labels"], cand["edges"], cand_pobj)
                 else:
                     if support_ok(cand_pobj):
@@ -2300,6 +2343,10 @@ class GSpanMiner:
             orig = self.pg.nodes[self.G.nodes[fid]["orig_node_id"]]
             pred = orig["label"]
             args = orig.get("args", [])
+            if pred in {"aconst", "rconst"} and len(args) >= 1:
+                head = ",".join(vget(a) for a in args[:-1])
+                tail = str(args[-1])
+                return f"{pred}(" + (head + "," if head else "") + tail + ")"
             return f"{pred}({','.join(vget(a) for a in args)})"
 
         premise_terms = [fact_term_from_gid(fid) for fid in sorted(list(premises_ext))]
@@ -2341,6 +2388,10 @@ class GSpanMiner:
             orig = self.pg.nodes[node["orig_node_id"]]
             pred = orig["label"]
             args = orig.get("args", [])
+            if pred in {"aconst", "rconst"} and len(args) >= 1:
+                head = ",".join(vget(a) for a in args[:-1])
+                tail = str(args[-1])
+                return f"{pred}(" + (head + "," if head else "") + tail + ")"
             return f"{pred}(" + ",".join(vget(a) for a in args) + ")"
 
         premises = [fact_term(i) for i,lb in enumerate(labels) if lb.startswith("F:") and indeg[i]==0]

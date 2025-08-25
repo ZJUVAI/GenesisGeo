@@ -45,10 +45,92 @@ except Exception:
         get_structured_proof = _pw_mod.get_structured_proof  # type: ignore[attr-defined]
 
 
+def _extract_point_rely_on_transitive(proof_state):
+    """提取所有点的传递依赖(基于 Point.rely_on)。
+
+    返回: dict[str, list[str]]，键为点名，值为传递依赖点名的去重有序列表(按字母排序稳定输出)。
+    若解析失败，返回空字典。
+    """
+
+    # 延迟、健壮导入 Point
+    try:
+        from newclid.dependencies.symbols import Point  # type: ignore
+    except Exception:
+        # 动态路径加载兜底
+        try:
+            _here = os.path.dirname(__file__)
+            _sym_path = os.path.abspath(os.path.join(_here, os.pardir, 'dependencies', 'symbols.py'))
+            _spec_sym = importlib.util.spec_from_file_location('symbols', _sym_path)
+            if _spec_sym is None or _spec_sym.loader is None:
+                return {}
+            _sym_mod = importlib.util.module_from_spec(_spec_sym)
+            _spec_sym.loader.exec_module(_sym_mod)  # type: ignore[attr-defined]
+            Point = getattr(_sym_mod, 'Point', None)  # type: ignore
+            if Point is None:
+                return {}
+        except Exception:
+            return {}
+
+    try:
+        dg = getattr(proof_state, 'dep_graph', None)
+        if dg is None or not hasattr(dg, 'symbols_graph'):
+            return {}
+        sg = dg.symbols_graph
+        if not hasattr(sg, 'nodes_of_type'):
+            return {}
+        points = sg.nodes_of_type(Point)
+    except Exception:
+        return {}
+
+    # 构建依赖映射: name -> direct parents(list[Point])
+    name2point = {}
+    direct_deps = {}
+    for p in points:
+        try:
+            name2point[p.name] = p
+            parents = []
+            for q in getattr(p, 'rely_on', []) or []:
+                try:
+                    parents.append(q)
+                except Exception:
+                    continue
+            direct_deps[p.name] = parents
+        except Exception:
+            # 某个点异常时跳过
+            direct_deps[p.name if hasattr(p, 'name') else str(p)] = []
+
+    # 计算传递闭包: DFS 防环
+    def ancestors(name: str, visiting: set[str] | None = None) -> set[str]:
+        if visiting is None:
+            visiting = set()
+        res: set[str] = set()
+        visiting.add(name)
+        for parent in direct_deps.get(name, []):
+            try:
+                pname = parent.name
+            except Exception:
+                pname = str(parent)
+            if pname in visiting:
+                continue  # 避免环
+            res.add(pname)
+            res |= ancestors(pname, visiting.copy())
+        return res
+
+    result: dict[str, list[str]] = {}
+    for name in name2point.keys():
+        try:
+            aset = ancestors(name)
+            # 稳定输出，按字母排序
+            result[name] = sorted(aset)
+        except Exception:
+            result[name] = []
+    return result
+
+
 def _to_jsonable(obj):
     """将任意对象转换为可 JSON 序列化的结构。
 
-    - 对 ProofState：使用 get_structured_proof 生成三段文本。
+    - 对 ProofState：使用 get_structured_proof 生成三段文本；并在其上层 dict 注入 point_rely_on。
     - 对映射、序列、集合：递归转换。
     - 其它对象：转为字符串表示。
     """
@@ -75,8 +157,26 @@ def _to_jsonable(obj):
             # 回退到字符串表示，避免整个保存失败
             return str(obj)
 
-    # 映射类型：保证 key 为字符串
+    # 映射类型：保证 key 为字符串；并在含 ProofState 的 dict 注入 point_rely_on
     if isinstance(obj, dict):
+        # 在转换前尝试找到一个 ProofState-like 的值，用于提取依赖
+        proof_state_obj = None
+        try:
+            for vv in obj.values():
+                if hasattr(vv, 'goals') and hasattr(vv, 'dep_graph'):
+                    proof_state_obj = vv
+                    break
+        except Exception:
+            proof_state_obj = None
+
+        # 若发现 ProofState，先提取传递依赖，填充到当前 dict 的副本中
+        injected_point_rely_on = None
+        if proof_state_obj is not None:
+            try:
+                injected_point_rely_on = _extract_point_rely_on_transitive(proof_state_obj)
+            except Exception:
+                injected_point_rely_on = None
+
         new_dict = {}
         for k, v in obj.items():
             try:
@@ -84,6 +184,14 @@ def _to_jsonable(obj):
             except Exception:
                 key_str = repr(k)
             new_dict[key_str] = _to_jsonable(v)
+        if injected_point_rely_on is not None:
+            # 压缩为 name -> "a,b,c" 的字典，减少 JSON 换行
+            try:
+                compact_map = {k: ",".join(v) if isinstance(v, list) else str(v)
+                               for k, v in injected_point_rely_on.items()}
+            except Exception:
+                compact_map = injected_point_rely_on
+            new_dict['point_rely_on'] = _to_jsonable(compact_map)
         return new_dict
 
     # 序列/集合
