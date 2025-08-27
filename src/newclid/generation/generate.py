@@ -364,7 +364,7 @@ class GeometryGenerator:
 
         def statement2str_with_mapping(statement: Statement, mp):
             res = [statement.predicate.NAME] + [mp[arg.name]
-                                                if isinstance(arg, Point) else mp[str(arg)] for arg in statement.args]
+                                                if isinstance(arg, Point) else str(arg) for arg in statement.args]
             return " ".join(res)
 
         def get_all_premise(problem):
