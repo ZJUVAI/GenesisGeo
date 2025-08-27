@@ -196,6 +196,7 @@ class GeometryGenerator:
         self.write_buffer = []
         self.writer_hash = set()
         self.filter = GeometryGoalFilter()
+        self.defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
 
     def all_possible_goals_by_ar(self, dep_graph: DependencyGraph) -> list[Statement]:
         def extract_points(s):
@@ -263,15 +264,13 @@ class GeometryGenerator:
 
     def llm_solution(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
         dep_idx: dict[Statement, str] = {}
-        defs = DefinitionJGEX.to_dict(
-            DefinitionJGEX.parse_txt_file(default_defs_path()))
 
         data_tmp = defaultdict(list)
         for construction in problem.constructions:
             group = {}
             p2deps = defaultdict(list)
             for constr_sentence in construction.sentences:
-                cdef = defs[constr_sentence[0]]
+                cdef = self.defs[constr_sentence[0]]
                 if len(constr_sentence) == len(cdef.declare):
                     mapping = dict(zip(cdef.declare[1:], constr_sentence[1:]))
                 else:
@@ -369,15 +368,13 @@ class GeometryGenerator:
             return " ".join(res)
 
         def get_all_premise(problem):
-            defs = DefinitionJGEX.to_dict(
-                DefinitionJGEX.parse_txt_file(default_defs_path()))
             data_tmp = defaultdict(list)
             for construction in problem.constructions:
                 group = {}
                 p2deps = defaultdict(list)
                 points_in_basic_order = []
                 for constr_sentence in construction.sentences:
-                    cdef = defs[constr_sentence[0]]
+                    cdef = self.defs[constr_sentence[0]]
                     if len(constr_sentence) == len(cdef.declare):
                         mapping = dict(
                             zip(cdef.declare[1:], constr_sentence[1:]))
@@ -635,20 +632,15 @@ class GeometryGenerator:
         try:
             """Process a single geometry problem."""
             pid = args
-            
-            clause_generator = CompoundClauseGen(
-                max_sets=self.max_clauses,
-                shuffle=False,
-            )
-            
-            fl_statement = clause_generator.generate_clauses(self.max_clauses)
-            last_goal_len = 0
+            clauses_generator = CompoundClauseGen(pid, self.defs)
+            fl_statement = clauses_generator.generate(self.max_clauses)
+
 
             solver_builder = GeometricSolverBuilder(seed=998244353)
             solver_builder.with_deductive_agent(DDARN())
             solver_builder.load_problem_from_txt(fl_statement)
             try:
-                solver = solver_builder.build(max_attempts=100)
+                solver = solver_builder.build(max_attempts=1)
             except Exception as e:
                 logging.info(f"Error: {e}")
                 return [], {}
@@ -714,11 +706,8 @@ class GeometryGenerator:
                     continue
                 #  llm data generation
                 aux_points = [p.name for p in aux_points]
-                llm = self.llm_solution(problem_new, aux_points, solver_new.proof)
                 llm_renamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
 
-                if len(aux_points) > 0 and not self.filter.aux_predicates_valid_check(llm['llm_output']):
-                    continue
                 if len(aux_points) > 0 and not self.filter.aux_predicates_valid_check(llm_renamed['llm_output']):
                     continue
 
@@ -729,8 +718,6 @@ class GeometryGenerator:
                     "nl_problem": "",
                     "n_proof_steps": n_proof_steps,
                     # "nl_solution": nl_solution,
-                    "llm_input": llm['llm_input'],
-                    "llm_output": llm['llm_output'],
                     "llm_input_renamed": llm_renamed['llm_input'],
                     "llm_output_renamed": llm_renamed['llm_output'],
                 })
@@ -779,85 +766,53 @@ class GeometryGenerator:
                     f.write('\n')
             self.write_buffer.clear()
 
-    def generate_problems(self, load_from: str = None): 
+    def generate_problems(self): 
         def task_generator():
             for i in range(10**9):
                 yield i
-        
-        if load_from:
-            print("Loading from ", load_from)
-            from tqdm import tqdm
-            with open(load_from, 'r') as f:
-                total_lines = sum(1 for _ in f)
-            self.n_samples -= total_lines
-            with open(load_from, 'r') as f:
-                for line in tqdm(f, total=total_lines, desc="Processing"):
-                    data = json.loads(line)
-                    key_hash = hash(data['llm_input_renamed'])
-                    if key_hash not in self.writer_hash:
-                        self.writer_hash.add(key_hash)
-            print("Loaded ", total_lines, " samples")
 
         task_iterator = task_generator()
 
         all_data_len = 0
         summary_reporter = Summary(prefix = self.path_prefix)
         start_time = time.time()
-        if self.n_threads == 1:
-            while all_data_len < self.n_samples:
-                data, summary = self.process_single_problem(next(task_iterator))
-                if data:
-                    self.write_data(data)
-                    all_data_len += len(data)
-                    summary_reporter.add(summary)
-                    elapsed_time = time.time() - start_time
-                    logging.info(
-                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                        f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. Hashfilter: {summary['hashfilter_runtime']:2.0f}s. "
-                        f"Speed: {(elapsed_time)/all_data_len:2.0f}s/sample. "
-                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                    )
-        else:
-            try:
-                if not ray.is_initialized():
-                    ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
-                
-                @ray.remote(num_cpus=1)
-                def ray_process_single_problem(args):
-                    return self.process_single_problem(args)
-                
-                pending_tasks = []
-                max_pending = self.n_threads * 2
-                while len(pending_tasks) < max_pending:
-                    pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
+ 
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
+        
+        @ray.remote(num_cpus=1)
+        def ray_process_single_problem(args):
+            return self.process_single_problem(args)
+        
+        pending_tasks = []
+        max_pending = self.n_threads * 2
+        while len(pending_tasks) < max_pending:
+            pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
 
-                while all_data_len < self.n_samples:
-                    done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
-                    result = ray.get(done[0])
-                    data, summary = result
-                    
-                    if data:
-                        self.write_data(data)
-                        all_data_len += len(data)
-                        summary_reporter.add(summary)
-                        elapsed_time = time.time() - start_time
-                        logging.info(
-                            f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                            f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. Hashfilter: {summary['hashfilter_runtime']:2.0f}s. "
-                            f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
-                            f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                        )
+        while all_data_len < self.n_samples:
+            done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
+            result = ray.get(done[0])
+            data, summary = result
+            
+            if data:
+                self.write_data(data)
+                all_data_len += len(data)
+                summary_reporter.add(summary)
+                elapsed_time = time.time() - start_time
+                logging.info(
+                    f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                    f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. Hashfilter: {summary['hashfilter_runtime']:2.0f}s. "
+                    f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
+                    f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                )
 
-                    if len(pending_tasks) < max_pending:
-                        pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
+            if len(pending_tasks) < max_pending:
+                pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
 
-                # Cancel any remaining tasks
-                for task in pending_tasks:
-                    ray.cancel(task, force=True)
-                ray.shutdown()
-
-            except Exception as e:
-                logging.error(f"multiprocessing error: {e}")
+        # Cancel any remaining tasks
+        for task in pending_tasks:
+            ray.cancel(task, force=True)
+        ray.shutdown()
 
         self.write_data([], force=True)
         final_elapsed_time = time.time() - start_time
@@ -879,7 +834,6 @@ def main():
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
     parser.add_argument("--filteration_rate", required=False, type=float, default=0.6)
-    parser.add_argument("--load_from", required=False, type=str, default=None)
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
@@ -895,7 +849,7 @@ def main():
         filteration_rate=args.filteration_rate
     )
 
-    generator.generate_problems(args.load_from)
+    generator.generate_problems()
 
 if __name__ == "__main__":
     main()

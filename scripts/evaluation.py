@@ -35,7 +35,7 @@ def solve_problem(args):
         elapsed_time = time.time() - start_time 
         return (problem_name, False, elapsed_time)
 
-@ray.remote(num_cpus=1, num_gpus=0.125)
+@ray.remote(num_cpus=1, num_gpus=0.5)
 def ray_solve_problem(args):
     """
     Ray remote function to process a single problem.

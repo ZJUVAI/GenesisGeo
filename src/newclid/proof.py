@@ -98,7 +98,7 @@ class ProofState:
                     )
                 )
                 if not statement.check_numerical():
-                    raise ConstructionError(construction)
+                    raise ConstructionError("Requirement check_numerical failed. " + str(construction))
 
             for bs in cdef.basics:
                 for t in bs.sentences:
@@ -108,7 +108,6 @@ class ProofState:
                         )
                     )
                     adds.append(Dependency.mk(statement, IN_PREMISES, ()))
-                    # adds.append(Dependency.mk(statement, IN_PREMISES, (), str(construction)))
             for n in cdef.numerics:
                 numerics.append(tuple(mapping[a] if a in mapping else a for a in n))
 
@@ -145,9 +144,14 @@ class ProofState:
                 to_be_intersected, [p.num for p in existing_points], rng=self.rng
             )
 
-        new_numerical_point = draw_fn()
-        for p, num, num0 in zip(new_points, new_numerical_point, fix_point_postions):
-            p.num = num0 or num
+        if None in fix_point_postions:
+            new_numerical_point = draw_fn()
+            for p, num, num0 in zip(new_points, new_numerical_point, fix_point_postions):
+                p.num = num0 or num
+        else:
+            for p, num in zip(new_points, fix_point_postions):
+                p.num = num
+            new_numerical_point = fix_point_postions
 
         # check two things
         existing_numerical_points = [p.num for p in existing_points]
