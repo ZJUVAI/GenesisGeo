@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import timedelta
 import ray
 from millify import millify
+import numpy as np
 
 from newclid.agent.ddarn import DDARN
 from newclid.api import GeometricSolver, GeometricSolverBuilder
@@ -28,12 +29,15 @@ from newclid.proof_writing import get_structured_proof, write_proof_steps
 from newclid.statement import Statement
 
 class GeometryGoalFilter:
-    def goal_valid_check(self, name, args, dep_graph):
+    def goal_valid_check(self, tokens, dep_graph):
+        name = tokens[0]
+        args = tokens[1:]
         if args[-1] == '':
             args = args[:-1]
         # AG1 do not support aconst and rconst
         if name in ('aconst', 'rconst'):  # rconst AB:AB=1, aconst ∠AB AB=0
-            return False
+            if name == 'rconst' and args[-1] == '1':
+                return False
         # case: cong AB = AB,
         if name == 'cong':
             left = {args[0], args[1]}
@@ -136,16 +140,20 @@ class GeometryGoalFilter:
             return unique_goals
 
         eqangle_goals = [
-            goal for goal in possible_goals if goal.predicate.NAME == 'eqangle']
+            goal for goal in possible_goals 
+            if goal.predicate.NAME == 'eqangle'
+        ]
         eqratio_goals = [
-            goal for goal in possible_goals if goal.predicate.NAME == 'eqratio']
-        other_goals = [goal for goal in possible_goals if goal.predicate.NAME not in (
-            'eqangle', 'eqratio')]
+            goal for goal in possible_goals 
+            if goal.predicate.NAME == 'eqratio'
+        ]
+        other_goals = [
+            goal for goal in possible_goals 
+            if goal.predicate.NAME not in ('eqangle', 'eqratio')
+        ]
 
-        eqangle_goals = remove_duplicates(
-            eqangle_goals, check_equivalence, 'para')
-        eqratio_goals = remove_duplicates(
-            eqratio_goals, check_equivalence, 'cong')
+        eqangle_goals = remove_duplicates(eqangle_goals, check_equivalence, 'para')
+        eqratio_goals = remove_duplicates(eqratio_goals, check_equivalence, 'cong')
 
         return other_goals + eqangle_goals + eqratio_goals
 
@@ -182,8 +190,8 @@ class GeometryGoalFilter:
         return True
 
 class GeometryGenerator:
-    def __init__(self, max_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600, filteration_rate=0.6):
-        self.max_clauses = max_clauses
+    def __init__(self, n_clauses=5, n_threads=1, output_dir="dataset", min_proof_steps=5, min_clauses_num=3, n_samples=100, timeout=3600, filteration_rate=0.6):
+        self.n_clauses = n_clauses
         self.min_proof_steps = min_proof_steps
         self.min_clauses_num = min_clauses_num
         self.n_samples = n_samples
@@ -192,18 +200,19 @@ class GeometryGenerator:
         self.output_dir = output_dir
         self.filteration_rate = filteration_rate
         self.path_prefix = os.path.join(
-            self.output_dir, f"geometry_clauses{self.max_clauses}_samples{millify(self.n_samples)}")
+            self.output_dir, f"geometry_clauses{self.n_clauses}_samples{millify(self.n_samples)}")
         self.write_buffer = []
         self.writer_hash = set()
         self.filter = GeometryGoalFilter()
         self.defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
+        self.clauses_generator = CompoundClauseGen(seed=os.getpid(), defs=self.defs)
 
     def all_possible_goals_by_ar(self, dep_graph: DependencyGraph) -> list[Statement]:
         def extract_points(s):
             return re.findall(r'[a-z][\d]*', s)
 
         def goal_from_tokens(tokens):
-            if self.filter.goal_valid_check(tokens[0], tokens[1:], dep_graph):
+            if self.filter.goal_valid_check(tokens, dep_graph):
                 goal = Statement.from_tokens(tokens, dep_graph)
                 if goal and goal.check():
                     return [goal]
@@ -234,8 +243,7 @@ class GeometryGenerator:
                     continue
         for v1, v2, v3, v4 in e2v_pairs4:
             try:
-                v1, v2, v3, v4 = extract_points(v1), extract_points(
-                    v2), extract_points(v3), extract_points(v4)
+                v1, v2, v3, v4 = extract_points(v1), extract_points(v2), extract_points(v3), extract_points(v4)
                 goal_from_tokens(tuple(['eqangle'] + list(v1 + v2 + v3 + v4)))
             except Exception as e:
                 logging.warning(
@@ -628,13 +636,17 @@ class GeometryGenerator:
                             "problem": solver_builder_test.problemJGEX
                         }
             return {"info": 'failed'}
-
+        
         try:
             """Process a single geometry problem."""
-            pid = args
-            clauses_generator = CompoundClauseGen(pid, self.defs)
-            fl_statement = clauses_generator.generate(self.max_clauses)
+            pid, fl_statement = args
+            start_time = time.time()
 
+            # t = time.time()
+            # # clauses_generator = CompoundClauseGen(seed=os.getpid(), defs=self.defs)
+            # # fl_statement = clauses_generator.generate(self.n_clauses)
+            # prob_gen_time = time.time() - t
+            # print(f'problem statement generated in {prob_gen_time:.1f} seconds')
 
             solver_builder = GeometricSolverBuilder(seed=998244353)
             solver_builder.with_deductive_agent(DDARN())
@@ -648,10 +660,8 @@ class GeometryGenerator:
 
             t = time.time()
             self.all_possible_goals_by_ar(solver.proof.dep_graph)
-            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.filter.goal_valid_check(
-                goal.predicate.NAME, [arg.name if hasattr(arg, "name") else arg for arg in goal.args], solver.proof.dep_graph)]
-            possible_goals = self.filter.goal_filter(
-                possible_goals, solver.proof.dep_graph)
+            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.filter.goal_valid_check(goal.to_str().split(" "), solver.proof.dep_graph)]
+            possible_goals = self.filter.goal_filter(possible_goals, solver.proof.dep_graph)
             checkgoals_runtime = time.time() - t
 
             n_filtered_samples = 0
@@ -661,16 +671,14 @@ class GeometryGenerator:
                 # find minimal aux clauses
                 solver.proof.goals = [goal]
                 solver_new = solver
-                problem_new = str(solver_builder.problemJGEX) + goal.predicate.NAME + \
-                    ' ' + ' '.join([arg.name for arg in goal.args])
+                problem_new = str(solver_builder.problemJGEX) + goal.to_str()
                 problem_new = ProblemJGEX.from_text(problem_new)
 
                 last_essential_clauses_len = float('inf')
                 last_essential_clauses_aux_len = float('inf')
                 while True:
                     # get proof and essential_clauses
-                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(
-                        solver_new.proof.goals)
+                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
                     essential_clauses: set[str] = set()
                     essential_clauses_aux: set[str] = set()
                     for p in aux_points:
@@ -682,8 +690,12 @@ class GeometryGenerator:
                         break
                     last_essential_clauses_len = len(essential_clauses)
                     last_essential_clauses_aux_len = len(essential_clauses_aux)
-                    res = find_minimal_aux_clauses([str(cons) for cons in solver_builder.problemJGEX.constructions], goal.to_str(
-                    ), essential_clauses, essential_clauses_aux)
+                    res = find_minimal_aux_clauses(
+                        [str(cons) for cons in solver_builder.problemJGEX.constructions], 
+                        goal.to_str(), 
+                        essential_clauses, 
+                        essential_clauses_aux
+                    )
                     if res['info'] == 'success':
                         essential_clauses_aux = res['aux_clauses']
                         solver_new = res['solver']
@@ -721,12 +733,9 @@ class GeometryGenerator:
                     "llm_input_renamed": llm_renamed['llm_input'],
                     "llm_output_renamed": llm_renamed['llm_output'],
                 })
-            
-            start_time = time.time()
-            
-            generated_data = self.writer_hash_filter(generated_data, "llm_input_renamed")
 
             summary = {
+                'total_time': time.time() - start_time,
                 'runtime': solver.run_infos['runtime'],
                 'checkgoals_runtime': checkgoals_runtime,
                 'n_samples': len(generated_data),
@@ -735,7 +744,6 @@ class GeometryGenerator:
                 'n_clauses': [d['n_clauses'] for d in generated_data],
                 'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
                 'n_filtered_samples': n_filtered_samples,
-                'hashfilter_runtime': time.time() - start_time
             }
             return generated_data, summary
         except Exception as e:
@@ -744,16 +752,6 @@ class GeometryGenerator:
             traceback.print_exc()
             return [], {}
     
-    def writer_hash_filter(self, data: list, key: str) -> list[str]:
-        """Check if the input has already been written to the output file."""
-        filtered_data = []
-        for d in data:
-            key_hash = hash(d[key])
-            if key_hash not in self.writer_hash:
-                self.writer_hash.add(key_hash)
-                filtered_data.append(d)
-        return filtered_data
-
     def write_data(self, all_data: list, force: bool = False):
         """Append a single JSON object to a .jsonl file."""
         self.write_buffer.extend(all_data)
@@ -762,6 +760,7 @@ class GeometryGenerator:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(filename, 'a', encoding='utf-8') as f:
                 for data_item in self.write_buffer:
+                    data_item['fl_problem'] = ''
                     json.dump(data_item, f, ensure_ascii=False)
                     f.write('\n')
             self.write_buffer.clear()
@@ -769,30 +768,35 @@ class GeometryGenerator:
     def generate_problems(self): 
         def task_generator():
             for i in range(10**9):
-                yield i
-
+                clauses = self.clauses_generator.generate(
+                    np.random.binomial(n=self.n_clauses * 2, p=0.5)
+                )
+                yield i, clauses
         task_iterator = task_generator()
 
-        all_data_len = 0
-        summary_reporter = Summary(prefix = self.path_prefix)
-        start_time = time.time()
- 
-        if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
-        
         @ray.remote(num_cpus=1)
         def ray_process_single_problem(args):
             return self.process_single_problem(args)
         
+        start_time = time.time()
+        summary_reporter = Summary(prefix = self.path_prefix)
+ 
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
         pending_tasks = []
-        max_pending = self.n_threads * 2
+        max_pending = int(self.n_threads * 1.5)
         while len(pending_tasks) < max_pending:
             pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
 
+        all_data_len = 0
         while all_data_len < self.n_samples:
             done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
-            result = ray.get(done[0])
-            data, summary = result
+            try:
+                result = ray.get(done[0])
+                data, summary = result
+            except Exception as e:
+                logging.warning(f"Ray task failed with error: {e}")
+                data, summary = [], {}
             
             if data:
                 self.write_data(data)
@@ -801,12 +805,12 @@ class GeometryGenerator:
                 elapsed_time = time.time() - start_time
                 logging.info(
                     f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                    f"DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. Hashfilter: {summary['hashfilter_runtime']:2.0f}s. "
+                    f"Total: {summary['total_time']:2.0f}s. DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
                     f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
                     f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
                 )
 
-            if len(pending_tasks) < max_pending:
+            while len(pending_tasks) < max_pending:
                 pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
 
         # Cancel any remaining tasks
@@ -825,7 +829,7 @@ class GeometryGenerator:
 def main():
     parser = argparse.ArgumentParser(
         description="Create problem fl - nl dataset")
-    parser.add_argument("--max_clauses", required=False, type=int, default=10)
+    parser.add_argument("--n_clauses", required=False, type=int, default=10)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
     parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
     parser.add_argument("--n_threads", required=False, type=int, default=1)
@@ -839,7 +843,7 @@ def main():
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
     generator = GeometryGenerator(
-        max_clauses=args.max_clauses,
+        n_clauses=args.n_clauses,
         n_threads=args.n_threads,
         output_dir=args.dir,
         min_proof_steps=args.min_proof_steps,

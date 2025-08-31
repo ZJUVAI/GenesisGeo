@@ -361,11 +361,13 @@ def circle_circle_intersection(c1: CircleNum, c2: CircleNum) -> tuple[PointNum, 
 
     d = (x1 - x0) ** 2 + (y1 - y0) ** 2
     if nearly_zero(d):
-        raise InvalidIntersectError
+        # raise InvalidIntersectError
+        raise InvalidIntersectError("Two circles have the same center.")
     d: float = np.sqrt(d)
 
     if not (r0 + r1 >= d and abs(r0 - r1) <= d):
-        return ()
+        # return ()
+        raise InvalidIntersectError("Two circles are too far to intersect.")
 
     a = (r0**2 - r1**2 + d**2) / (2 * d)
     h = r0**2 - a**2
@@ -379,31 +381,41 @@ def circle_circle_intersection(c1: CircleNum, c2: CircleNum) -> tuple[PointNum, 
 
 
 def line_circle_intersection(line: LineNum, circle: CircleNum) -> tuple[PointNum, ...]:
+    # Line: ax + by + c = 0
+    # Circle: (x - p)^2 + (y - q)^2 = r^2
     a, b, c = line.coefficients
     r = circle.radius
     center = circle.center
     p, q = center.x, center.y
 
+    # Line is almost vertical (b=0, equation degenerates to a x + c = 0), solve for y
     if nearly_zero(b):
         x = -c / a
         x_p = x - p
         x_p2 = x_p * x_p
         y = solve_quad(1, -2 * q, q * q + x_p2 - r * r)
+        if len(y) == 0:
+            raise InvalidIntersectError("Line & circle are too far to intersect.")
         return tuple(PointNum(x, y1) for y1 in y)
 
+     # Line is almost horizontal (a=0, equation degenerates to b y + c = 0), solve for x
     if close_enough(a, 0):
         y = -c / b
         y_q = y - q
         y_q2 = y_q * y_q
         x = solve_quad(1, -2 * p, p * p + y_q2 - r * r)
+        if len(y) == 0:
+            raise InvalidIntersectError("Line & circle are too far to intersect.")
         return tuple(PointNum(x1, y) for x1 in x)
 
+    # General case: x = -(b y + c) / a
     c_ap = c + a * p
     a2 = a * a
     y = solve_quad(
         a2 + b * b, 2 * (b * c_ap - a2 * q), c_ap * c_ap + a2 * (q * q - r * r)
     )
-
+    if len(y) == 0:
+        raise InvalidIntersectError("Line & circle are too far to intersect.")
     return tuple(PointNum(-(b * y1 + c) / a, y1) for y1 in y)
 
 
@@ -455,9 +467,12 @@ def reduce(
         assert isinstance(v, FormNum)
         result = np.array(intersect(u, v))
         rng.shuffle(result)
+        if len(result) == 0:
+            raise InvalidIntersectError("No intersection")
+        # may have multiple points, choose the one that is not close to existing points
         for p in result:
             if all(not p.close_enough(x) for x in existing_points):
                 return (p,)
-        raise InvalidReduceError
+        raise InvalidReduceError("All possible intersections are too close to existing points.")
     else:
         raise NotImplementedError

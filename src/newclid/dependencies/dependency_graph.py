@@ -167,7 +167,7 @@ class DependencyGraph:
 
         points: set[Point] = set()
         for goal in goals:
-            points.update(goal.args)
+            points.update([p for p in goal.args if isinstance(p, Point)])
         queue: list[Point] = list(points)
         i = 0
         while i < len(queue):

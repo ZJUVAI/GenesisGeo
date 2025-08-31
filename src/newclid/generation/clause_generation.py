@@ -31,7 +31,7 @@ BASIC = [
     'triangle12',
     'r_triangle',
     'iso_triangle',
-    'iso_triangle0', 
+    # 'iso_triangle0', 
     'ieq_triangle',
     'risos',
     'quadrangle',
@@ -55,10 +55,10 @@ INTERSECT = [
     'eqdistance', # => circle => CircleNum     
     'on_line', # => line => LineNum
     'on_aline', # => aline => LineNum
-    'on_aline0', # => aline => LineNum
+    # 'on_aline0', # => aline => LineNum
     'on_bline', # => bline => LineNum
     'on_pline', # => pline => LineNum
-    'on_pline0', # => pline => LineNum
+    # 'on_pline0', # => pline => LineNum
     'on_tline', # => tline => LineNum
     'on_dia', # => dia => CircleNum
     'on_circle', # => circle => CircleNum
@@ -67,7 +67,7 @@ INTERSECT = [
     'eqratio', # => eqratio => CircleNum
     'eqratio6',  # => eqratio6 => LineNum / CircleNum
     'lc_tangent', # => tline => LineNum  # should be here
-    # TODO: double check.
+    # TODO: double check. do we need this?
     # 'rconst', # => rconst => CircleNum
     # 'rconst2', # => rconst2 => LineNum / CircleNum
     # 'aconst', # => aconst => LineNum !一般在goal中，可以不放
@@ -110,10 +110,9 @@ OTHER = [
     'trisegment',
     'cc_tangent',
     'tangent',
-    'iso_triangle_vertex',
-    'iso_triangle_vertex_angle',
+    # 'iso_triangle_vertex',
+    # 'iso_triangle_vertex_angle',
 ]
-OTHER += INTERSECT
 
 
 class PointGenerator:
@@ -161,7 +160,7 @@ class CompoundClauseGen:
         self.dep_graph = DependencyGraph(AlgebraicManipulator())
         self.symbols_graph = self.dep_graph.symbols_graph
 
-        max_basic_clause = int(0.3 * length)
+        max_basic_clause = int(0.15 * length)
         res = []
         for clause_set in range(length):
             # step 1: add clause with basic 
@@ -170,17 +169,20 @@ class CompoundClauseGen:
             # step 2: add clause with basic (free) 
             elif clause_set < max_basic_clause:
                 new_clause = self.get_clause_with_n_constructions(BASIC_FREE, 1)
-            # step: add cluase with single constructions or two constructions
+            # step 3: add cluase with single constructions or two constructions
             else:
                 if random.random() < 0.5:
                     new_clause = self.get_clause_with_n_constructions(INTERSECT, 2)
                 else:
                     new_clause = self.get_clause_with_n_constructions(OTHER, 1)
-            res.append(new_clause)
+            if new_clause:
+                res.append(new_clause)
         return "; ".join(res)
 
     def get_clause_with_n_constructions(self, construction_candidates, n: int):
-        while True:
+        try_count = 0
+        while try_count < 10:
+            try_count += 1
             # samples constructions
             constructions = []
             numerics = []
@@ -199,6 +201,9 @@ class CompoundClauseGen:
             try:
                 self.draw_diagram(new_points, numerics)
             except Exception as e:
+                # print(f"Exception type: {type(e).__name__}, message: {e}")
+                # import traceback
+                # traceback.print_exc()
                 continue
 
             self.point_generator.define_points(new_points)
@@ -310,9 +315,15 @@ class CompoundClauseGen:
 
 
 if __name__ == "__main__":
-    for _ in range(5):
-        cc_gen = CompoundClauseGen(42)
-        clause_text = cc_gen.generate(2)
-        print(clause_text)
-        clause_text = cc_gen.generate(2)
-        print(clause_text)
+    cc_gen = CompoundClauseGen(42)
+    clause_text = cc_gen.generate(50)
+    clause_text = cc_gen.generate(50)
+    clause_text = cc_gen.generate(50)
+    print(clause_text)
+    for i in range(20):
+        s_time = time.time()
+        cc_gen = CompoundClauseGen(i)
+        clause_text = cc_gen.generate(50)
+        print(f'{time.time() - s_time:.2f}s')
+
+        
