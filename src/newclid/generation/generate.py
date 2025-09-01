@@ -1,5 +1,8 @@
 import logging
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+import psutil
 import re
 import argparse
 import itertools
@@ -205,7 +208,7 @@ class GeometryGenerator:
         self.writer_hash = set()
         self.filter = GeometryGoalFilter()
         self.defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
-        self.clauses_generator = CompoundClauseGen(seed=os.getpid(), defs=self.defs)
+        self.clauses_generator = CompoundClauseGen(seed=int(time.time())+os.getpid(), defs=self.defs)
 
     def all_possible_goals_by_ar(self, dep_graph: DependencyGraph) -> list[Statement]:
         def extract_points(s):
@@ -769,19 +772,34 @@ class GeometryGenerator:
         def task_generator():
             for i in range(10**9):
                 clauses = self.clauses_generator.generate(
-                    np.random.binomial(n=self.n_clauses * 2, p=0.5)
+                    np.clip(
+                        np.random.binomial(n=self.n_clauses * 2, p=0.5), 
+                        max(1, self.n_clauses - 10), 
+                        self.n_clauses + 10)
                 )
                 yield i, clauses
         task_iterator = task_generator()
 
+        def set_affinity(task_id):
+            total_cpus = 2
+            total_cores = psutil.cpu_count(logical=True)
+            cores_per_cpu = total_cores // total_cpus
+            target_cpu = task_id % total_cpus
+            cpu_affinity = list(range(target_cpu * cores_per_cpu, (target_cpu + 1) * cores_per_cpu))
+            p = psutil.Process(os.getpid())
+            p.cpu_affinity(cpu_affinity)
+
         @ray.remote(num_cpus=1)
         def ray_process_single_problem(args):
+            task_id = args[0]
+            set_affinity(task_id)
             return self.process_single_problem(args)
         
         start_time = time.time()
         summary_reporter = Summary(prefix = self.path_prefix)
  
         if not ray.is_initialized():
+            # ray.init(address="10.130.136.19:6379", ignore_reinit_error=True)
             ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
         pending_tasks = []
         max_pending = int(self.n_threads * 1.5)

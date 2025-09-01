@@ -25,7 +25,7 @@ def solve_problem(args):
             .with_deductive_agent(LMAgent(model_path, decoding_size=decoding_size,beam_size=beam_size, search_depth=search_depth))
             .build()
         )
-        is_solved = solver.run(timeout=3600*2)
+        is_solved = solver.run(timeout=3600)
         elapsed_time = time.time() - start_time
         return (problem_name, is_solved, elapsed_time) 
     except Exception as e:
