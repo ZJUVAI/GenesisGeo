@@ -2,7 +2,6 @@ import logging
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-import psutil
 import re
 import argparse
 import itertools
@@ -769,34 +768,43 @@ class GeometryGenerator:
             self.write_buffer.clear()
 
     def generate_problems(self): 
+        import signal
+        class TimeoutError(Exception):
+            pass
+        def handler(signum, frame):
+            raise TimeoutError()
         def task_generator():
             for i in range(10**9):
-                clauses = self.clauses_generator.generate(
-                    np.clip(
-                        np.random.binomial(n=self.n_clauses * 2, p=0.5), 
-                        max(1, self.n_clauses - 10), 
-                        self.n_clauses + 10)
-                )
+                signal.signal(signal.SIGALRM, handler)
+                signal.alarm(10)
+                try:
+                    clauses = self.clauses_generator.generate(
+                        np.clip(
+                            np.random.binomial(n=self.n_clauses * 2, p=0.5), 
+                            max(1, self.n_clauses - 10), 
+                            self.n_clauses + 10
+                        )
+                    )
+                except TimeoutError:
+                    signal.alarm(0)
+                    continue
                 yield i, clauses
-        task_iterator = task_generator()
-
-        @ray.remote(num_cpus=1)
+        @ray.remote(num_cpus=1, max_retries=0)
         def ray_process_single_problem(args):
-            task_id = args[0]
             return self.process_single_problem(args)
         
-        start_time = time.time()
-        summary_reporter = Summary(prefix = self.path_prefix)
- 
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
-        pending_tasks = []
+        task_iterator = task_generator()
         max_pending = int(self.n_threads * 1.5)
-        while len(pending_tasks) < max_pending:
-            pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
-
+        summary_reporter = Summary(prefix = self.path_prefix)
+        
+        start_time = time.time()
         all_data_len = 0
+        pending_tasks = []
         while all_data_len < self.n_samples:
+            while len(pending_tasks) < max_pending:
+                pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
             done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
             try:
                 result = ray.get(done[0])
@@ -816,9 +824,6 @@ class GeometryGenerator:
                     f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
                     f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
                 )
-
-            while len(pending_tasks) < max_pending:
-                pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
 
         # Cancel any remaining tasks
         for task in pending_tasks:

@@ -7,3 +7,10 @@ pyvis
 seaborn
 colorama
 pillow
+torch
+millify
+ray
+openai
+pybind11
+transformers
+accelerate
