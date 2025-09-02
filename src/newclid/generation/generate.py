@@ -780,26 +780,15 @@ class GeometryGenerator:
                 yield i, clauses
         task_iterator = task_generator()
 
-        def set_affinity(task_id):
-            total_cpus = 2
-            total_cores = psutil.cpu_count(logical=True)
-            cores_per_cpu = total_cores // total_cpus
-            target_cpu = task_id % total_cpus
-            cpu_affinity = list(range(target_cpu * cores_per_cpu, (target_cpu + 1) * cores_per_cpu))
-            p = psutil.Process(os.getpid())
-            p.cpu_affinity(cpu_affinity)
-
         @ray.remote(num_cpus=1)
         def ray_process_single_problem(args):
             task_id = args[0]
-            set_affinity(task_id)
             return self.process_single_problem(args)
         
         start_time = time.time()
         summary_reporter = Summary(prefix = self.path_prefix)
  
         if not ray.is_initialized():
-            # ray.init(address="10.130.136.19:6379", ignore_reinit_error=True)
             ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
         pending_tasks = []
         max_pending = int(self.n_threads * 1.5)
