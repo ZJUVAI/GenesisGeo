@@ -25,7 +25,7 @@ def solve_problem(args):
             .with_deductive_agent(LMAgent(model_path, decoding_size=decoding_size,beam_size=beam_size, search_depth=search_depth))
             .build()
         )
-        is_solved = solver.run(timeout=3600)
+        is_solved = solver.run(timeout=3600 * 4)
         elapsed_time = time.time() - start_time
         return (problem_name, is_solved, elapsed_time) 
     except Exception as e:
@@ -35,7 +35,7 @@ def solve_problem(args):
         elapsed_time = time.time() - start_time 
         return (problem_name, False, elapsed_time)
 
-@ray.remote(num_cpus=1, num_gpus=0.5)
+@ray.remote(num_cpus=1, num_gpus=1)
 def ray_solve_problem(args):
     """
     Ray remote function to process a single problem.

@@ -786,8 +786,8 @@ class GeometryGenerator:
                         )
                     )
                 except TimeoutError:
-                    signal.alarm(0)
                     continue
+                signal.alarm(0)
                 yield i, clauses
         @ray.remote(num_cpus=1, max_retries=0)
         def ray_process_single_problem(args):
@@ -801,32 +801,38 @@ class GeometryGenerator:
         
         start_time = time.time()
         all_data_len = 0
-        pending_tasks = []
+        pending_tasks = {}
         while all_data_len < self.n_samples:
-            while len(pending_tasks) < max_pending:
-                pending_tasks.append(ray_process_single_problem.remote(next(task_iterator)))
-            done, pending_tasks = ray.wait(pending_tasks, num_returns=1)
-            try:
+            done, _ = ray.wait(list(pending_tasks.keys()), num_returns=1, timeout=10)
+            if not done:
+                now = time.time()
+                for task, s_time in list(pending_tasks.items()):
+                    if now - s_time > self.timeout:
+                        print(f"⚠️ Task {task} timeout. Canceling")
+                        ray.cancel(task, force=True)
+                        del pending_tasks[task]
+            else:          
                 result = ray.get(done[0])
                 data, summary = result
-            except Exception as e:
-                logging.warning(f"Ray task failed with error: {e}")
-                data, summary = [], {}
+                del pending_tasks[done[0]]
             
-            if data:
-                self.write_data(data)
-                all_data_len += len(data)
-                summary_reporter.add(summary)
-                elapsed_time = time.time() - start_time
-                logging.info(
-                    f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
-                    f"Total: {summary['total_time']:2.0f}s. DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
-                    f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
-                    f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
-                )
+                if data:
+                    self.write_data(data)
+                    all_data_len += len(data)
+                    summary_reporter.add(summary)
+                    elapsed_time = time.time() - start_time
+                    logging.info(
+                        f"Progress: [{all_data_len}/{self.n_samples}] ({len(data):4d} new) in {elapsed_time:.0f}s. "
+                        f"Total: {summary['total_time']:2.0f}s. DDAR: {summary['runtime']:3.0f}s. Checkgoals: {summary['checkgoals_runtime']:2.0f}s. "
+                        f"Speed: {all_data_len / (elapsed_time):2.0f} samples/s. "
+                        f"ETA: {timedelta(seconds=int(self.n_samples/all_data_len*(elapsed_time)-elapsed_time))}"
+                    )
+
+            while len(pending_tasks) < max_pending:
+                pending_tasks[ray_process_single_problem.remote(next(task_iterator))] = time.time()
 
         # Cancel any remaining tasks
-        for task in pending_tasks:
+        for task in pending_tasks.keys():
             ray.cancel(task, force=True)
         ray.shutdown()
 
@@ -834,13 +840,11 @@ class GeometryGenerator:
         final_elapsed_time = time.time() - start_time
         summary_reporter.total_elapsed_time = final_elapsed_time
         summary_reporter.total_samples_generated = all_data_len
-        logging.info(
-            f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
+        logging.info(f"Generated {all_data_len} samples successfully in {final_elapsed_time:.2f}s.")
         summary_reporter.output_report()
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Create problem fl - nl dataset")
+    parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
     parser.add_argument("--n_clauses", required=False, type=int, default=10)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
     parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
