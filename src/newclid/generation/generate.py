@@ -811,9 +811,13 @@ class GeometryGenerator:
                         print(f"⚠️ Task {task} timeout. Canceling")
                         ray.cancel(task, force=True)
                         del pending_tasks[task]
-            else:          
-                result = ray.get(done[0])
-                data, summary = result
+            else:
+                try:         
+                    result = ray.get(done[0])
+                    data, summary = result
+                except Exception as e:
+                    print(f"⚠️ Task {task} Error. {e}")
+                    data, summary = [], {}
                 del pending_tasks[done[0]]
             
                 if data:

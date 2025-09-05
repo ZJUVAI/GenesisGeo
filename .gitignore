@@ -32,6 +32,7 @@ venv/
 
 # Models
 ag_ckpt_vocab/
+models/
 
 # IDEs
 .idea/
@@ -47,6 +48,8 @@ src/newclid/generation/dataset/
 src/newclid/test.py
 results/
 datasets/
+core*
+temp/
 
 # TODO
 TODO.md
