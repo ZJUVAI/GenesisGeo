@@ -74,6 +74,7 @@ docs/source
 # New output and model directories
 outputs/
 models/ckpts/
+src/newclid/data_discovery/data/
 
 # Keep model info file but ignore checkpoints
 !models/ckpts_info.md
