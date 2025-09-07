@@ -1,0 +1,32 @@
+r28 Overlapping parallels
+para A B A C => coll A B C
+r34 AA Similarity of triangles (Direct)
+eqangle B A B C Q P Q R, eqangle C A C B R P R Q, sameclock A B C P Q R => simtri A B C P Q R
+r35 AA Similarity of triangles (Reverse)
+eqangle B A B C Q R Q P, eqangle C A C B R Q R P, sameclock A B C P R Q => simtrir A B C P Q R
+r49 Recognize center of cyclic (circle)
+circle O A B C, cyclic A B C D => cong O A O D
+r50 Recognize center of cyclic (cong)
+cong O A O B, cong O C O D, cyclic A B C D, npara A B C D => cong O A O C
+r51 Midpoint splits in two
+midp M A B => rconst M A A B 1/2
+r52 Properties of similar triangles (Direct)
+simtri A B C P Q R => eqangle B A B C Q P Q R, eqratio B A B C Q P Q R
+r53 Properties of similar triangles (Reverse)
+simtrir A B C P Q R => eqangle B A B C Q R Q P, eqratio B A B C Q P Q R
+r54 Definition of midpoint
+cong M A M B, coll M A B => midp M A B
+r56 Properties of midpoint (coll)
+midp M A B => coll M A B
+r60 SSS Similarity of triangles (Direct)
+eqratio B A B C Q P Q R, eqratio C A C B R P R Q, sameclock A B C P Q R => simtri A B C P Q R
+r61 SSS Similarity of triangles (Reverse)
+eqratio B A B C Q P Q R, eqratio C A C B R P R Q, sameclock A B C P R Q => simtrir A B C P Q R
+r62 SAS Similarity of triangles (Direct)
+eqratio B A B C Q P Q R, eqangle B A B C Q P Q R, sameclock A B C P Q R => simtri A B C P Q R
+r63 SAS Similarity of triangles (Reverse)
+eqratio B A B C Q P Q R, eqangle B A B C Q R Q P, sameclock A B C P R Q => simtrir A B C P Q R
+r101 Similarity to Congruence (Direct)
+simtri A B C P Q R, cong A B P Q => contri A B C P Q R
+r102 Similarity to Congruence (Reverse)
+simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
