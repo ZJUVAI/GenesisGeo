@@ -31,11 +31,10 @@
   - 若模式中所有规则均已完整，先行“预 finalize”产出结果，避免在后续扩展中因限额而丢失可输出模式。
   - A 阶段（补齐规则）若没有实际进展，则不会提前 return，而是继续进入 FRF/attach 流程，减少“0 结果”情况。
   - 变量闭包检查改为“逐嵌入过滤”，更新支持度后再判定，避免一刀切误杀。
-- 输出落盘统一：
-  - 路径挖掘：`data_discovery/data/path_mining.json`
-  - 分叉挖掘 fact_rule：`data_discovery/data/branched_mining.json`
-  - 分叉挖掘 rule_only：`data_discovery/data/rules_only_mining.json`
-  - 统一包含：meta（图统计/参数/用时）、top-k 摘要、完整 patterns（含 schema），不再写入 input.json 相关信息。
+- 输出落盘统一（仅分叉/规则仅）：
+  - 分叉挖掘（fact_rule）：`data_discovery/data/branched_mining.json`
+  - 规则仅挖掘（rule_only）：`data_discovery/data/rules_only_mining.json`
+  - 统一包含：`created_at/proof_graph/merged_graph/params/timing_sec/patterns_summary_topN/patterns` 等结构化字段（不再写入 input.json 相关信息）。
 - 新的 MiningPipeline 后处理总线：将 schema 生成与多步过滤、去重、最终“同结论按前提集合最小化”与审计写入封装为 `MiningPipeline` 类，脚本仅负责超参与调用。
 - aconst/rconst 语义修正：其最后一个参数是数值常量（非点/变量），不计入依赖/变量闭包；在 schema 渲染时保留字面量、不参与变量重命名。
 - 日志改进：在总节点/边统计后，追加 per-problem 平均节点/边数，便于设置 `max_nodes`。
@@ -44,14 +43,9 @@
 - 新增“种子级并行挖掘”通道：
   - 子进程仅负责搜索（按 seed 扩展并通过 emit 推送原始模式对象），不做 schema/过滤。
   - 主进程集中完成 schema 转换、两层去重（结构签名 + 规范化 schema）、过滤（可选丢弃 unknown、变量闭包兜底与依赖过滤）与写入（流式或批量）。
-- 脚本参数（`Newclid/scripts/run_gspan_branched_demo.py`）：
-  - `--engine {single,seeds,seeds_mproc}`：执行引擎；默认 `seeds_mproc`。
-  - `--workers N`：seeds_mproc 工作进程数（默认 CPU/2，至少 1）。
-  - `--stream-write {0,1}`：1 主进程边消费边写；0 聚合后一次写。
-  - `--stage-dump {0,1}`：是否落盘种子/扩展审计。
-  - 其他过滤/后处理参数如 `--drop-unknown-in-schema`、`--enable-dependency-filter` 等保持可用。
+- 脚本参数（`Newclid/scripts/run_gspan_branched_demo.py`）：支持常见命令行参数，但推荐直接编辑脚本内 CONFIG 以控制引擎/阈值/剪枝/时间预算等。
 - 全局扩展预算（重要变化）：
-  - seeds_mproc 下，`--debug-limit-expansions` 作为“全体子进程共享”的严格上限实现，使用 `multiprocessing.Semaphore` 作为跨进程预算；每次可导致结构增长的扩展尝试前均会尝试消耗 1 个配额，耗尽后所有 worker 将不再产生新扩展。
+  - seeds_mproc 下，`debug_limit_expansions` 作为“全体子进程共享”的严格上限实现，使用 `multiprocessing.Semaphore` 作为跨进程预算；每次可导致结构增长的扩展尝试前均会尝试消耗 1 个配额，耗尽后所有 worker 将不再产生新扩展。
   - `single` 与 `seeds` 引擎下则为“当前一次运行/当前种子内”的本地上限。
 - 死锁修复与可靠退出：
   - 工作队列采用 `JoinableQueue` + 阻塞式 `get()`；在启动前预投递与 worker 数相同的哨兵 `None`，worker 消费到哨兵后 `task_done()` 并退出。
@@ -59,7 +53,7 @@
   - 结果通道使用 `qout`；每个 worker 结束时会向 `qout` 发送一次 `None` 作为完成信号，主进程据此统计 worker 退出并收尾。
   - 加入 `maxsize` 以防止输出洪泛，emit 端采用带超时的 `put` 避免阻塞。
 - 日志顺序：不再调用整体 `run_*`，而是在主进程汇总后统一记录耗时。
-- 入口脚本：在仓库根目录提供薄封装 `run_gspan_branched_demo.py`，可直接 `python run_gspan_branched_demo.py` 运行，等价于调用 `Newclid/scripts/run_gspan_branched_demo.py`。
+入口脚本：仓库根目录提供薄封装 `run_gspan_branched_demo.py`，可直接 `python run_gspan_branched_demo.py` 运行，相当于调用 `Newclid/scripts/run_gspan_branched_demo.py`。
 
 ## 1. 任务要求（Checklist）
 - 图模型
@@ -146,7 +140,7 @@
   - 所有出度=0 的节点都是 fact，且唯一结论 fact。
   - 规则节点数 ≥ `min_rule_nodes`；边数 ≥ `min_edges`；支持度 ≥ `min_support`。
   - 可选 `min_rule_indeg2_count`：至少有 N 个 rule 的入度≥2。
-  - 可选变量闭包兜底（enable_var_closure_check）：逐嵌入过滤，结论 fact 的变量必须包含于所有源前提的变量并集（默认关闭）。
+  - 可选变量闭包兜底（enable_var_closure_check）：逐嵌入过滤，结论 fact 的变量必须包含于所有源前提的变量并集（脚本默认开启，可在 CONFIG 关闭）。
 - 输出：
   - `nodes: [{idx, label}]`、`labels`、`edges`、`support`、`pids`、`embeddings`。
 - 可读化：
@@ -178,91 +172,38 @@
   - `prune_by_rule`：按规则 code（R:code）的题目覆盖度进行全局剪枝。
   - `attach_producer` 与 `max_producer_depth`：是否启用与向上接入层数上限。
   - `skip_unknown`：扩展/接入时跳过 F:unknown 前提以减少节点噪声。
-  - `enable_var_closure_check`：输出阶段的变量闭包兜底检查（默认关闭）。
+  - `enable_var_closure_check`：输出阶段的变量闭包兜底检查（脚本默认 True，可在脚本内 CONFIG 关闭）。
  - 规则仅挖掘：
    - 推荐与分叉版共享相同的结构/支持度阈值；在较大图上优先选择 rules-only 以快速获得高质量候选，再回溯生成 schema。
 
-## 7. 快速开始（一键脚本 + 集中超参）
-- 提供开箱即用脚本，超参集中在脚本内的 `CONFIG` 字典中：
-  - 路径挖掘：`Newclid/run_gspan_demo.py`
-  - 分叉/规则仅：`Newclid/scripts/run_gspan_branched_demo.py`（通过 `--mode` 选择）
-- 直接运行即可按安全默认值执行；如需覆盖，脚本也提供可选的命令行参数。
-
-示例：
-```sh
-# 路径挖掘
-/usr/bin/env python3 Newclid/run_gspan_demo.py
-
-# 分叉/规则仅（从仓库根目录直接运行入口脚本）
-/usr/bin/env python3 run_gspan_branched_demo.py --mode fact_rule
-/usr/bin/env python3 run_gspan_branched_demo.py --mode rule_only
-```
-
-两脚本默认使用较小数据集 `r07_expanded_problems_results_lil.json`，避免卡住；可通过 `--json` 指定完整数据集。
-
-常用可覆盖参数（二者交集）：
-- `--json`: 数据源 JSON 路径（默认 lil 数据集）
-- `--min-support`: 支持度（int 或 float 比例字符串，如 "2" 或 "0.2"）
-- `--min-rule-nodes`: 最少规则节点数
-- `--min-edges`: 最少边数
-- `--max-nodes`: 节点上限（路径/分叉）
-- `--sample-embeddings`: 每个模式展示的代表性嵌入数
-- `--top-k`: 打印前 K 个模式
-- `--quiet`: 静默解析模式
-
-分叉/规则仅脚本特有参数：
-- `--engine {single,seeds,seeds_mproc}`：执行引擎（默认 seeds_mproc）。
-- `--workers`：seeds_mproc 工作进程数。
-- `--stream-write {0,1}`：主进程流式写或聚合后写。
-- `--stage-dump {0,1}`：落盘审计。
-- `--min-rule-indeg2-count`：至少 N 个 rule 入度≥2（默认 1）。
-- `--debug-limit-expansions`：扩展步数上限；在 seeds_mproc 下为全局配额（跨进程），在 single/seeds 下为本地限额。
-- `--debug-log-every`：扩展日志频率（步）。
-- `--time-budget-seconds`：时间预算（秒）。
-- `--prune-low-support-labels`、`--prune-by-rule`：全局支持剪枝。
-- `--attach-producer`、`--max-producer-depth`：生产者接入控制。
-- `--skip-unknown`：扩展时跳过 F:unknown 前提。
-- `--enable-var-closure-check`：变量闭包兜底。
-- `--drop-unknown-in-schema`、`--enable-dependency-filter`：输出阶段过滤控制。
-- `--mode {fact_rule,rule_only}`：分叉/规则仅模式。
-
-推荐默认（已写入脚本 CONFIG，中小规模数据能稳定跑完，不会卡住）：
-- 路径：`min_support=2, min_rule_nodes=2, min_edges=3, max_nodes=9, sample_embeddings=1, top_k=10, quiet=True`
-- 分叉：`min_support=2, min_rule_nodes=3, min_edges=3, min_rule_indeg2_count=1, max_nodes=10, sample_embeddings=2, debug_limit_expansions=30000, debug_log_every=5000, prune_low_support_labels=True, prune_by_rule=True, attach_producer=True, max_producer_depth=1, skip_unknown=True, enable_var_closure_check=False, time_budget_seconds=None, top_k=10, quiet=True`
-
 ## 8. 运行方法（命令）
-- 路径挖掘 demo：
-  ```sh
-  /usr/bin/env python3 Newclid/run_gspan_demo.py \
-    --json Newclid/src/newclid/data_discovery/r07_expanded_problems_results.json \
-    --min-support 2 --min-rule-nodes 2 --min-edges 3 --top-k 5 --sample-embeddings 1
-  ```
-- 分叉挖掘 demo（fact_rule）：
-  ```sh
-  /usr/bin/env python3 Newclid/scripts/run_gspan_branched_demo.py --mode fact_rule \
-    --json Newclid/src/newclid/data_discovery/r07_expanded_problems_results.json \
-  --min-support 2 --min-rule-nodes 3 --min-edges 3 --min-rule-indeg2-count 1 \
-  --max-nodes 10 --sample-embeddings 2 --top-k 10
-  ```
-- 规则仅挖掘 demo（rule_only）：
-  ```sh
-  /usr/bin/env python3 Newclid/scripts/run_gspan_branched_demo.py --mode rule_only \
-    --json Newclid/src/newclid/data_discovery/r07_expanded_problems_results.json \
-  --min-support 2 --min-rule-nodes 3 --min-edges 3 \
-  --max-nodes 10 --sample-embeddings 2 --top-k 10
-  ```
+```sh
+/usr/bin/env python3 Newclid/scripts/run_gspan_demo.py
+/usr/bin/env python3 run_gspan_branched_demo.py
+```
+超参与模式从脚本内 `CONFIG` 修改。
+
+默认数据集：
+- 路径挖掘默认 `r07_expanded_problems_results_lil.json`；
+- 分叉/规则仅默认 `r07_expanded_problems_results.json`。
 
 ## 9. 输出与落盘
 - 统一落盘目录：`data_discovery/data/`
 - 文件名：
-  - 路径挖掘：`path_mining.json`
   - 分叉挖掘（fact_rule）：`branched_mining.json`
   - 规则仅挖掘（rule_only）：`rules_only_mining.json`
 - 文件结构（示例字段）：
-  - `meta`: { graph_stats, params, timings, dataset_name, ... }
-  - `top_k`: [ { pattern_id, support, labels, schema, ... } ]
-  - `patterns`: 完整列表，每个含 `labels/nodes/edges/support/pids/embeddings/schema`
-- 说明：不包含 input.json 的复制/大小信息；结果 JSON 采用“混合美化”排版：
+  - `created_at`: 生成时间（ISO 格式）
+  - `proof_graph`: 原图统计（每题与合并图）
+  - `merged_graph`: 合并图统计与标签覆盖度
+  - `params`: 运行参数快照（来自脚本内 CONFIG）
+  - `timing_sec`: 各阶段耗时
+  - `pattern_count`: 模式总数
+  - `patterns_summary_topN`: 概览（前 N 条）
+  - `patterns`: 完整列表（含 `labels/nodes/edges/support/pids/embeddings/schema/rendered` 等）
+- 说明：
+  - 路径挖掘 demo 不写入文件，仅打印到 stdout；
+  - 不包含 input.json 的复制/大小信息；结果 JSON 采用“混合美化”排版：
   - 绝大多数对象/数组使用缩进打印，便于阅读与 diff；
   - `labels`、`rules`、`fr_edges` 等短数组保持单行输出，避免冗长；
   - 审计文件使用 NDJSON（每行一条）。
@@ -272,7 +213,7 @@
 - 入口：`MiningPipeline(pg, miner, args, out_dir).run(...)`。
 - 处理阶段：
   1) schema 生成（基于 `pattern_to_schema_*`），并保留 `schema_before_dependency` 字段用于对照；
-  2) 过滤 unknown：若启用 `--drop-unknown-in-schema` 则直接丢弃包含 `unknown()` 的 schema；
+   2) 过滤 unknown：若在配置中启用“丢弃 unknown”，则直接丢弃包含 `unknown()` 的 schema；
   3) 依赖过滤（可选）：仅对首个嵌入进行三分支判定：
      - 若所有前提点集均是结论点及其依赖并集的子集（all_subset），丢弃；
      - 若均不是子集（all_not_subset），丢弃；
@@ -292,6 +233,9 @@
   - step5-dropped：`audit_{mode}_step5_subset_min_dropped.ndjson`（“前提集合最小化”阶段被丢弃的记录，包含赢家/输家对照）。
 
 提示：上述审计在 fact_rule 与 rule_only 两种模式下均会产出，便于对比不同模式的效果与被裁剪原因。
+
+额外文件（rule_only）：
+- `unknown_problem.txt`：当某些题目缺少必要的 rule-only 邻接信息而被跳过时，记录其 problem_id，便于后续检查数据完整性。
 
 ### 9.3 多进程实现要点与顺序（seeds_mproc）
 - 任务分发：`JoinableQueue` 承载种子；启动 worker 前先投递与 worker 数相等的哨兵 `None`。
@@ -324,6 +268,7 @@
   ```sh
   /usr/bin/env python3 -m unittest Newclid/tests/test_gspan.py -v
   /usr/bin/env python3 -m unittest Newclid/tests/test_gspan_branched.py -v
+  /usr/bin/env python3 -m unittest Newclid/tests/test_gspan_branched_step.py -v
   # 或一次性发现
   /usr/bin/env python3 -m unittest discover -s Newclid/tests -v
   ```
@@ -332,7 +277,7 @@
 - 性能关键点：
   - 支持度阈值越低、结构上限越大，搜索空间越大；优先提高 `min_support`。
   - 扩展阶段不截断嵌入，防止“支持度早丢失→过早剪枝”，仅在结果阶段截断输出样本。
-  - 合并图上建议开启 `--quiet` 以减少日志开销。
+  - 合并图上建议在配置中开启 `quiet` 以减少日志开销。
 - 可能的改进：
   - 为分叉挖掘引入完整 gSpan 的最小 DFS 码去同构，避免标签一致但结构不同的折叠。
   - 建立按标签分桶与反向邻接索引，加速扩展候选检索。
@@ -346,11 +291,9 @@
 ## 附：文件与目录速览（与本功能相关）
 - 代码实现：`Newclid/src/newclid/data_discovery/proof_graph.py`
 - 一键脚本：
-  - `Newclid/run_gspan_demo.py`（路径挖掘，集中超参）
-  - `Newclid/scripts/run_gspan_branched_demo.py`（分叉/规则仅挖掘，集中超参 + 限流/剪枝/时间预算）
+  - `Newclid/scripts/run_gspan_demo.py`（路径挖掘，集中超参）
+  - 根入口 `run_gspan_branched_demo.py`（调用 `Newclid/scripts/run_gspan_branched_demo.py`，集中超参 + 限流/剪枝/时间预算）
 - 测试与演示：
-  - `Newclid/tests/run_gspan_demo.py`（旧版 CLI 演示）
-  - `Newclid/tests/run_gspan_branched_demo.py`（新版 CLI 演示，含 debug 限流）
   - `Newclid/tests/test_gspan.py`、`Newclid/tests/test_gspan_branched.py`、`Newclid/tests/test_gspan_branched_step.py`
 - 路径挖掘仅产出简单路径；
 - 分叉挖掘当前使用 `(labels, sorted_edges)` 作为签名，非严格同构判定；
@@ -358,6 +301,57 @@
   - 引入 directed gSpan 的 canonical DFS code 与 rightmost 扩展；
   - 更丰富的 schema 转换（含中间 fact/多个结论的表达）；
   - 导出/可视化接口（GraphML/JSON）以及 FSM 结果持久化。
+
+---
+
+## 13. Schema 批量提取与评估（scripts/schema_eval.py）
+
+目的与定位：
+- 从分叉挖掘输出 `branched_mining.json` 中批量提取 `schema` 与 `schema_before_dependency`，
+  统一对齐 `scripts/translate_rule_to_problem.py` 的接口格式，并批量翻译→求解→写出结果。
+
+脚本与位置：
+- 主脚本：`Newclid/scripts/schema_eval.py`
+  - 运行风格参照 demo 脚本：默认参数写在脚本顶部 `Args` 类；在仓库根目录执行：`python scripts/schema_eval.py`。
+  - 全程 `logging` 输出实时进度；不做去重。
+
+输入：
+- `src/newclid/data_discovery/data/branched_mining.json`（分叉挖掘输出，含 patterns[*].schema/schema_before_dependency）
+
+标准化与翻译：
+- 规范化 schema：将“∧”统一替换为逗号；保持 `premises => conclusions` 结构。
+- 每个输入 JSON 对应派生的两行规则与拆分产物（便于审计）：
+  - `<basename>.schema.rules.txt` 与 `<basename>.schema.split.txt`
+  - `<basename>.schema_before.rules.txt` 与 `<basename>.schema_before.split.txt`
+  位于：`src/newclid/data_discovery/data/` 目录。
+
+求解与证明：
+- 对每条翻译出的 `Problem: ...`，使用 `newclid` 的 `GeometricSolverBuilder` 构建并 `run()`；
+- 通过 `proof_writing.write_proof_steps(solver.proof)` 捕获证明文本并写入 JSON（stdout 捕获）。
+
+成功判定标准：
+- translate_fail：`translate_success == False`；
+- solver_fail：`translate_success == True` 且所有 problems 的 `solver_success == False`；
+- ok（成功）：`translate_success == True` 且存在至少一个 `solver_success == True`。
+
+输出与落盘（一个输入对应一个输出）：
+- 结果文件：
+  - `<basename>.schema.results.json`
+  - `<basename>.schema_before.results.json`
+  每条记录包含：`title/kind/rule/translate_success/problems[*]`。
+  位置：`src/newclid/data_discovery/data/`。
+
+命令行输出：
+- 打印每个 kind 的保存路径与记录条数；`Args.topn_print` 仍可用于内部调试（当前默认不打印 Top-N 分类预览）。
+
+运行方法：
+```sh
+/usr/bin/env python3 scripts/schema_eval.py
+```
+
+实现说明与健壮性：
+- 译器装载：通过 `importlib` 动态加载脚本中的 `process_rules`；若加载失败仅跳过翻译步骤并记录日志。
+- 求解器缺失：若运行环境无法导入 `newclid` 求解器，则问题级别结果标记为 `solver_unavailable`，不影响文件落盘。
 
 ---
 如需进一步扩展或特定模式的约束（例如强制存在某些 rule code 序列），可在输出阶段增加附加过滤器，或在扩展过程中加入轻量剪枝（保持与“输出阶段约束为主”的约定一致）。

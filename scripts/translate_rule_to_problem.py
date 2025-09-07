@@ -1,15 +1,43 @@
 import re
 import random
+import argparse
 from functools import cmp_to_key
 from collections import deque, defaultdict
+
+def _split_top_level(expr: str):
+    """Split by commas at top-level (not inside parentheses)."""
+    parts = []
+    buf = []
+    depth = 0
+    for ch in expr:
+        if ch == '(':
+            depth += 1
+            buf.append(ch)
+        elif ch == ')':
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif ch == ',' and depth == 0:
+            seg = ''.join(buf).strip()
+            if seg:
+                parts.append(seg)
+            buf = []
+        else:
+            buf.append(ch)
+    seg = ''.join(buf).strip()
+    if seg:
+        parts.append(seg)
+    return parts
+
 
 # 拆分规则
 def split_rule(rule):
     # 拆分规则为premise和goal部分
-    premise_part, goal_part = rule.split('=>')
+    premise_part, goal_part = rule.split('=>', 1)
 
     # 拆分前提部分为每个条件
-    premise_conditions = premise_part.split(',')
+    premise_part = premise_part.replace('∧', ',')
+    goal_part = goal_part.replace('∧', ',')
+    premise_conditions = _split_top_level(premise_part)
     premise_tuples = []
     for condition in premise_conditions:
         # 匹配每个条件的格式，假设条件由标识符和参数组成
@@ -18,7 +46,7 @@ def split_rule(rule):
             premise_tuples.append(tuple(parts))
 
     # 提取目标部分
-    goal_conditions = goal_part.split(',')
+    goal_conditions = _split_top_level(goal_part)
     goal_tuples = []
     for condition in goal_conditions:
         # 匹配每个条件的格式，假设条件由标识符和参数组成
@@ -136,6 +164,8 @@ def translate_cyclic(args, deps, constructions, state):
     return True
 
 def translate_eqangle(args, deps, constructions, state):
+    if len(args) != 8:
+        return False
     a, b, c, d, e, f, g, h = args
     if a not in deps[e] and b not in deps[e] and c not in deps[e] and d not in deps[e] and f not in deps[e] and g not in deps[e] and h not in deps[e] and state[e]:
         constructions[e].append(('on_aline0', e, a, b, c, d, f, g, h))
@@ -195,6 +225,8 @@ def translate_eqangle(args, deps, constructions, state):
     return False
 
 def translate_eqratio(args, deps, constructions, state):
+    if len(args) != 8:
+        return False
     a, b, c, d, e, f, g, h = args
     if a not in deps[e] and b not in deps[e] and c not in deps[e] and d not in deps[e] and f not in deps[e] and g not in deps[e] and h not in deps[e] and state[e]:
         constructions[e].append(('eqratio', e, a, b, c, d, f, g, h))
@@ -404,7 +436,7 @@ def shuffle_premise(premise):
         return (type, args[0], *points)
     elif type in ['eqangle', 'eqratio']:
         return premise
-    assert False
+    # For any other predicate types, keep as-is (no shuffling)
     return premise
 
 def topological_sort(elements, deps):
@@ -474,88 +506,117 @@ def process_rules(input_file, output_file, max_attempts = 10):
     for i in range(0, len(lines), 2):  # 假设标题和规则交替出现
         title = lines[i].strip()
         rule = lines[i+1].strip()
-        
-        # 拆分规则
-        premise_tuples, goal_tuples = split_rule(rule)
 
+        fail_reason = ''
+        premise_tuples = []
+        goal_tuples = []
         points = []
-        for premise_tuple in premise_tuples:
-            for point in premise_tuple[1:]:
-                points.append(point)
-        points = sorted(list(set(points)))
-        
-        tuples_new = []
-        for premise_tuple in premise_tuples:
-            if premise_tuple[0] == 'simtri':
-                a, b, c, p, q, r = premise_tuple[1:]
-                tuples_new.append(('eqangle', b, a, b, c, q, p, q, r))
-                tuples_new.append(('eqangle', c, a, c, b, r, p, r, q))
-            elif premise_tuple[0] == 'simtrir':
-                a, b, c, p, q, r = premise_tuple[1:]
-                tuples_new.append(('eqangle', b, a, b, c, q, p, q, r))
-                tuples_new.append(('eqangle', c, a, c, b, r, q, r, p))
-            elif premise_tuple[0] == 'PythagoreanPremises':
-                a, b, c = premise_tuple[1:]
-                tuples_new.append(('perp', a, b, a, c))
-            else:
-                tuples_new.append(premise_tuple)
-        premise_tuples = tuples_new
+        deps = {}
+        constructions = {}
+        problems = []
+        success = False
 
-        for i in range(max_attempts):
-            
-            for j, premise in enumerate(premise_tuples):
-                premise_tuples[j] = shuffle_premise(premise)
+        try:
+            # 拆分规则
+            premise_tuples, goal_tuples = split_rule(rule)
 
-            constructions = {}
-            state = {}
-            for point in points:
-                constructions[point] = []
-                state[point] = True
-            
-            # 点之间的依赖，如果点A在deps[B]中则认为A依赖于B
-            deps = {}
-            for point in points:
-                deps[point] = []
-
-            success = True
-            random.shuffle(premise_tuples)
+            points = []
             for premise_tuple in premise_tuples:
-                if not translate_premise(premise_tuple, deps, constructions, state):
-                    success = False
+                for point in premise_tuple[1:]:
+                    points.append(point)
+            points = sorted(list(set(points)))
+
+            # 归一化前提（展开 simtri 等）
+            tuples_new = []
+            for premise_tuple in premise_tuples:
+                if premise_tuple[0] == 'simtri':
+                    a, b, c, p, q, r = premise_tuple[1:]
+                    tuples_new.append(('eqangle', b, a, b, c, q, p, q, r))
+                    tuples_new.append(('eqangle', c, a, c, b, r, p, r, q))
+                elif premise_tuple[0] == 'simtrir':
+                    a, b, c, p, q, r = premise_tuple[1:]
+                    tuples_new.append(('eqangle', b, a, b, c, q, p, q, r))
+                    tuples_new.append(('eqangle', c, a, c, b, r, q, r, p))
+                elif premise_tuple[0] == 'PythagoreanPremises':
+                    a, b, c = premise_tuple[1:]
+                    tuples_new.append(('perp', a, b, a, c))
+                else:
+                    tuples_new.append(premise_tuple)
+            premise_tuples = tuples_new
+
+            last_fail_on = None
+
+            for _ in range(max_attempts):
+                # 打乱以增加成功概率
+                for j, premise in enumerate(premise_tuples):
+                    premise_tuples[j] = shuffle_premise(premise)
+
+                constructions = {p: [] for p in points}
+                state = {p: True for p in points}
+
+                # 点之间的依赖，如果点A在deps[B]中则认为A依赖于B
+                deps = {p: [] for p in points}
+
+                success = True
+                random.shuffle(premise_tuples)
+                for premise_tuple in premise_tuples:
+                    if not translate_premise(premise_tuple, deps, constructions, state):
+                        success = False
+                        last_fail_on = premise_tuple
+                        break
+
+                if success:
                     break
-            
-            if success:
-                break
-        
-        premise = dict2str(points, deps, constructions)
-        if not premise:
+
+            if not success and last_fail_on is not None:
+                fail_reason = f"cannot_translate:{last_fail_on[0]}"
+
+            premise = dict2str(points, deps, constructions)
+            if not premise:
+                success = False
+                if not fail_reason:
+                    fail_reason = 'toposort_failed_or_no_premise'
+            else:
+                problems = []
+                for goal in goal_tuples:
+                    problem = premise + " ? " + " ".join(goal)
+                    problems.append(problem.lower())
+
+        except Exception as e:  # 捕获任意异常并继续写出失败原因
             success = False
-        else:
-            problems = []
-            for goal in goal_tuples:
-                problem = premise + " ? " + " ".join(goal)
-                problems.append(problem.lower())
-        
+            fail_reason = f"exception:{type(e).__name__}: {e}"
+
         # 存储拆分结果，按标题查找
         rules_dict[title] = {
+            'rule_raw': rule,
             'premise': premise_tuples,
             'goal': goal_tuples,
             'points': points,
             'deps': deps,
             'constructions': constructions,
             'problem': problems,
-            'success': success
-            }
+            'success': success,
+            'fail_reason': fail_reason,
+        }
 
     # 写入拆分后的结果到输出文件
     with open(output_file, 'w', encoding='utf-8') as output:
         for title, rule_data in rules_dict.items():
             output.write(f"Title: {title}\n")
+            # 输出被翻译的 schema 原文（按输入文件中的原始规则行）
+            raw = rule_data.get('rule_raw', '')
+            if raw:
+                output.write(f"RuleRaw: {raw}\n")
             output.write(f"Premise: {rule_data['premise']}\n")
             output.write(f"Goal: {rule_data['goal']}\n")
             output.write(f"Points: {rule_data['points']}\n")
             if not rule_data['success']:
-                output.write("Translate Fail.\n\n")
+                # 兼容旧解析：保留原行；同时追加失败原因
+                output.write("Translate Fail.\n")
+                fr = rule_data.get('fail_reason')
+                if fr:
+                    output.write(f"Translate Fail Reason: {fr}\n")
+                output.write("\n")
                 continue
             # for point, dep in rule_data['deps'].items():
             #     output.write(f"{point}: {dep}\n")
@@ -569,7 +630,16 @@ def process_rules(input_file, output_file, max_attempts = 10):
                 output.write(f"Problem: {problem}\n")
             output.write("\n")
 
-# 调用函数：处理输入文件并输出到新文件
-input_file = '/c23474/home/math/dubhe/Newclid/src/newclid/default_configs/unabridged_rules.txt'  # 输入文件路径
-output_file = '/c23474/home/math/dubhe/Newclid/scripts/rules_split.txt'  # 输出文件路径
-process_rules(input_file, output_file, 100)
+def _parse_args():
+    parser = argparse.ArgumentParser(description='Translate rules file (two-line pairs) into Newclid problems list.')
+    parser.add_argument('--input', type=str, required=False,
+                        default='/c23474/home/math/dzt/Newclid/src/newclid/data_discovery/data/sch_rules.txt')
+    parser.add_argument('--output', type=str, required=False,
+                        default='/c23474/home/math/dzt/Newclid/src/newclid/data_discovery/data/sch_split_test.txt')
+    parser.add_argument('--max-attempts', type=int, default=100)
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = _parse_args()
+    process_rules(args.input, args.output, args.max_attempts)
