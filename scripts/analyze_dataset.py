@@ -2,10 +2,23 @@
 """
 Analysis script for geometry_clauses30_samples10M.jsonl
 Analyzes llm_input_renamed column for:
-0. Auxiliary content analysis (ratio of samples containing '<aux>')
+0. Auxiliary content analysis (ratio of samples containing '<aux>') + predicate distribution in aux content
 1. Point distribution 
 2. Predicate distribution (before and after ?)
 3. Proof length (number of ; in <proof> </proof>)
+
+Example data structure:
+{
+  "llm_input_renamed": "<problem>a01 a02 a03 : x00 g : coll a01 a02 g [001] perp a01 a02 g a03 [002] ; ? perp a01 a03 g</problem>",
+  "llm_output_renamed": "<aux> x00 g : coll a b g [006] perp a b g d [007] ; </aux><proof>coll a01 a02 g [001]; perp a01 a02 g a03 [002]; ...</proof>"
+}
+
+Analysis process demonstration:
+1. Point extraction: From "a01 a02 a03 : x00 g :" → points = {a01, a02, a03, x00, g} → count = 5
+2. Predicates before '?': From "coll a01 a02 g [001] perp a01 a02 g a03 [002]" → [coll, perp]
+3. Predicates after '?': From "perp a01 a03 g" → [perp]
+4. Auxiliary predicate combinations: From "<aux> x00 g : coll a b g [006] perp a b g d [007] ; p1 [008] ; p2 p3 [009] ; </aux>" → [('coll', 'perp'), ('p1',), ('p2', 'p3')]
+5. Proof length: Count semicolons in <proof> content
 """
 
 import json
@@ -14,8 +27,16 @@ from collections import Counter, defaultdict
 import sys
 from tqdm import tqdm
 
+# ============================================================================
+# EXTRACTION FUNCTIONS
+# ============================================================================
+
 def extract_points(problem_text):
-    """Extract point names from the problem text using proper segmentation"""
+    """
+    Extract point names from the problem text using proper segmentation.
+    
+    Example: "a01 a02 a03 : x00 g : coll a01 a02 g [001]" → {a01, a02, a03, x00, g}
+    """
     points = set()
     
     # Split by semicolons first
@@ -33,7 +54,12 @@ def extract_points(problem_text):
     return points
 
 def extract_predicates_before_after_question(problem_text):
-    """Extract predicates before and after the ? mark using proper segmentation"""
+    """
+    Extract predicates before and after the ? mark using proper segmentation.
+    
+    Example: "coll a01 a02 g [001] perp a01 a02 g a03 [002] ; ? perp a01 a03 g"
+    Returns: ([coll, perp], [perp])
+    """
     parts = problem_text.split('?')
     if len(parts) != 2:
         return [], []
@@ -84,8 +110,52 @@ def extract_predicates_before_after_question(problem_text):
     
     return before_preds, after_preds
 
+def extract_aux_predicates(llm_output):
+    """
+    Extract predicate combinations from auxiliary content between <aux> and </aux> tags.
+    Each semicolon-separated segment represents a separate combination.
+    
+    Example: "<aux> x00 g : coll a b g [006] perp a b g d [007] ; p1 p2 [008] ; p3 [009] ; </aux>"
+    Returns: [('coll', 'perp'), ('p1',), ('p3',)] - list of combination tuples
+    """
+    aux_match = re.search(r'<aux>(.*?)</aux>', llm_output, re.DOTALL)
+    if not aux_match:
+        return []
+    
+    aux_content = aux_match.group(1).strip()
+    combinations = []
+    
+    # Split by semicolons to get separate combinations
+    segments = aux_content.split(';')
+    
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+        
+        combinations = []
+        # Handle segments that may contain both point definitions and predicates
+        if ':' in segment:
+            # Check if there's content after the colon that contains predicates
+            colon_parts = segment.split(':', 1)
+            if len(colon_parts) > 1:
+                after_colon = colon_parts[1].strip()
+                # Look for predicates in the part after the colon - pattern: word + args + [number]
+                predicate_matches = re.findall(r'([a-z]+)\s+[a-z\s]+\s*\[\d+\]', after_colon)
+                combinations.append(tuple(sorted(predicate_matches)))
+    
+    return combinations
+
+# ============================================================================
+# ANALYSIS FUNCTIONS  
+# ============================================================================
+
 def count_proof_semicolons(llm_output):
-    """Count semicolons in the <proof> </proof> section"""
+    """
+    Count semicolons in the <proof> </proof> section to measure proof length.
+    
+    Example: "<proof>coll a01 a02 g [001]; perp a01 a02 g a03 [002];</proof>" → 2
+    """
     proof_match = re.search(r'<proof>(.*?)</proof>', llm_output, re.DOTALL)
     if proof_match:
         proof_content = proof_match.group(1)
@@ -93,12 +163,17 @@ def count_proof_semicolons(llm_output):
     return 0
 
 def analyze_jsonl_file(file_path):
-    """Analyze the JSONL file"""
+    """
+    Main analysis function that processes the entire JSONL file.
+    
+    Returns: (point_counts, predicates_before, predicates_after, aux_predicates, proof_lengths, aux_count)
+    """
     print(f"Analyzing {file_path}...")
     
     point_counts = Counter()
     predicates_before = Counter()
     predicates_after = Counter()
+    aux_predicate_combinations = Counter()
     proof_lengths = []
     aux_count = 0
     
@@ -116,9 +191,15 @@ def analyze_jsonl_file(file_path):
                 llm_input = data['llm_input_renamed']
                 llm_output = data['llm_output_renamed']
                 
-                # Check for <aux> in llm_input_renamed
+                # Check for <aux> in llm_output_renamed and extract predicate combinations
                 if '<aux>' in llm_output:
                     aux_count += 1
+                    # Extract predicate combinations from auxiliary content
+                    aux_pred_combos = extract_aux_predicates(llm_output)
+                    # Count each combination separately
+                    for combo in aux_pred_combos:
+                        if combo:  # Only count non-empty combinations
+                            aux_predicate_combinations[combo] += 1
                 
                 # Extract problem text from <problem> tags
                 problem_match = re.search(r'<problem>(.*?)</problem>', llm_input, re.DOTALL)
@@ -145,10 +226,18 @@ def analyze_jsonl_file(file_path):
                 print(f"Error processing line {i}: {e}")
                 continue
     
-    return point_counts, predicates_before, predicates_after, proof_lengths, aux_count
+    return point_counts, predicates_before, predicates_after, aux_predicate_combinations, proof_lengths, aux_count
 
-def generate_report(point_counts, predicates_before, predicates_after, proof_lengths, aux_count):
-    """Generate analysis report"""
+# ============================================================================
+# REPORTING FUNCTIONS
+# ============================================================================
+
+def generate_report(point_counts, predicates_before, predicates_after, aux_predicate_combinations, proof_lengths, aux_count):
+    """
+    Generate comprehensive analysis report with all statistics.
+    
+    Displays: auxiliary content analysis, point distribution, predicate distribution, and proof length analysis.
+    """
     print("\n" + "="*80)
     print("GEOMETRY DATASET ANALYSIS REPORT")
     print("="*80)
@@ -161,6 +250,16 @@ def generate_report(point_counts, predicates_before, predicates_after, proof_len
     print(f"Total samples analyzed: {total_samples:,}")
     print(f"Samples containing '<aux>': {aux_count:,} ({aux_ratio:.2f}%)")
     print(f"Samples without '<aux>': {total_samples - aux_count:,} ({100 - aux_ratio:.2f}%)")
+    
+    # Auxiliary predicate combination distribution
+    if aux_predicate_combinations:
+        print(f"\nAuxiliary Predicate Combination Distribution:")
+        total_aux_combinations = sum(aux_predicate_combinations.values())
+        for combo, count in aux_predicate_combinations.most_common():
+            percentage = (count / total_aux_combinations) * 100
+            # Format combination as [pred1, pred2, ...]
+            combo_str = '[' + ', '.join(combo) + ']'
+            print(f"  {combo_str}: {count:,} ({percentage:.2f}%)")
     
     # 1. Point Distribution Analysis
     print("\n1. POINT DISTRIBUTION ANALYSIS")
@@ -238,18 +337,27 @@ def generate_report(point_counts, predicates_before, predicates_after, proof_len
             else:
                 print(f"  {start}-{end} steps: {count:,} proofs ({percentage:.2f}%)")
 
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+
 def main():
+    """
+    Main entry point for the analysis script.
+    
+    Usage: python analyze_dataset.py <path_to_jsonl_file>
+    """
     if len(sys.argv) != 2:
-        print("Usage: python analyze.py <path_to_jsonl_file>")
+        print("Usage: python analyze_dataset.py <path_to_jsonl_file>")
         sys.exit(1)
     
     file_path = sys.argv[1]
     
     # Analyze the data
-    point_counts, predicates_before, predicates_after, proof_lengths, aux_count = analyze_jsonl_file(file_path)
+    point_counts, predicates_before, predicates_after, aux_predicate_combinations, proof_lengths, aux_count = analyze_jsonl_file(file_path)
     
     # Generate report
-    generate_report(point_counts, predicates_before, predicates_after, proof_lengths, aux_count)
+    generate_report(point_counts, predicates_before, predicates_after, aux_predicate_combinations, proof_lengths, aux_count)
     
     print("\n" + "="*80)
     print("Analysis complete!")

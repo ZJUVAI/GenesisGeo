@@ -174,7 +174,7 @@ class CompoundClauseGen:
                 if random.random() < 0.5:
                     new_clause = self.get_clause_with_n_constructions(INTERSECT, 2)
                 else:
-                    new_clause = self.get_clause_with_n_constructions(OTHER, 1)
+                    new_clause = self.get_clause_with_n_constructions(OTHER+INTERSECT, 1)
             if new_clause:
                 res.append(new_clause)
         return "; ".join(res)
@@ -325,5 +325,3 @@ if __name__ == "__main__":
         cc_gen = CompoundClauseGen(i)
         clause_text = cc_gen.generate(50)
         print(f'{time.time() - s_time:.2f}s')
-
-        
