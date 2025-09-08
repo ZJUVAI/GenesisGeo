@@ -1,20 +1,14 @@
 # 几何知识发现
 
-## 0. 文件与目录速览（与本功能相关）
-- 代码实现：`Newclid/src/newclid/data_discovery/proof_graph.py`
-- 一键脚本：
-  - `Newclid/scripts/run_gspan_demo.py`（路径挖掘，集中超参）
-  - 根入口 `run_gspan_branched_demo.py`（调用 `Newclid/scripts/run_gspan_branched_demo.py`，集中超参 + 限流/剪枝/时间预算）
-- 测试与演示：
-  - `Newclid/tests/test_gspan.py`、`Newclid/tests/test_gspan_branched.py`、`Newclid/tests/test_gspan_branched_step.py`
-- 路径挖掘仅产出简单路径；
-- 分叉挖掘当前使用 `(labels, sorted_edges)` 作为签名，非严格同构判定；
-- 计划升级：
-  - 引入 directed gSpan 的 canonical DFS code 与 rightmost 扩展；
-  - 更丰富的 schema 转换（含中间 fact/多个结论的表达）；
-  - 导出/可视化接口（GraphML/JSON）以及 FSM 结果持久化。
+## 0. 目录速览
 
----
+
+- 1. 概述与背景 — 阐述当前几何自动证明的瓶颈、以频繁子图发掘新引理/定理的核心思路与预期贡献。
+- 2. 目标与阶段里程碑 — 通过两阶段可行性验证与规则集拆分评估方案有效性，给出基础/完整规则集的解题率对比。
+- 3. 数据与证明图构建 — 将证明文本解析为“fact-rule”分层有向二分图，定义节点/边、去重与一致性策略及作用域。
+- 4. 方法 — 提出三类频繁子图挖掘器（路径/分叉/规则仅），配套支持度与结构约束、可读化 schema 与变量闭包检查。
+- 5. 实现与代码结构 — 汇总近期功能更新、核心类与数据模型、并行管线与落盘格式，以及运行入口与日志/审计机制。
+- 6. 剩余目标及日程规划 — 列出实验与论文的待办事项、时间表与阶段产出，以指导后续推进。
 
 ## 1. 概述与背景
 
@@ -37,11 +31,93 @@
 
 ## 2. 目标与阶段里程碑
 
-- 验证思路：目前的ddar规则集中，r07（Thales Theorem I）的结论可以通过添加辅助点来证明，包含r07的题目如果添加相应的辅助点，就可以不依赖r07求解。如果对一批这样的求解结果利用频繁子图搜索算法重新找出r07，就可以验证这个思路是可行的
+### 2.1 方案可行性验证 I
+
+验证思路：目前的ddar规则集中，r07（Thales Theorem I）的结论可以通过添加辅助点来证明，包含r07的题目如果添加相应的辅助点，就可以不依赖r07求解。如果对一批这样的求解结果利用频繁子图搜索算法重新找出r07，就可以验证这个思路是可行的
+
   ```
   r07 Thales Theorem I
   para A B C D, coll O A C, ncoll O A B, coll O B D => eqratio3 A B C D O O
   ```
+
+### 2.2 方案可行性验证 II
+
+将通过“选择小规则集 → 评估小规则集解题能力 → 生成数据 → 定理挖掘 → 更新规则集并重新评估”的流程，验证方案的实际效果。为此，先对现有规则集进行整理：在当前 31 条规则中，可按“基础规则/派生定理”进行如下划分。
+
+#### 基础规则：公理与定义(16条)
+
+基础规则是系统的逻辑基石，定义了最核心的几何概念与关系，本身无需证明。
+
+```
+r28 Overlapping parallels
+para A B A C => coll A B C
+r34 AA Similarity of triangles (Direct)
+eqangle B A B C Q P Q R, eqangle C A C B R P R Q, sameclock A B C P Q R => simtri A B C P Q R
+r35 AA Similarity of triangles (Reverse)
+eqangle B A B C Q R Q P, eqangle C A C B R Q R P, sameclock A B C P R Q => simtrir A B C P Q R
+r49 Recognize center of cyclic (circle)
+circle O A B C, cyclic A B C D => cong O A O D
+r50 Recognize center of cyclic (cong)
+cong O A O B, cong O C O D, cyclic A B C D, npara A B C D => cong O A O C
+r51 Midpoint splits in two
+midp M A B => rconst M A A B 1/2
+r52 Properties of similar triangles (Direct)
+simtri A B C P Q R => eqangle B A B C Q P Q R, eqratio B A B C Q P Q R
+r53 Properties of similar triangles (Reverse)
+simtrir A B C P Q R => eqangle B A B C Q R Q P, eqratio B A B C Q P Q R
+r54 Definition of midpoint
+cong M A M B, coll M A B => midp M A B
+r56 Properties of midpoint (coll)
+midp M A B => coll M A B
+r60 SSS Similarity of triangles (Direct)
+eqratio B A B C Q P Q R, eqratio C A C B R P R Q, sameclock A B C P Q R => simtri A B C P Q R
+r61 SSS Similarity of triangles (Reverse)
+eqratio B A B C Q P Q R, eqratio C A C B R P R Q, sameclock A B C P R Q => simtrir A B C P Q R
+r62 SAS Similarity of triangles (Direct)
+eqratio B A B C Q P Q R, eqangle B A B C Q P Q R, sameclock A B C P Q R => simtri A B C P Q R
+r63 SAS Similarity of triangles (Reverse)
+eqratio B A B C Q P Q R, eqangle B A B C Q R Q P, sameclock A B C P R Q => simtrir A B C P Q R
+r101 Similarity to Congruence (Direct)
+simtri A B C P Q R, cong A B P Q => contri A B C P Q R
+r102 Similarity to Congruence (Reverse)
+simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
+```
+
+- 定义性规则：定义几何概念的内涵与外延。
+  - 中点定义（r51, r54, r56）：完整给出“何为中点”（r54）及其共线（r56）与二等分（r51）性质。
+  - 相似性的性质（r52, r53）：定义 simtri（相似三角形）这一谓词的含义，一旦确立相似关系，可推出对应角相等与对应边成比例。
+  - 相似到全等（r101, r102）：可视作 congtri 的定义途径之一：若两三角形相似且有一对对应边相等，则它们全等。
+  - 圆心定义（r49, r50）：基于“圆上各点到圆心距离相等”的定义，用于识别与使用圆心。
+- 公理化规则：源于欧几里得几何的基本公理。
+  - 重叠平行线（r28）：平行公理的直接逻辑推论（过直线外一点仅有一条与已知直线平行的直线）。
+
+#### 核心判定规则：建立等价关系的基石
+
+此类规则虽在严格意义上可证，但在几何推理系统中承担着判定三角形相似的核心职责，是运用比例与角度关系的关键工具。
+
+- AA 相似（r34, r35）：角-角相似准则。
+- SSS 相似（r60, r61）：边-边-边相似准则。
+- SAS 相似（r62, r63）：边-角-边相似准则。
+
+将这些判定准则视作基础层级是合理的，因为它们是多数复杂定理证明的起点。
+
+#### 派生定理：由基础规则构建的几何知识
+
+派生定理在系统中数量最多，代表欧几里得几何中那些著名且需多步证明的定理。在 DDARN 引擎中将其固化为单步规则，能显著提升推理效率，避免每次从零展开冗长推导。
+
+- 泰勒斯定理（r07, r27, r41, r42）：泰勒斯定理（平行线分线段成比例）及其逆定理，均可通过构造相似三角形（利用 AA 相似）证明。
+- 圆几何定理（r03, r04, r19, r58, r59）：包括圆周角定理及其逆、等弦对等角、直角三角形斜边是外接圆直径等，可通过添加圆心、连接半径构造等腰三角形并利用基础角关系来证明。
+- 著名三角形定理：
+  - 角平分线定理（r11, r12）：可通过添加辅助平行线构造相似三角形来证明。
+  - 勾股定理（r57）：经典做法是过直角顶点向斜边作高，利用产生的三个相似三角形（AA 相似）进行边长比例推导。
+  - 垂心定理（r43）与内心定理（r46）：关于“四心”的更高级结论，证明常需综合运用多种规则，例如通过证明四点共圆获得新的角度关系。
+- 高等几何定理：
+  - 帕普斯定理（r44）：更高等的定理，射影几何框架下更简洁；在欧氏框架下证明也依赖反复应用相似与泰勒斯定理。
+
+接下来，我们将检查提取到的基础规则集，记录对 benchmark jgex-231 的题目求解率；利用当前数据生成功能，基于基础规则集生成一批数据，提取其中包含辅助点的数据，并调用子图挖掘管线进行求解。
+
+- 基础规则集的求解完成率：158/231
+- 完全规则集的求解完成率：202/231
 
 ## 3. 数据与证明图构建
 
@@ -308,10 +384,40 @@
 可见性增强：
 - 解析完成后，在总 nodes/edges 统计后打印 per-problem 平均节点/边（problems, avg_nodes, avg_edges），可据此调整 `max_nodes`。
 
-## 6. 局限与后续计划
-- 已知局限与后续计划保持与现有实现一致。
+## 6. 剩余目标及日程规划
 
----
+### 实验部分
+
+- [ ] __(9.11)完成并调试翻译schema的代码（处理ar前提）__
+- [ ] __(9.12)调试挖掘代码：辅助点部分的正确性 + 超参（效率/数量）__
+- [ ] (9.13)验证方案II
+- [ ] (9.14)实验目标设计 & 消融实验设计
+- [ ] __(9.15)主体实验管线__
+- [ ] (9.18)主要实验结果
+- [ ] (9.24)全部实验结果
+
+### 论文部分
+
+- [ ] (9.14)调研相关工作 relate works
+- [ ] (9.16)method
+- [ ] (9.18)experiment & abstract
+- [ ] __(9.20)初稿__
+- [ ] (9.25)完成提交
+
+### 日程表
+
+| 日期范围      | 任务内容           | 完成情况     |
+|--------------|--------------------|-------------|
+| 0908-0914    | 调试 + 跑通实验管线  |             |
+|              | 设定实验目标        |             |
+|              | 论文摘要            |            |
+| 0915-0918    | 实验主要结果完成     |            |
+|              | 完成论文初稿        |             |
+| 0918-0921    | 补充实验结果        |             |
+|              | 提交摘要           |             |
+| 0922-0925    | 最终检查           |             |
+|              | 投稿               |             |
+
 
 ### 附录：Schema 批量提取与评估（scripts/schema_eval.py）
 
