@@ -271,106 +271,13 @@ class GeometryGenerator:
                 logging.warning(
                     f"Error in goal_from_tokens: {e} for eqratio {v1}, {v2}, {v3}, {v4}")
                 continue
-
-    def llm_solution(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
-        dep_idx: dict[Statement, str] = {}
-
-        data_tmp = defaultdict(list)
-        for construction in problem.constructions:
-            group = {}
-            p2deps = defaultdict(list)
-            for constr_sentence in construction.sentences:
-                cdef = self.defs[constr_sentence[0]]
-                if len(constr_sentence) == len(cdef.declare):
-                    mapping = dict(zip(cdef.declare[1:], constr_sentence[1:]))
-                else:
-                    assert len(constr_sentence) + \
-                        len(construction.points) == len(cdef.declare)
-                    mapping = dict(
-                        zip(cdef.declare[1:], construction.points + constr_sentence[1:]))
-                for points, bs in cdef.basics:
-                    points = tuple([mapping[x] for x in points])
-                    for p in points:
-                        group[p] = points
-                    for b in bs:
-                        statement = Statement.from_tokens(
-                            translate_sentence(mapping, b), proof_state.dep_graph)
-                        p2deps[points].append(statement)
-
-            points = construction.points
-            while points:
-                p = points[0]
-                gr = group[p]
-                points = [x for x in points if x not in gr]
-
-                deps = []
-                for dep in p2deps[gr]:
-                    deps.append(dep)
-                data_tmp[' '.join(gr)] = deps
-
-        # <problem> </problem>
-        data_problem = '<problem> '
-        string_premise = []
-        for k, v in data_tmp.items():
-            if not all(p in aux_points for p in k.split(' ')):
-                tmp_string = k + ' : '
-                for dep in v:
-                    if dep not in dep_idx:
-                        dep_idx[dep] = f"{len(dep_idx):03d}"
-                    tmp_string += dep.to_str() + f' [{dep_idx[dep]}] '
-                string_premise.append(tmp_string)
-        data_problem += ' ; '.join([s.strip() for s in string_premise]) + ' ? '
-        data_problem += ' ;'.join([
-            (goal[0] + ' ' + ' '.join(goal[1:]))
-            for goal in problem.goals
-        ])
-        data_problem += ' </problem>'
-
-        # <aux> </aux>
-        data_aux = ''
-        string_aux = []
-        for k, v in data_tmp.items():
-            if all(p in aux_points for p in k.split(' ')):
-                tmp_string = 'x00 ' + k + ' : '
-                for dep in v:
-                    if dep not in dep_idx:
-                        dep_idx[dep] = f"{len(dep_idx):03d}"
-                    tmp_string += dep.to_str() + f' [{dep_idx[dep]}] '
-                string_aux.append(tmp_string)
-        if len(string_aux) > 0:
-            data_aux += '<aux> '
-            data_aux += ' ; '.join([s.strip() for s in string_aux])
-            data_aux += ' ; </aux> '
-
-        # get analysis, numerical_check and proof
-        data_analysis, data_numerical_check, data_proof = get_structured_proof(
-            proof_state, dep_idx)
-
-        # <numerical_check> </numerical_check>
-        if data_numerical_check != '':
-            data_numerical_check += ' '
-
-        return {
-            "llm_data": data_problem + ' ' + data_aux + data_numerical_check + data_proof,
-            "llm_input": data_problem,
-            # "llm_output": data_aux + data_analysis + ' ' + data_numerical_check + data_proof,
-            "llm_output": data_aux + data_numerical_check + data_proof,
-        }
     
     def llm_solution_renamed(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
         def get_apha_geo_solver_var(va_idx):
+            """Generate a point name using letters and numbers"""
             letter_part = string.ascii_lowercase[va_idx % 26]
             number_part = va_idx // 26
-
-            # Prepare the point name
-            if number_part == 0:
-                # For the first cycle (A-Z), we don't add a number part
-                point_name = letter_part
-            else:
-                # For subsequent cycles, add the number part (reduced by 1 to start from 0)
-                point_name = f"{letter_part}{number_part - 1}"
-
-            return point_name
+            return f"{letter_part}{number_part - 1}" if number_part else letter_part  # a, b, ..., z, a0, b0, ...
 
         def statement2str_with_mapping(statement: Statement, mp):
             res = [statement.predicate.NAME] + [mp[arg.name]
@@ -603,155 +510,175 @@ class GeometryGenerator:
             "llm_output": data_aux + numerical_check + proof,
         }
 
-    def process_single_problem(self, args: tuple) -> tuple[list, dict]:
-        def find_minimal_aux_clauses(all_constructions, goal_str, essential_clauses, essential_clauses_aux):
-            # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
-            minimal_aux_set = set()
-            # Search through subsets from size 0 to len-1 (excluding full set)
-            for r in range(len(essential_clauses_aux)):
-                for aux_subset in itertools.combinations(essential_clauses_aux, r):
-                    aux_subset_set = set(aux_subset)
-                    statements_test = []
-                    for clause in all_constructions:
-                        clause_str = str(clause)
-                        if clause_str in essential_clauses or clause_str in aux_subset_set:
-                            statements_test.append(clause_str)
-                    fl_problem_test = '; '.join(
-                        statements_test) + ' ? ' + goal_str
-
-                    solver_builder_test = GeometricSolverBuilder(
-                        seed=random.randint(0, 998244353))
-                    solver_builder_test.with_deductive_agent(DDARN())
-                    solver_builder_test.load_problem_from_txt(fl_problem_test)
-                    try:
-                        solver_test = solver_builder_test.build(
-                            max_attempts=100)
-                    except Exception as e:
-                        logging.debug(f"Error: {e}")
-                        continue
-                    if solver_test.run(timeout=self.timeout):
-                        minimal_aux_set = aux_subset_set
-                        return {
-                            "info": 'success',
-                            "aux_clauses": minimal_aux_set,
-                            "solver": solver_test,
-                            "problem": solver_builder_test.problemJGEX
-                        }
-            return {"info": 'failed'}
-        
+    def _build_solver(self, fl_statement):
+        """Build geometric solver"""
+        solver_builder = GeometricSolverBuilder(seed=998244353)
+        solver_builder.with_deductive_agent(DDARN())
+        solver_builder.load_problem_from_txt(fl_statement)
         try:
-            """Process a single geometry problem."""
+            solver = solver_builder.build(max_attempts=1)
+            return solver, solver_builder
+        except Exception as e:
+            logging.info(f"Error: {e}")
+            return None, None
+    
+    def _generate_possible_goals(self, solver):
+        """Generate possible goals"""
+        t = time.time()
+        self.all_possible_goals_by_ar(solver.proof.dep_graph)
+        possible_goals = [
+            goal for goal in solver.proof.dep_graph.conclusions()
+            if self.filter.goal_valid_check(goal.to_str().split(" "), solver.proof.dep_graph)
+        ]
+        possible_goals = self.filter.goal_filter(possible_goals, solver.proof.dep_graph)
+        checkgoals_runtime = time.time() - t
+        return possible_goals, checkgoals_runtime
+    
+    def _find_minimal_aux_clauses(self, all_constructions, goal_str, essential_clauses, essential_clauses_aux):
+        """Find minimal auxiliary clause set"""
+        # Iterate through all possible subsets to find the minimal necessary auxiliary clause set
+        minimal_aux_set = set()
+        # Search through subsets from size 0 to len-1 (excluding full set)
+        for r in range(len(essential_clauses_aux)):
+            for aux_subset in itertools.combinations(essential_clauses_aux, r):
+                aux_subset_set = set(aux_subset)
+                statements_test = []
+                for clause in all_constructions:
+                    clause_str = str(clause)
+                    if clause_str in essential_clauses or clause_str in aux_subset_set:
+                        statements_test.append(clause_str)
+                fl_problem_test = '; '.join(statements_test) + ' ? ' + goal_str
+
+                solver_builder_test = GeometricSolverBuilder(
+                    seed=random.randint(0, 998244353))
+                solver_builder_test.with_deductive_agent(DDARN())
+                solver_builder_test.load_problem_from_txt(fl_problem_test)
+                try:
+                    solver_test = solver_builder_test.build(max_attempts=100)
+                except Exception as e:
+                    logging.debug(f"Error: {e}")
+                    continue
+                if solver_test.run(timeout=self.timeout):
+                    minimal_aux_set = aux_subset_set
+                    return {
+                        "info": 'success',
+                        "aux_clauses": minimal_aux_set,
+                        "solver": solver_test,
+                        "problem": solver_builder_test.problemJGEX
+                    }
+        return {"info": 'failed'}
+    
+    def _process_single_goal(self, goal, solver, solver_builder):
+        """Process a single goal"""
+        # find minimal aux clauses
+        solver.proof.goals = [goal]
+        solver_new = solver
+        problem_new = str(solver_builder.problemJGEX) + goal.to_str()
+        problem_new = ProblemJGEX.from_text(problem_new)
+
+        last_essential_clauses_len = float('inf')
+        last_essential_clauses_aux_len = float('inf')
+        iteration_count = 0
+        while True:
+            # get proof and essential_clauses
+            points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
+            essential_clauses: set[str] = set()
+            essential_clauses_aux: set[str] = set()
+            for p in aux_points:
+                essential_clauses_aux.add(str(p.clause))
+            for p in points:
+                if str(p.clause) not in essential_clauses_aux:
+                    essential_clauses.add(str(p.clause))
+            if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
+                break
+            # check if not converged after 1 iteration
+            if iteration_count > 1:
+                error_info = {
+                    "problem_new": str(problem_new),
+                    "iteration_count": iteration_count,
+                    "goal": goal.to_str(),
+                    "last_essential_clauses_len": last_essential_clauses_len,
+                    "last_essential_clauses_aux_len": last_essential_clauses_aux_len,
+                    "current_essential_clauses_len": len(essential_clauses),
+                    "current_essential_clauses_aux_len": len(essential_clauses_aux),
+                    "essential_clauses": list(essential_clauses),
+                    "essential_clauses_aux": list(essential_clauses_aux)
+                }
+                logging.warning(f"Warning: Iteration did not converge after {iteration_count} iterations. Details: {error_info}")
+            iteration_count += 1
+            last_essential_clauses_len = len(essential_clauses)
+            last_essential_clauses_aux_len = len(essential_clauses_aux)
+            res = self._find_minimal_aux_clauses(
+                [str(cons) for cons in solver_builder.problemJGEX.constructions],
+                goal.to_str(),
+                essential_clauses,
+                essential_clauses_aux
+            )
+            if res['info'] == 'success':
+                essential_clauses_aux = res['aux_clauses']
+                solver_new = res['solver']
+                problem_new = res['problem']
+                break  # Add break to avoid infinite loop
+
+        # filter clauses
+        n_clauses = len(essential_clauses | essential_clauses_aux)
+        if n_clauses < self.min_clauses_num:
+            logging.debug(f"Too few clauses: {n_clauses}")
+            return None
+
+        # get new proof
+        points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(
+            solver_new.proof.goals)
+
+        # filter proof
+        n_proof_steps = len(proof_steps)
+        if n_proof_steps < self.min_proof_steps:
+            logging.debug(f"Naive proof with length {n_proof_steps}")
+            return None
+            
+        # llm data generation
+        aux_points = [p.name for p in aux_points]
+        llm_renamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
+
+        if len(aux_points) > 0 and not self.filter.aux_predicates_valid_check(llm_renamed['llm_output']):
+            return None
+
+        return {
+            # "fl_statement_src": fl_statement,
+            "n_clauses": n_clauses,
+            "fl_problem": str(problem_new),
+            "nl_problem": "",
+            "n_proof_steps": n_proof_steps,
+            # "nl_solution": nl_solution,
+            "llm_input_renamed": llm_renamed['llm_input'],
+            "llm_output_renamed": llm_renamed['llm_output'],
+        }
+    
+    def process_single_problem(self, args: tuple) -> tuple[list, dict]:
+        """Process a single geometry problem."""
+        try:
             pid, fl_statement = args
             start_time = time.time()
 
-            # t = time.time()
-            # # clauses_generator = CompoundClauseGen(seed=os.getpid(), defs=self.defs)
-            # # fl_statement = clauses_generator.generate(self.n_clauses)
-            # prob_gen_time = time.time() - t
-            # print(f'problem statement generated in {prob_gen_time:.1f} seconds')
-
-            solver_builder = GeometricSolverBuilder(seed=998244353)
-            solver_builder.with_deductive_agent(DDARN())
-            solver_builder.load_problem_from_txt(fl_statement)
-            try:
-                solver = solver_builder.build(max_attempts=1)
-            except Exception as e:
-                logging.info(f"Error: {e}")
+            # Build solver
+            solver, solver_builder = self._build_solver(fl_statement)
+            if not solver:
                 return [], {}
+
+            # Run solver
             solver.run(timeout=self.timeout)
 
-            t = time.time()
-            self.all_possible_goals_by_ar(solver.proof.dep_graph)
-            possible_goals = [goal for goal in solver.proof.dep_graph.conclusions() if self.filter.goal_valid_check(goal.to_str().split(" "), solver.proof.dep_graph)]
-            possible_goals = self.filter.goal_filter(possible_goals, solver.proof.dep_graph)
-            checkgoals_runtime = time.time() - t
+            # Generate possible goals
+            possible_goals, checkgoals_runtime = self._generate_possible_goals(solver)
 
-            n_filtered_samples = 0
-            proofs_of_used_rules = {}
+            # Process each goal
             generated_data = []
             for goal in possible_goals:
-                # find minimal aux clauses
-                solver.proof.goals = [goal]
-                solver_new = solver
-                problem_new = str(solver_builder.problemJGEX) + goal.to_str()
-                problem_new = ProblemJGEX.from_text(problem_new)
+                data = self._process_single_goal(goal, solver, solver_builder)
+                if data:
+                    generated_data.append(data)
 
-                last_essential_clauses_len = float('inf')
-                last_essential_clauses_aux_len = float('inf')
-                iteration_count = 0
-                while True:
-                    # get proof and essential_clauses
-                    points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
-                    essential_clauses: set[str] = set()
-                    essential_clauses_aux: set[str] = set()
-                    for p in aux_points:
-                        essential_clauses_aux.add(str(p.clause))
-                    for p in points:
-                        if str(p.clause) not in essential_clauses_aux:
-                            essential_clauses.add(str(p.clause))
-                    if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
-                        break
-                    # check if not converged after 1 iteration
-                    if iteration_count > 1:
-                        error_info = {
-                            "problem_new": str(problem_new),
-                            "iteration_count": iteration_count,
-                            "goal": goal.to_str(),
-                            "last_essential_clauses_len": last_essential_clauses_len,
-                            "last_essential_clauses_aux_len": last_essential_clauses_aux_len,
-                            "current_essential_clauses_len": len(essential_clauses),
-                            "current_essential_clauses_aux_len": len(essential_clauses_aux),
-                            "essential_clauses": list(essential_clauses),
-                            "essential_clauses_aux": list(essential_clauses_aux)
-                        }
-                        logging.warning(f"Warning: Iteration did not converge after {iteration_count} iterations. Details: {error_info}")
-                    iteration_count += 1
-                    last_essential_clauses_len = len(essential_clauses)
-                    last_essential_clauses_aux_len = len(essential_clauses_aux)
-                    res = find_minimal_aux_clauses(
-                        [str(cons) for cons in solver_builder.problemJGEX.constructions], 
-                        goal.to_str(), 
-                        essential_clauses, 
-                        essential_clauses_aux
-                    )
-                    if res['info'] == 'success':
-                        essential_clauses_aux = res['aux_clauses']
-                        solver_new = res['solver']
-                        problem_new = res['problem']
-
-                # filter clauses
-                n_clauses = len(essential_clauses | essential_clauses_aux)
-                if n_clauses < self.min_clauses_num:
-                    logging.debug(f"Too few clauses: {n_clauses}")
-                    continue
-
-                # get new proof
-                points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(
-                    solver_new.proof.goals)
-
-                #  filter proof
-                n_proof_steps = len(proof_steps)
-                if n_proof_steps < self.min_proof_steps:
-                    logging.debug(f"Naive proof with length {n_proof_steps}")
-                    continue
-                #  llm data generation
-                aux_points = [p.name for p in aux_points]
-                llm_renamed = self.llm_solution_renamed(problem_new, aux_points, solver_new.proof)
-
-                if len(aux_points) > 0 and not self.filter.aux_predicates_valid_check(llm_renamed['llm_output']):
-                    continue
-
-                generated_data.append({
-                    # "fl_statement_src": fl_statement,
-                    "n_clauses": n_clauses,
-                    "fl_problem": str(problem_new),
-                    "nl_problem": "",
-                    "n_proof_steps": n_proof_steps,
-                    # "nl_solution": nl_solution,
-                    "llm_input_renamed": llm_renamed['llm_input'],
-                    "llm_output_renamed": llm_renamed['llm_output'],
-                })
-
+            # Create summary (created directly in main function, no need for separate function)
             summary = {
                 'total_time': time.time() - start_time,
                 'runtime': solver.run_infos['runtime'],
@@ -761,9 +688,11 @@ class GeometryGenerator:
                 'first_predicate': [get_first_predicate(d['fl_problem']) for d in generated_data],
                 'n_clauses': [d['n_clauses'] for d in generated_data],
                 'n_proof_steps': [d['n_proof_steps'] for d in generated_data],
-                'n_filtered_samples': n_filtered_samples,
+                'n_filtered_samples': 0,  # This value is always 0 in the original code
             }
+            
             return generated_data, summary
+
         except Exception as e:
             logging.info(f"Error generating problem: {e}")
             import traceback
@@ -783,7 +712,7 @@ class GeometryGenerator:
                     f.write('\n')
             self.write_buffer.clear()
 
-    def generate_problems(self): 
+    def generate_problems(self):
         import signal
         class TimeoutError(Exception):
             pass
