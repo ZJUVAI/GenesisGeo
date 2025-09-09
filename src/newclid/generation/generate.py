@@ -678,6 +678,7 @@ class GeometryGenerator:
 
                 last_essential_clauses_len = float('inf')
                 last_essential_clauses_aux_len = float('inf')
+                iteration_count = 0
                 while True:
                     # get proof and essential_clauses
                     points, _, _, aux_points, _, _, proof_steps = solver_new.proof.dep_graph.get_proof_steps(solver_new.proof.goals)
@@ -690,6 +691,21 @@ class GeometryGenerator:
                             essential_clauses.add(str(p.clause))
                     if last_essential_clauses_len == len(essential_clauses) and last_essential_clauses_aux_len == len(essential_clauses_aux):
                         break
+                    # check if not converged after 1 iteration
+                    if iteration_count > 1:
+                        error_info = {
+                            "problem_new": str(problem_new),
+                            "iteration_count": iteration_count,
+                            "goal": goal.to_str(),
+                            "last_essential_clauses_len": last_essential_clauses_len,
+                            "last_essential_clauses_aux_len": last_essential_clauses_aux_len,
+                            "current_essential_clauses_len": len(essential_clauses),
+                            "current_essential_clauses_aux_len": len(essential_clauses_aux),
+                            "essential_clauses": list(essential_clauses),
+                            "essential_clauses_aux": list(essential_clauses_aux)
+                        }
+                        logging.warning(f"Warning: Iteration did not converge after {iteration_count} iterations. Details: {error_info}")
+                    iteration_count += 1
                     last_essential_clauses_len = len(essential_clauses)
                     last_essential_clauses_aux_len = len(essential_clauses_aux)
                     res = find_minimal_aux_clauses(
