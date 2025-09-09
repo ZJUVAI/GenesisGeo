@@ -39,9 +39,10 @@ def split_rule(rule):
     goal_part = goal_part.replace('∧', ',')
     premise_conditions = _split_top_level(premise_part)
     premise_tuples = []
+    token_pattern = r'[A-Za-z_]\w*|\d+/\d+|\d+(?:\.\d+)?'
     for condition in premise_conditions:
-        # 匹配每个条件的格式，假设条件由标识符和参数组成
-        parts = re.findall(r'\w+', condition)  # 提取所有单词（标识符和参数）
+        # 匹配每个条件的格式，支持分数字面量（例如 1/2）
+        parts = re.findall(token_pattern, condition)
         if parts:
             premise_tuples.append(tuple(parts))
 
@@ -49,8 +50,8 @@ def split_rule(rule):
     goal_conditions = _split_top_level(goal_part)
     goal_tuples = []
     for condition in goal_conditions:
-        # 匹配每个条件的格式，假设条件由标识符和参数组成
-        parts = re.findall(r'\w+', condition)  # 提取所有单词（标识符和参数）
+        # 匹配每个条件的格式，支持分数字面量（例如 1/2）
+        parts = re.findall(token_pattern, condition)
         if parts:
             goal_tuples.append(tuple(parts))
     
@@ -387,6 +388,85 @@ def translate_circle(args, deps, constructions, state):
         return True
     return False
 
+def get_rvalue_reciprocal(rvalue):
+    if rvalue is None:
+        return rvalue
+    s = str(rvalue).strip()
+    if '/' in s:
+        left, right = s.split('/', 1)
+        return f"{right}/{left}"
+    return s
+
+def translate_rconst(args, deps, constructions, state):
+    # 基本形：rconst a b c x r
+    # 仅处理：
+    #  - 基本情形：从四点中识别新点 x，余下三点按原相对顺序作为 A,B,C，构造 x = rconst x A B C r
+    #  - 典型 rconst2：若移除 x 后剩余仍含 x（重复点等于新点），取其余两个非 x 点为 A,B，构造 x = rconst2 x A B r
+    # 其他情形（如无法满足 diff(A,B) 或不符合上述判定）返回 False
+    if len(args) < 5:
+        return False
+    a, b, c, d = args[:-1]
+    rvalue = args[-1]
+
+    if a == d or b == d or a == c or b == c:
+        if a == d:
+            a, b, c, d = b, a, d, c
+        elif b == d:
+            a, b, c, d = a, b, d, c
+        elif a == c:
+            a, b, c, d = b, a, c, d
+        if b == c and a not in deps[b] and d not in deps[b] and state[b]:
+            constructions[b].append(('rconst2', b, a, d, rvalue))
+            if len(constructions[b]) == 2:
+                state[b] = False
+            for p in [a, d]:
+                update_dep(b, p, deps)
+            return True
+        elif a not in deps[d] and b not in deps[d] and c not in deps[d] and state[d]:
+            constructions[d].append(('rconst', a, b, c, d, rvalue))
+            if len(constructions[d]) == 2:
+                state[d] = False
+            for p in [a, b, c]:
+                update_dep(d, p, deps)
+            return True
+        elif b not in deps[a] and c not in deps[a] and d not in deps[a] and state[a]:
+            constructions[a].append(('rconst', c, d, b, a, get_rvalue_reciprocal(rvalue)))
+            if len(constructions[a]) == 2:
+                state[a] = False
+            for p in [b, c, d]:
+                update_dep(a, p, deps)
+                return True
+    else:
+        if a not in deps[d] and b not in deps[d] and c not in deps[d] and state[d]:
+            constructions[d].append(('rconst', a, b, c, d, rvalue))
+            if len(constructions[d]) == 2:
+                state[d] = False
+            for p in [a, b, c]:
+                update_dep(d, p, deps)
+            return True
+        elif a not in deps[c] and b not in deps[c] and d not in deps[c] and state[c]:
+            constructions[c].append(('rconst', a, b, d, c, rvalue))
+            if len(constructions[c]) == 2:
+                state[c] = False
+            for p in [a, b, d]:
+                update_dep(c, p, deps)
+            return True
+        elif b not in deps[a] and c not in deps[a] and d not in deps[a] and state[a]:
+            constructions[a].append(('rconst', c, d, b, a, get_rvalue_reciprocal(rvalue)))
+            if len(constructions[a]) == 2:
+                state[a] = False
+            for p in [b, c, d]:
+                update_dep(a, p, deps)
+            return True
+        elif a not in deps[b] and c not in deps[b] and d not in deps[b] and state[b]:
+            constructions[b].append(('rconst', c, d, a, b, get_rvalue_reciprocal(rvalue)))
+            if len(constructions[b]) == 2:
+                state[b] = False
+            for p in [a, b, d]:
+                update_dep(b, p, deps)
+            return True
+    return False
+
 def translate_premise(premise, deps, constructions, state):
     type = premise[0]
     args = premise[1:]
@@ -412,6 +492,8 @@ def translate_premise(premise, deps, constructions, state):
         return translate_coll(args, deps, constructions, state)
     if type == "circle":
         return translate_circle(args, deps, constructions, state)
+    if type == "rconst":
+        return translate_rconst(args, deps, constructions, state)
     print(type)            
     return False
 
@@ -434,7 +516,7 @@ def shuffle_premise(premise):
         points = args[1:]
         random.shuffle(points)
         return (type, args[0], *points)
-    elif type in ['eqangle', 'eqratio']:
+    elif type in ['eqangle', 'eqratio', 'rconst']:
         return premise
     # For any other predicate types, keep as-is (no shuffling)
     return premise
@@ -522,8 +604,14 @@ def process_rules(input_file, output_file, max_attempts = 10):
 
             points = []
             for premise_tuple in premise_tuples:
-                for point in premise_tuple[1:]:
-                    points.append(point)
+                pred = premise_tuple[0]
+                # rconst 的最后一个参数为比例 r（可能是 1/2 这样的分数），不计入点集合
+                if pred == 'rconst' and len(premise_tuple) >= 2:
+                    for point in premise_tuple[1:-1]:
+                        points.append(point)
+                else:
+                    for point in premise_tuple[1:]:
+                        points.append(point)
             points = sorted(list(set(points)))
 
             # 归一化前提（展开 simtri 等）
