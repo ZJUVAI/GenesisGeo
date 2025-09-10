@@ -272,120 +272,105 @@ class GeometryGenerator:
                     f"Error in goal_from_tokens: {e} for eqratio {v1}, {v2}, {v3}, {v4}")
                 continue
     
-    def llm_solution_renamed(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> str:
-        def get_apha_geo_solver_var(va_idx):
-            """Generate a point name using letters and numbers"""
-            letter_part = string.ascii_lowercase[va_idx % 26]
-            number_part = va_idx // 26
-            return f"{letter_part}{number_part - 1}" if number_part else letter_part  # a, b, ..., z, a0, b0, ...
+    def _get_apha_geo_solver_var(self, va_idx):
+        """Generate a point name using letters and numbers"""
+        letter_part = string.ascii_lowercase[va_idx % 26]
+        number_part = va_idx // 26
+        return f"{letter_part}{number_part - 1}" if number_part else letter_part
 
-        def statement2str_with_mapping(statement: Statement, mp):
-            res = [statement.predicate.NAME] + [mp[arg.name]
-                                                if isinstance(arg, Point) else str(arg) for arg in statement.args]
-            return " ".join(res)
+    def _statement2str_with_mapping(self, statement: Statement, mp):
+        res = [statement.predicate.NAME] + [mp[arg.name]
+                                            if isinstance(arg, Point) else str(arg) for arg in statement.args]
+        return " ".join(res)
 
-        def get_all_premise(problem):
-            data_tmp = defaultdict(list)
-            for construction in problem.constructions:
-                group = {}
-                p2deps = defaultdict(list)
-                points_in_basic_order = []
-                for constr_sentence in construction.sentences:
-                    cdef = self.defs[constr_sentence[0]]
-                    if len(constr_sentence) == len(cdef.declare):
-                        mapping = dict(
-                            zip(cdef.declare[1:], constr_sentence[1:]))
-                    else:
-                        assert len(constr_sentence) + \
-                            len(construction.points) == len(cdef.declare)
-                        mapping = dict(
-                            zip(cdef.declare[1:], construction.points + constr_sentence[1:]))
-                    for points, bs in cdef.basics:
-                        points = tuple([mapping[x] for x in points])
-                        for p in points:
-                            points_in_basic_order.append(p)
-                            group[p] = points
-                        for b in bs:
-                            statement = Statement.from_tokens(
-                                translate_sentence(mapping, b), proof_state.dep_graph)
-                            p2deps[points].append(statement)
+    def _get_all_premise(self, problem, proof_state):
+        """Get all premises from the problem constructions"""
+        data_tmp = defaultdict(list)
+        for construction in problem.constructions:
+            group = {}
+            p2deps = defaultdict(list)
+            points_in_basic_order = []
+            for constr_sentence in construction.sentences:
+                cdef = self.defs[constr_sentence[0]]
+                if len(constr_sentence) == len(cdef.declare):
+                    mapping = dict(
+                        zip(cdef.declare[1:], constr_sentence[1:]))
+                else:
+                    assert len(constr_sentence) + \
+                        len(construction.points) == len(cdef.declare)
+                    mapping = dict(
+                        zip(cdef.declare[1:], construction.points + constr_sentence[1:]))
+                for points, bs in cdef.basics:
+                    points = tuple([mapping[x] for x in points])
+                    for p in points:
+                        points_in_basic_order.append(p)
+                        group[p] = points
+                    for b in bs:
+                        statement = Statement.from_tokens(
+                            translate_sentence(mapping, b), proof_state.dep_graph)
+                        p2deps[points].append(statement)
 
-                points = points_in_basic_order
-                while points:
-                    p = points[0]
-                    gr = group[p]
-                    points = [x for x in points if x not in gr]
+            points = points_in_basic_order
+            while points:
+                p = points[0]
+                gr = group[p]
+                points = [x for x in points if x not in gr]
 
-                    deps = []
-                    for dep in p2deps[gr]:
-                        deps.append(dep)
-                    data_tmp[' '.join(gr)] = deps
-            return data_tmp
+                deps = []
+                for dep in p2deps[gr]:
+                    deps.append(dep)
+                data_tmp[' '.join(gr)] = deps
+        return data_tmp
 
-        def get_essential_points_and_premise(premises, proof_deps, points, aux_points):
-            # essential_premises
-            essential_premises = []
-            for line in premises:
-                essential_premises.append(line.statement)
-            # essential_points points
-            essential_points = set()
-            for line in proof_deps:
-                for arg in line.statement.args:
-                    if isinstance(arg, Point):
-                        essential_points.add(arg.name)
-            points = set([p.name for p in points]) & essential_points
-            aux_points = set([p.name for p in aux_points]) & essential_points
-            return points, aux_points, essential_premises
+    def _get_essential_points_and_premise(self, premises, proof_deps, points, aux_points):
+        """Get essential points and premises"""
+        # essential_premises
+        essential_premises = []
+        for line in premises:
+            essential_premises.append(line.statement)
+        # essential_points points
+        essential_points = set()
+        for line in proof_deps:
+            for arg in line.statement.args:
+                if isinstance(arg, Point):
+                    essential_points.add(arg.name)
+        points = set([p.name for p in points]) & essential_points
+        aux_points = set([p.name for p in aux_points]) & essential_points
+        return points, aux_points, essential_premises
 
-        def rediger_new_format(dep, mp, dep_idx) -> str:
-            """Generate proof step in new format: statement [id] rule_id [required_statement_ids]"""
-            for statement in (dep.statement,) + dep.why:
-                statemtn_str = statement2str_with_mapping(statement, mp)
-                if statemtn_str not in dep_idx:
-                    dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
+    def _rediger_new_format(self, dep, mp, dep_idx) -> str:
+        """Generate proof step in new format: statement [id] rule_id [required_statement_ids]"""
+        for statement in (dep.statement,) + dep.why:
+            statemtn_str = self._statement2str_with_mapping(statement, mp)
+            if statemtn_str not in dep_idx:
+                dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
 
-            # Extract rule ID from reason string and handle special cases
-            reason = dep.reason
-            if "Ratio Chasing" in reason:
-                rule_id = "a00"
-            elif "Angle Chasing" in reason:
-                rule_id = "a01"
-            elif "Shortcut Derivation" in reason:
-                rule_id = "r99"
-            elif "Same Circle" in reason:
-                rule_id = "r98"
-            elif "Same Line" in reason:
-                rule_id = "r97"
-            elif reason and ' ' in reason:
-                rule_id = reason.split()[0]
-            else:
-                rule_id = reason if reason else "unknown"
+        # Extract rule ID from reason string and handle special cases
+        reason = dep.reason
+        if "Ratio Chasing" in reason:
+            rule_id = "a00"
+        elif "Angle Chasing" in reason:
+            rule_id = "a01"
+        elif "Shortcut Derivation" in reason:
+            rule_id = "r99"
+        elif "Same Circle" in reason:
+            rule_id = "r98"
+        elif "Same Line" in reason:
+            rule_id = "r97"
+        elif reason and ' ' in reason:
+            rule_id = reason.split()[0]
+        else:
+            rule_id = reason if reason else "unknown"
 
-            # Generate new format: statement [statement_id] rule_id [premise_ids]
-            premise_ids = ' '.join(
-                f"[{dep_idx[statement2str_with_mapping(premise, mp)]}]" for premise in dep.why)
-            conclusion_str = statement2str_with_mapping(dep.statement, mp)
-            return f"{conclusion_str} [{dep_idx[conclusion_str]}] {rule_id} {premise_ids}".strip()
+        # Generate new format: statement [statement_id] rule_id [premise_ids]
+        premise_ids = ' '.join(
+            f"[{dep_idx[self._statement2str_with_mapping(premise, mp)]}]" for premise in dep.why)
+        conclusion_str = self._statement2str_with_mapping(dep.statement, mp)
+        return f"{conclusion_str} [{dep_idx[conclusion_str]}] {rule_id} {premise_ids}".strip()
 
-        dep_idx: dict[str, str] = {}
-        # get proof info
-        goals = [goal for goal in proof_state.goals if goal.check()]
-        (
-            points,
-            premises,
-            numercial_checked_premises,
-            aux_points,
-            aux,
-            numercial_checked_aux,
-            proof_steps,
-        ) = proof_state.dep_graph.get_proof_steps(goals)
-
-        # find essential_premises
-        all_premise = get_all_premise(problem)  # all premises from problem
-        essential_points, essential_aux_points, essential_premises = get_essential_points_and_premise(
-            premises+aux, proof_state.dep_graph.proof_deps(goals), points, aux_points)  # only included in proof steps
-        # mapping
-        mp: dict[str, str] = {}
+    def _create_point_mapping(self, problem, proof_state, essential_points, essential_aux_points, essential_premises, all_premise):
+        """Create point name mapping"""
+        mp = {}
         for k, v in all_premise.items():
             kps = k.split(' ')
             if any(p in essential_points for p in kps):
@@ -393,110 +378,152 @@ class GeometryGenerator:
                     if dep in essential_premises:
                         for arg in dep.args:
                             if isinstance(arg, Point) and arg.name not in mp:
-                                mp[arg.name] = get_apha_geo_solver_var(len(mp))
+                                mp[arg.name] = self._get_apha_geo_solver_var(len(mp))
                 for p in kps:
                     if p not in mp:
-                        mp[p] = get_apha_geo_solver_var(len(mp))
+                        mp[p] = self._get_apha_geo_solver_var(len(mp))
 
         for k, v in all_premise.items():
             ps = k.split(' ')
             if any(p in essential_aux_points for p in ps):
                 for p in ps:
                     if p not in mp:
-                        mp[p] = get_apha_geo_solver_var(len(mp))
-        # import pdb; pdb.set_trace()
-        # <problem> </problem>
-        try:
-            string_premise = []
-            for k, v in all_premise.items():
-                # if not all(p in essential_aux_points for p in k.split(' ')):
-                if any(p in essential_points for p in k.split(' ')):
-                    tmp_string = ""
-                    for dep in v:
-                        if dep in essential_premises:  # only select useful premise and free points withou useful premises
-                            dep_str_renamed = statement2str_with_mapping(
-                                dep, mp)
-                            if dep_str_renamed not in dep_idx:
-                                dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
-                            tmp_string += dep_str_renamed + \
-                                f' [{dep_idx[dep_str_renamed]}] '
-                    if tmp_string == "":
-                        # if this premise is useless, free all points in it
-                        for p in k.split(' '):
-                            string_premise.append(mp[p] + " : ")
-                    else:
-                        k_renamed = " ".join(mp[p] for p in k.split(' '))
-                        tmp_string = k_renamed + ' : ' + tmp_string
-                        string_premise.append(tmp_string)
-            data_problem = '<problem> '
-            data_problem += ' ; '.join([s.strip()
-                                       for s in string_premise]) + ' ? '
-            data_problem += ' ;'.join([statement2str_with_mapping(goal, mp)
-                                      for goal in proof_state.goals])
-            data_problem += ' </problem>'
-            # import pdb; pdb.set_trace()
-            # <aux> </aux>
-            data_aux = ''
-            string_aux = []
-            for k, v in all_premise.items():
-                # if all(p in aux_points for p in k.split(' ')):
-                if all(p in essential_aux_points for p in k.split(' ')):
-                    k_renamed = " ".join(mp[p] for p in k.split(' '))
-                    tmp_string = 'x00 ' + k_renamed + ' : '
-                    for dep in v:
-                        if dep in essential_premises:  # free points withou useful premises
-                            dep_str_renamed = statement2str_with_mapping(
-                                dep, mp)
-                            if dep_str_renamed not in dep_idx:
-                                dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
-                            tmp_string += dep_str_renamed + \
-                                f' [{dep_idx[dep_str_renamed]}] '
-                    string_aux.append(tmp_string)
-            if len(string_aux) > 0:
-                data_aux += '<aux> '
-                data_aux += ' ; '.join([s.strip() for s in string_aux])
-                data_aux += ' ; </aux> '
-            # import pdb; pdb.set_trace()
-            # <numerical_check> </numerical_check>
-            numerical_check_items = []
-            # numercial_checked_premises
-            for line in numercial_checked_premises:
-                statemtn_str = statement2str_with_mapping(line.statement, mp)
-                if statemtn_str not in dep_idx:
-                    dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
-            sorted_numercial_checked_premises = sorted(
-                numercial_checked_premises, key=lambda line: dep_idx[statement2str_with_mapping(line.statement, mp)])
-            for line in sorted_numercial_checked_premises:
-                statemtn_str = statement2str_with_mapping(line.statement, mp)
-                numerical_check_items.append(
-                    f"{statemtn_str} [{dep_idx[statemtn_str]}]")
-            # numercial_checked_premises
-            for line in numercial_checked_aux:
-                statemtn_str = statement2str_with_mapping(line.statement, mp)
-                if statemtn_str not in dep_idx:
-                    dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
-            sorted_numercial_checked_aux = sorted(
-                numercial_checked_aux, key=lambda line: dep_idx[statement2str_with_mapping(line.statement, mp)])
-            for line in sorted_numercial_checked_aux:
-                statemtn_str = statement2str_with_mapping(line.statement, mp)
-                numerical_check_items.append(
-                    f"{statemtn_str} [{dep_idx[statemtn_str]}]")
-            if len(numerical_check_items) > 0:
-                numerical_check = "<numerical_check> " + \
-                    " ; ".join(numerical_check_items) + \
-                    " ; </numerical_check> "
-            else:
-                numerical_check = ""
+                        mp[p] = self._get_apha_geo_solver_var(len(mp))
+        return mp
 
-            # <proof> </proof>
-            proof = "<proof> "
-            proof_steps_formatted = []
-            for k, line in enumerate(proof_steps):
-                if NUMERICAL_CHECK not in line.reason and IN_PREMISES not in line:
-                    proof_steps_formatted.append(
-                        rediger_new_format(line, mp, dep_idx))
-            proof += " ; ".join(proof_steps_formatted) + " ; </proof>"
+    def _generate_problem_section(self, problem, mp, dep_idx, essential_points, essential_premises, all_premise, goals):
+        """Generate problem description section"""
+        string_premise = []
+        for k, v in all_premise.items():
+            if any(p in essential_points for p in k.split(' ')):
+                tmp_string = ""
+                for dep in v:
+                    if dep in essential_premises:  # only select useful premise and free points withou useful premises
+                        dep_str_renamed = self._statement2str_with_mapping(dep, mp)
+                        if dep_str_renamed not in dep_idx:
+                            dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
+                        tmp_string += dep_str_renamed + \
+                            f' [{dep_idx[dep_str_renamed]}] '
+                if tmp_string == "":
+                    # if this premise is useless, free all points in it
+                    for p in k.split(' '):
+                        string_premise.append(mp[p] + " : ")
+                else:
+                    k_renamed = " ".join(mp[p] for p in k.split(' '))
+                    tmp_string = k_renamed + ' : ' + tmp_string
+                    string_premise.append(tmp_string)
+        data_problem = '<problem> '
+        data_problem += ' ; '.join([s.strip()
+                                   for s in string_premise]) + ' ? '
+        data_problem += ' ;'.join([self._statement2str_with_mapping(goal, mp)
+                                  for goal in goals])
+        data_problem += ' </problem>'
+        return data_problem
+
+    def _generate_aux_section(self, problem, mp, dep_idx, essential_aux_points, essential_premises, all_premise):
+        """Generate auxiliary information section"""
+        data_aux = ''
+        string_aux = []
+        for k, v in all_premise.items():
+            if all(p in essential_aux_points for p in k.split(' ')):
+                k_renamed = " ".join(mp[p] for p in k.split(' '))
+                tmp_string = 'x00 ' + k_renamed + ' : '
+                for dep in v:
+                    if dep in essential_premises:  # free points withou useful premises
+                        dep_str_renamed = self._statement2str_with_mapping(dep, mp)
+                        if dep_str_renamed not in dep_idx:
+                            dep_idx[dep_str_renamed] = f"{len(dep_idx):03d}"
+                        tmp_string += dep_str_renamed + \
+                            f' [{dep_idx[dep_str_renamed]}] '
+                string_aux.append(tmp_string)
+        if len(string_aux) > 0:
+            data_aux += '<aux> '
+            data_aux += ' ; '.join([s.strip() for s in string_aux])
+            data_aux += ' ; </aux> '
+        return data_aux
+
+    def _generate_numerical_check_section(self, mp, dep_idx, numercial_checked_premises, numercial_checked_aux):
+        """Generate numerical check section"""
+        numerical_check_items = []
+        # numercial_checked_premises
+        for line in numercial_checked_premises:
+            statemtn_str = self._statement2str_with_mapping(line.statement, mp)
+            if statemtn_str not in dep_idx:
+                dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
+        sorted_numercial_checked_premises = sorted(
+            numercial_checked_premises, key=lambda line: dep_idx[self._statement2str_with_mapping(line.statement, mp)])
+        for line in sorted_numercial_checked_premises:
+            statemtn_str = self._statement2str_with_mapping(line.statement, mp)
+            numerical_check_items.append(
+                f"{statemtn_str} [{dep_idx[statemtn_str]}]")
+        # numercial_checked_premises
+        for line in numercial_checked_aux:
+            statemtn_str = self._statement2str_with_mapping(line.statement, mp)
+            if statemtn_str not in dep_idx:
+                dep_idx[statemtn_str] = f"{len(dep_idx):03d}"
+        sorted_numercial_checked_aux = sorted(
+            numercial_checked_aux, key=lambda line: dep_idx[self._statement2str_with_mapping(line.statement, mp)])
+        for line in sorted_numercial_checked_aux:
+            statemtn_str = self._statement2str_with_mapping(line.statement, mp)
+            numerical_check_items.append(
+                f"{statemtn_str} [{dep_idx[statemtn_str]}]")
+        if len(numerical_check_items) > 0:
+            numerical_check = "<numerical_check> " + \
+                " ; ".join(numerical_check_items) + \
+                " ; </numerical_check> "
+        else:
+            numerical_check = ""
+        return numerical_check
+
+    def _generate_proof_section(self, mp, dep_idx, proof_steps):
+        """Generate proof section"""
+        proof = "<proof> "
+        proof_steps_formatted = []
+        for k, line in enumerate(proof_steps):
+            if NUMERICAL_CHECK not in line.reason and IN_PREMISES not in line:
+                proof_steps_formatted.append(
+                    self._rediger_new_format(line, mp, dep_idx))
+        proof += " ; ".join(proof_steps_formatted) + " ; </proof>"
+        return proof
+
+    def llm_solution_renamed(self, problem: ProblemJGEX, aux_points: list[str], proof_state: ProofState) -> dict:
+        """Refactored main method to generate LLM solution with renamed points"""
+        try:
+            # Initialize data
+            dep_idx: dict[str, str] = {}
+            goals = [goal for goal in proof_state.goals if goal.check()]
+            (
+                points,
+                premises,
+                numercial_checked_premises,
+                aux_points_list,
+                aux,
+                numercial_checked_aux,
+                proof_steps,
+            ) = proof_state.dep_graph.get_proof_steps(goals)
+
+            # Get all premises and essential premises/points
+            all_premise = self._get_all_premise(problem, proof_state)
+            essential_points, essential_aux_points, essential_premises = self._get_essential_points_and_premise(
+                premises+aux, proof_state.dep_graph.proof_deps(goals), points, aux_points_list)
+
+            # Create point name mapping
+            mp = self._create_point_mapping(problem, proof_state, essential_points, essential_aux_points, essential_premises, all_premise)
+
+            # Generate each section
+            data_problem = self._generate_problem_section(problem, mp, dep_idx, essential_points, essential_premises, all_premise, goals)
+            data_aux = self._generate_aux_section(problem, mp, dep_idx, essential_aux_points, essential_premises, all_premise)
+            numerical_check = self._generate_numerical_check_section(mp, dep_idx, numercial_checked_premises, numercial_checked_aux)
+            proof = self._generate_proof_section(mp, dep_idx, proof_steps)
+
+            # Assemble result
+            return {
+                "llm_input": data_problem,
+                "llm_output": data_aux + numerical_check + proof,
+            }
+
         except Exception as e:
+            # Error handling
             import traceback
             traceback.print_exc()
             print(essential_points)
@@ -504,11 +531,7 @@ class GeometryGenerator:
             print(essential_premises)
             print(mp)
             print(all_premise)
-            # import pdb; pdb.set_trace()
-        return {
-            "llm_input": data_problem,
-            "llm_output": data_aux + numerical_check + proof,
-        }
+            raise
 
     def _build_solver(self, fl_statement):
         """Build geometric solver"""
@@ -739,7 +762,10 @@ class GeometryGenerator:
             return self.process_single_problem(args)
         
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
+            ray.init(
+                ignore_reinit_error=True, 
+                num_cpus=self.n_threads
+            )
         task_iterator = task_generator()
         max_pending = int(self.n_threads * 1.5)
         summary_reporter = Summary(prefix = self.path_prefix)
@@ -793,6 +819,7 @@ class GeometryGenerator:
         summary_reporter.output_report()
 
 def main():
+    
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
     parser.add_argument("--n_clauses", required=False, type=int, default=10)
     parser.add_argument("--min_proof_steps", required=False, type=int, default=3)
