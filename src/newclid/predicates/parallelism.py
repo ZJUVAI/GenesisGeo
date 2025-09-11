@@ -12,7 +12,7 @@ from newclid.predicates.congruence import Cong
 from newclid.predicates.predicate import Predicate
 from newclid.algebraic_reasoning.tables import Angle_Chase
 from newclid.tools import reshape
-from newclid.dependencies.dependency import Dependency
+from newclid.dependencies.dependency import NUMERICAL_CHECK, Dependency
 
 if TYPE_CHECKING:
     from newclid.algebraic_reasoning.tables import Table
@@ -166,6 +166,10 @@ class NPara(Predicate):
     @classmethod
     def check(cls, statement: Statement) -> bool:
         return True
+
+    @classmethod
+    def why(cls, statement: Statement) -> Dependency:
+        return Dependency.mk(statement, NUMERICAL_CHECK, tuple())
 
     @classmethod
     def pretty(cls, statement: Statement) -> str:
