@@ -2,6 +2,7 @@ import random
 import string
 import numpy
 import time
+import logging
 from newclid.formulations.definition import DefinitionJGEX
 from newclid.formulations.clause import translate_sentence
 from newclid.statement import Statement
@@ -186,19 +187,19 @@ class CompoundClauseGen:
             # samples constructions
             constructions = []
             numerics = []
-            if n == 1:
-                new_points, construction, numeric = self.choose_construction(construction_candidates)
-                constructions.append(construction)
-                numerics += numeric
-            else:
-                # multiple n_constructions shares the same new points. Only support one new point
-                new_points = self.point_generator.prefetch_points(1)
-                for _ in range(n):
-                    _, construction, numeric = self.choose_construction(construction_candidates, new_points)
+            try:
+                if n == 1:
+                    new_points, construction, numeric = self.choose_construction(construction_candidates)
                     constructions.append(construction)
                     numerics += numeric
-            # check numerics by drawing diagram
-            try:
+                else:
+                    # multiple n_constructions shares the same new points. Only support one new point
+                    new_points = self.point_generator.prefetch_points(1)
+                    for _ in range(n):
+                        _, construction, numeric = self.choose_construction(construction_candidates, new_points)
+                        constructions.append(construction)
+                        numerics += numeric
+                # check numerics by drawing diagram
                 self.draw_diagram(new_points, numerics)
             except Exception as e:
                 # print(f"Exception type: {type(e).__name__}, message: {e}")
@@ -250,9 +251,11 @@ class CompoundClauseGen:
         # set point position
         for p, num in zip(_new_points, _new_numerical_point):
             p.num = num 
+            
     def choose_construction(self, construction_candidates, new_points = None):
-        while True:
-            construction = random.choice(construction_candidates)
+        random_construction_candidates = construction_candidates.copy()
+        self.rng.shuffle(random_construction_candidates)
+        for construction in random_construction_candidates:
             construction_def = self.defs[construction]
 
             # create new point if new_points is None
@@ -283,7 +286,8 @@ class CompoundClauseGen:
                     for t in bs.sentences:
                         statement = Statement.from_tokens(translate_sentence(mapping, t), self.dep_graph)
             except Exception as e:
-                continue  
+                logging.warning(f"Error processing construction {construction}: {e}")
+                continue
 
             # output numerics for draw check
             numerics = []
@@ -291,6 +295,8 @@ class CompoundClauseGen:
                 numerics.append(tuple(mapping[a] if a in mapping else a for a in n))
 
             return new_points, self.construction_text(construction_def, mapping), numerics
+        
+        raise ConstructionError("No valid construction found.")
         
     
     def map_points(self, construction_def, defined_points, new_points):
