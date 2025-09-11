@@ -116,25 +116,6 @@ def write_proof_steps(proof_state: "ProofState", out_file: Optional[Path] = None
                 id[statement] = str(len(id) - len(goals))
         return f"{', '.join(premise.pretty() + ' [' + id[premise] + ']' for premise in dep.why)} ({dep.reason})=> {dep.statement.pretty()} [{id[dep.statement]}]"
 
-    # solution = "==========================\n"
-    # solution += "* From problem construction:\n"
-    # solution += f"Points : {', '.join(p.pretty_name for p in proof_state.symbols_graph.nodes_of_type(Point))}\n"
-    # proof_deps = proof_state.dep_graph.proof_deps(goals)
-    # premises: list[Dependency] = []
-    # numercial_checked: list[Dependency] = []
-    # proof_steps: list[Dependency] = []
-    # for line in proof_deps:
-    #     if IN_PREMISES == line.reason:
-    #         premises.append(line)
-    #     elif NUMERICAL_CHECK == line.reason:
-    #         numercial_checked.append(line)
-    #     else:
-    #         proof_steps.append(line)
-    # for line in premises:
-    #     solution += rediger(line) + "\n"
-    # for line in numercial_checked:
-    #     solution += rediger(line) + "\n"
-
     (
         points,
         premises,
