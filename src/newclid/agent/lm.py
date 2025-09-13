@@ -6,23 +6,18 @@ import logging
 from typing import TYPE_CHECKING, Any
 import re
 from collections import defaultdict
-import copy
-from openai import OpenAI
-import torch
-from pathlib import Path
-from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 import heapq
 import ray
+import numpy as np
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
-
-from newclid.agent.agents_interface import (
-    DeductiveAgent,
-)
+from newclid.agent.agents_interface import DeductiveAgent
 from newclid.formulations.problem import ProblemJGEX
-from newclid.proof import ProofState
-from newclid.formulations.clause import Clause
+from newclid.formulations.definition import DefinitionJGEX
+from newclid.formulations.clause import Clause, translate_sentence
 from newclid.statement import Statement
-from newclid.formulations.clause import translate_sentence
+from newclid.proof import ProofState
 from newclid.predicates.congruence import Cong
 from newclid.predicates.midpoint import MidPoint
 from newclid.predicates.parallelism import Para
@@ -31,58 +26,26 @@ from newclid.predicates.collinearity import Coll
 from newclid.predicates.cyclic import Cyclic
 from newclid.predicates.equal_angles import EqAngle
 from newclid.predicates.equal_ratios import EqRatio
+from newclid.dependencies.dependency_graph import DependencyGraph
+from newclid.algebraic_reasoning.algebraic_manipulator import AlgebraicManipulator
 
 if TYPE_CHECKING:
     from newclid.formulations.rule import Rule
     from newclid.dependencies.dependency import Dependency
 
-
-
 class LMAgent(DeductiveAgent):
-    def __init__(self, model_path: list[Path], decoding_size: int, beam_size: int, search_depth: int):
+    def __init__(self, model_path: list[str], decoding_size: int, beam_size: int, search_depth: int):
         self.any_new_statement_has_been_added = True
         self.decoding_size = decoding_size
         self.beam_size = beam_size
         self.search_depth = search_depth
-        
-        # Set OpenAI's API key and API base to use vLLM's API server.
-        openai_api_key = "EMPTY"
-        openai_api_base = "http://localhost:8000/v1"
-        self.client = OpenAI(
-            api_key=openai_api_key,
-            base_url=openai_api_base,
-        )
-
-        # transformer
+        # LLM model
         self.model_path = model_path
         self.models = []
         self.tokenizers = []
         
-
-    def inference(self, query: str):
-        chat_response = self.client.chat.completions.create(
-            model="LLaMA-Factory/saves/qwen2.5math1.5b-ag/full/sft",
-            messages=[
-                {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
-                {"role": "user", "content": query}
-            ],
-            max_tokens=50,
-            # temperature=2,
-            # top_p=0.9,
-            temperature=0.0,
-            logprobs=True,
-            n=8,
-            extra_body={
-                'use_beam_search': True,
-                'best_of': 8,
-                'stop_token_ids': [62],
-            },
-        )
-        #chat_response.choices[0].logprobs.content[0].logprob
-        return chat_response.choices[0].message.content
-    
     @torch.no_grad()
-    def inference2(self, query: str, response_prefix: str = '<aux>'):
+    def inference(self, query: str, response_prefix: str = '<aux>'):
         if not self.models or not self.tokenizers:
             # Clear any existing models/tokenizers
             self.models.clear()
@@ -123,18 +86,11 @@ class LMAgent(DeductiveAgent):
                 max_new_tokens=100,
                 num_beams=self.decoding_size,
                 num_return_sequences=self.decoding_size,
-                # num_beam_groups=5,
-                # diversity_penalty=1.0,
-                # do_sample=True, 
-                # # temperature=2, 
-                # top_k=50, 
-                # top_p=0.9, 
                 pad_token_id=151643,
                 eos_token_id=2587, #' ;' #29
                 # bad_words_ids=bad_words_ids,
                 return_dict_in_generate=True, 
                 output_scores=True,
-                # use_cache=True,
                 past_key_values=past_key_values,
             )
             scores = generated_output.sequences_scores
@@ -150,105 +106,106 @@ class LMAgent(DeductiveAgent):
             
         return aux_dsl_dict # key: aux, value: score
 
-
     def run(self, proof: "ProofState", rules: list[Rule], timeout: int = 3600
         ) -> dict[str, Any]:
         """Run DeductiveAgent until saturation or goal found."""
-        def proof_info(proof: "ProofState"):
+        def infos(is_success, error_msg = None):
+            infos: dict[str, Any] = {}
             infos["runtime"] = time.time() - t0
-            infos["success"] = proof.check_goals()
+            infos["success"] = is_success
             infos["steps"] = step
-            for goal in proof.goals:
-                if goal.check():
-                    infos[goal.pretty() + " succeeded"] = True
-                else:
-                    infos[goal.pretty() + " succeeded"] = False
+            if error_msg:
+                infos["error"] = error_msg
             return infos
-
-        infos: dict[str, Any] = {}
-        for goal in proof.goals:
-            if not goal.check_numerical():
-                infos["error"] = f"{goal.pretty()} fails numerical check"
-                return infos
+        
         t0 = time.time()
         step = 0
-
-        proof = LMAgent.run_ddar(proof, rules, t0, timeout)
-
-        if not proof.check_goals():
-            beam_queue = BeamQueue(max_size=self.beam_size)
-            beam_queue.add(node=(self.problemJGEX, proof, '<aux>'), val=0)
-            p_dsl = self.problem_to_dsl(self.problemJGEX, proof)
-            
-            # Initialize Ray if not already initialized
-            if not ray.is_initialized():
-                ray.init(ignore_reinit_error=True, logging_level=logging.ERROR)
-            
+        
+        # Check goals numerically 
+        for goal in proof.goals:
+            if not goal.check_numerical():
+                return infos(False, f"{goal.pretty()} fails numerical check")
+        # Run ddar
+        base_proof = LMAgent.run_ddar(proof, rules, t0, timeout)
+        # if proofed by ddar, return
+        if base_proof.check_goals():
+            return infos(True)
+        # else seek help from llm
+        else:
+            rules_ref = ray.put(rules)
+            # defs_ref = ray.put(base_proof.defs)
             future_info = dict()
             running_futures = []
-            
+    
+            beam_queue = BeamQueue(max_size=self.beam_size)
+            beam_queue.add(node=(self.problemJGEX, base_proof), val=0)
             for depth in range(self.search_depth):
                 new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
-                for prev_score, (problem, proof, a_dsl) in beam_queue:
-                    # seek help from llm
+                beam_queue_list = [(q[0], q[2]) for q in beam_queue.queue]
+                beam_queue_list.sort(key=lambda x: x[0], reverse=True)
+                for prev_score, (problem, proof) in beam_queue_list:
+                # for prev_score, (problem, proof) in beam_queue:
                     if time.time() - t0 > timeout:
-                        break
-
+                        ray.shutdown()
+                        return infos(False, 'Timeout')
+                    proof_ref = ray.put(proof)
+                    
                     # Stragety 1: insert the aux string into problem and predict the next aux
-                    p_dsl = self.problem_to_dsl(problem, proof)
-                    aux_dsl_dict = self.inference2(p_dsl, '<aux> x00')
+                    p_dsl = self.problem_to_dsl(problem, base_proof.defs)
+                    aux_dsl_dict = self.inference(p_dsl, '<aux> x00')
                     for aux_dsl, score in aux_dsl_dict.items():
                         try:
                             aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
                             if aux:
                                 # create new problem as new task
                                 new_problem = problem.with_more_construction(aux)  # will recreate the problem
-                                new_proof = copy.deepcopy(proof)
-                                self.add_construction(new_proof, aux)
-                                # submit multi tasks
-                                future = run_ddar_remote.remote(new_proof, rules, t0, timeout)
-                                future_info[future] = (new_problem, prev_score, score, a_dsl)
-                                running_futures.append(future)
-                                # check any done futures
-                                done, running_futures = ray.wait(running_futures, timeout=0)
-                                for f in done:
-                                    new_proof = ray.get(f)
-                                    if new_proof.check_goals():
-                                        for task in running_futures:
-                                            ray.cancel(task, force=True)
-                                        ray.shutdown()
-                                        return proof_info(new_proof)
-                                    else:
-                                        # import pdb; pdb.set_trace()
-                                        new_problem, prev_score, score, a_dsl = future_info[f]
-                                        new_queue.add(node=(new_problem, new_proof, a_dsl), val=prev_score+score)
-                                
+                                # sumbit ray task
+                                future = run_ddar_remote.remote(new_problem, proof_ref, aux, rules_ref, t0, timeout)
+                                future_info[future] = (new_problem, prev_score, score)
+                                running_futures.append(future)       
                         except Exception as e:
-                            # logging.warning(f"Error processing aux construction: {e} {aux}")
-                            # import traceback
-                            # traceback.print_exc()
                             continue
-                            
-                # check remaining futures/tasks
-                done, remaining_futures = ray.wait(running_futures, num_returns=len(running_futures))
-                for f in done:
-                    new_proof = ray.get(f)
-                    if new_proof.check_goals():
-                        for task in remaining_futures:
-                            ray.cancel(task, force=True)
-                        ray.shutdown()
-                        return proof_info(new_proof)
-                    else:
-                        new_problem, prev_score, score, a_dsl = future_info[f]
-                        new_queue.add((new_problem, new_proof, a_dsl), val=prev_score + score)
-                    
-                    
+                    # Stragey 2: keep the aux string behind previous '<aux> x00' (AG).
+                    # Not implement yet
+
+                    # check any done task. if we find a solution early, we can save time
+                    done, running_futures = ray.wait(running_futures, timeout=0)
+                    for f in done:
+                        res = ray.get(f)
+                        if res is None:
+                            continue
+                        elif res.check_goals():
+                            for task in running_futures:
+                                ray.cancel(task, force=True)
+                            ray.shutdown()
+                            return infos(True, str(new_problem))
+                        elif depth < self.search_depth -1:
+                            new_problem, prev_score, score = future_info[f]
+                            new_queue.add(node=(new_problem, res), val=prev_score+score)
+                # check remaining tasks
+                while running_futures:
+                    done, running_futures = ray.wait(running_futures, num_returns=min(1000, len(running_futures)))
+                    for f in done:
+                        res = ray.get(f)
+                        if res is None:
+                            continue
+                        elif res.check_goals():
+                            new_problem, prev_score, score = future_info[f]
+                            for task in running_futures:
+                                ray.cancel(task, force=True)
+                            ray.shutdown()
+                            return infos(True, str(new_problem))
+                        elif depth < self.search_depth -1:
+                            new_problem, prev_score, score = future_info[f]
+                            new_queue.add(node=(new_problem, res), val=prev_score+score)
                 beam_queue = new_queue
+
             ray.shutdown()
-        return proof_info(proof)
+            return infos(False, 'Tried but failed.')
 
     def step(self, proof: ProofState, rules: list[Rule]) -> bool:
         return
+    
     def try_dsl_to_constructions(self, content):
         points, premises = content.split(';')[0].split(' : ')
 
@@ -272,10 +229,11 @@ class LMAgent(DeductiveAgent):
         result_constructions = []
         for premise in premises:
             parts = premise.split()
+            if not parts[0].isalpha():
+                return
             construction = self.translate_dsl_to_construction(points, parts[0], parts[1:])
             result_constructions.append(construction)
         return points + ' = ' + ', '.join(result_constructions)
-
 
     def translate_dsl_to_construction(self, point: str, predicate: str, args: list[str]
         ) -> tuple[str, list[str]]:
@@ -311,41 +269,6 @@ class LMAgent(DeductiveAgent):
 
         # 等角
         elif predicate == 'eqangle':
-            def dzt(args):
-                a1, a2, b1, b2, c1, c2, d1, d2 = args
-                if point in [c1, c2, d1, d2]:
-                    a1, a2, b1, b2, c1, c2, d1, d2 = c1, c2, d1, d2, a1, a2, b1, b2
-                if point in [b1, b2]:
-                    a1, a2, b1, b2 = b1, b2, a1, a2
-                if point in [d1, d2]:
-                    c1, c2, d1, d2 = d1, d2, c1, c2
-                if point == a2:
-                    a1, a2 = a2, a1
-                if point == b2:
-                    b1, b2 = b2, b1
-                if point == c2:
-                    c1, c2 = c2, c1
-                # 1. angle_bisector
-                if point == a1 and point == c1:
-                    b = a2
-                    a = b1 if b == b2 else b2
-                    c = d1 if b == d2 else d2
-                    return 'angle_bisector', [point, a, b, c]
-                # 2. eqangle3
-                if point == a1 and point == b1:
-                    a = a2
-                    b = b2
-                    d = c1 if c1 == d1 or c1 == d2 else c2
-                    e = c2 if d == c1 else c1
-                    f = d2 if d == d1 else d1
-                    return 'eqangle3', [point, a, b, d, e, f]            
-                # 3. on_aline
-                a = a2
-                b = b2 if a == b1 else b1
-                d = c1 if c1 == d1 or c1 == d2 else c2
-                c = c2 if d == c1 else c1
-                e = d2 if d == d1 else d1
-                return 'on_aline', [point, a, b, c, d, e]
             def arrange_angle_points(a, b, c, d):
                 if a == c:
                     return (b, a, d)
@@ -360,22 +283,22 @@ class LMAgent(DeductiveAgent):
 
             a, b, c, d, e, f, g, h = args
             if(len(set([a, b, c, d, e, f, g, h]))) == 8:
-                        if point == h:
-                            res1 = f"on_aline0 {h} {a} {b} {c} {d} {e} {f} {g}"
-                        if point == g:
-                            res1 = f"on_aline0 {g} {a} {b} {c} {d} {e} {f} {h}"
-                        if point == f:
-                            res1 = f"on_aline0 {f} {c} {d} {a} {b} {g} {h} {e}"
-                        if point == e:
-                            res1 = f"on_aline0 {e} {c} {d} {a} {b} {g} {h} {f}"
-                        if point == d:
-                            res1 = f"on_aline0 {d} {e} {f} {g} {h} {a} {b} {c}"
-                        if point == c:
-                            res1 = f"on_aline0 {c} {e} {f} {g} {h} {a} {b} {d}"
-                        if point == b:
-                            res1 = f"on_aline0 {b} {g} {h} {e} {f} {c} {d} {a}"
-                        if point == a:
-                            res1 = f"on_aline0 {a} {g} {h} {e} {f} {c} {d} {b}"
+                if point == h:
+                    res1 = f"on_aline0 {h} {a} {b} {c} {d} {e} {f} {g}"
+                if point == g:
+                    res1 = f"on_aline0 {g} {a} {b} {c} {d} {e} {f} {h}"
+                if point == f:
+                    res1 = f"on_aline0 {f} {c} {d} {a} {b} {g} {h} {e}"
+                if point == e:
+                    res1 = f"on_aline0 {e} {c} {d} {a} {b} {g} {h} {f}"
+                if point == d:
+                    res1 = f"on_aline0 {d} {e} {f} {g} {h} {a} {b} {c}"
+                if point == c:
+                    res1 = f"on_aline0 {c} {e} {f} {g} {h} {a} {b} {d}"
+                if point == b:
+                    res1 = f"on_aline0 {b} {g} {h} {e} {f} {c} {d} {a}"
+                if point == a:
+                    res1 = f"on_aline0 {a} {g} {h} {e} {f} {c} {d} {b}"
             else:
                 # Handle diagonal line exchange
                 if(len(set([a, b, c, d])) == 4 and len(set([a, b, e, f])) == 3): 
@@ -393,10 +316,10 @@ class LMAgent(DeductiveAgent):
         # 其它直接返回
         return f"{predicate} {' '.join(args)}"
     
-    def problem_to_dsl(self, problem: "ProblemJGEX", proof_state: "ProofState") -> str:
+    def problem_to_dsl(self, problem: "ProblemJGEX", defs: dict[str, DefinitionJGEX]) -> str:
         """Convert the problem to a DSL string."""
         dep_idx: dict[Statement, str] = {}
-        defs = proof_state.defs
+        dep_graph = DependencyGraph(AlgebraicManipulator())
         
         data_tmp = defaultdict(list)
         for construction in problem.constructions:
@@ -415,7 +338,7 @@ class LMAgent(DeductiveAgent):
                     for p in points:
                         group[p] = points
                     for b in bs:
-                        statement = Statement.from_tokens(translate_sentence(mapping, b), proof_state.dep_graph)
+                        statement = Statement.from_tokens(translate_sentence(mapping, b), dep_graph)
                         p2deps[points].append(statement)
 
             points = construction.points
@@ -448,12 +371,14 @@ class LMAgent(DeductiveAgent):
         data_problem += ' </problem>'
         return data_problem
     
-    def add_construction(self, proof: "ProofState", s: str) -> None:
+    @staticmethod
+    def add_construction(proof: "ProofState", s: str) -> None:
         clauses = Clause.parse_line(s)
         for clause in clauses:
             proof.add_construction(clause)
+
     @staticmethod
-    def run_ddar(proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600):   
+    def run_ddar(proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600): 
         rule_buffer: list[Rule] = []
         application_buffer: list[Dependency] = []
         any_new_statement_has_been_added = True
@@ -483,11 +408,26 @@ class LMAgent(DeductiveAgent):
             # step += 1
         return proof
 
-@ray.remote(num_cpus=1)
-def run_ddar_remote(proof, rules, start_time, timeout):
-    """Ray remote function to run DDAR."""
-    return LMAgent.run_ddar(proof, rules, start_time, timeout)
 
+@ray.remote(num_cpus=1)
+def run_ddar_remote(problem, proof, aux, rules: list[Rule], start_time: int, timeout: int = 3600): 
+    try:
+        LMAgent.add_construction(proof, aux)
+    except Exception as e:
+        try:
+            proof = ProofState.build_problemJGEX(
+                problemJGEX=problem,
+                defsJGEX=proof.defs,
+                rng=np.random.default_rng(998244353),
+                max_attempts=100,
+                problem_path=None,
+            )
+        except Exception:
+            return
+    proof = LMAgent.run_ddar(proof, rules, start_time, timeout)
+    return proof
+    
+    
 class BeamQueue:
     """Keep only the top k objects according to their values."""
 
