@@ -775,14 +775,13 @@ class GeometryGenerator:
         pending_tasks = {}
         while all_data_len < self.n_samples:
             done, _ = ray.wait(list(pending_tasks.keys()), num_returns=1, timeout=10)
-            if not done:
-                now = time.time()
-                for task, s_time in list(pending_tasks.items()):
-                    if now - s_time > self.timeout:
-                        print(f"⚠️ Task {task} timeout. Canceling")
-                        ray.cancel(task, force=True)
-                        del pending_tasks[task]
-            else:
+            now = time.time()
+            for task, s_time in list(pending_tasks.items()):
+                if now - s_time > self.timeout:
+                    print(f"⚠️ Task {task} timeout. Canceling")
+                    ray.cancel(task, force=True)
+                    del pending_tasks[task]
+            if done:
                 try:         
                     result = ray.get(done[0])
                     data, summary = result
@@ -826,7 +825,7 @@ def main():
     parser.add_argument("--min_clauses_num", required=False, type=int, default=2)
     parser.add_argument("--n_threads", required=False, type=int, default=1)
     parser.add_argument("--n_samples", required=False, type=int, default=1000)
-    parser.add_argument("--dir", required=False, default="dataset")
+    parser.add_argument("--dir", required=False, default="datasets")
     parser.add_argument("--log_level", required=False, default="info", choices=["debug", "info", "warning", "error"])
     parser.add_argument("--timeout", required=False, type=int, default=3600)
     parser.add_argument("--filteration_rate", required=False, type=float, default=0.6)

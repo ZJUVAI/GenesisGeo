@@ -14,3 +14,5 @@ openai
 pybind11
 transformers
 accelerate
+rich
+py-data-juicer
