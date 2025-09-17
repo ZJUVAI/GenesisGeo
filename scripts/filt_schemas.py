@@ -68,7 +68,7 @@ POST_VIZ_BUCKETS = ["candidate_schemas", "candidate_schemas_type2"]
 POST_VIZ_BASE_OUTDIR_NAME = "schema_fig"  # 基础输出子目录名，位于 OUTPUT_DIR 下
 POST_VIZ_MAX_PER_BUCKET = 0
 POST_VIZ_OVERWRITE = True
-POST_VIZ_LABEL_MODE = "full"       # "full" | "short"
+POST_VIZ_LABEL_MODE = "legend"       # "full" | "short" | "legend"; 在二次筛选可视化时默认用 legend 解决溢出
 POST_VIZ_HIGHLIGHT_KIND = True
 
 
@@ -183,6 +183,8 @@ def main() -> None:
                                 overwrite=POST_VIZ_OVERWRITE,
                                 label_mode=POST_VIZ_LABEL_MODE,
                                 highlight_kind=POST_VIZ_HIGHLIGHT_KIND,
+                                enable_union_rely_styling=True,
+                                style_opts={"font_size": 8, "figsize": (16, 9)},
                             )
                             print("Post visualize (rely_on) stats:", json.dumps(stats, ensure_ascii=False))
                             print(f"Post visualize output base dir: {base_outdir}")
