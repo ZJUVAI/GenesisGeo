@@ -10,7 +10,7 @@ We present **GenesisGeo**, a reproduction of [AlphaGeometry](https://www.nature.
 
 We implemented AlphaGeometry’s synthetic data generation methodology. The generation procedure begins with the random sampling of geometric constructions. Using these constructions, a geometric figure is constructed. The symbolic engine then deduces all possible conclusions from this figure, which subsequently undergo a filtering process to remove low-quality results. For each conclusion that passes the filter, we employ the traceback method to obtain its complete proof process. By analyzing the dependency relations, we distinguish from the original premises, ultimately yielding a complete geometric problem that includes both the auxiliary constructions and the full proof.
 
-Using 50 CPU threads over 22 hours, we generated a synthetic dataset of 8 million geometric problems, each with complete proof steps. More than 1.3 million of these problems involve auxiliary constructions in their proofs. 
+Using 50 CPU threads over 22 hours, we generated a synthetic dataset of 21.8 million geometric problems, each with complete proof steps. More than 3 million of these problems involve auxiliary constructions in their proofs. 
 
 ![alt text](imgs/synthetic_data.png)
 
