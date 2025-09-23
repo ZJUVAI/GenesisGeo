@@ -39,6 +39,53 @@ GenesisGeo proves 24 of the 30 theorems, closely matching the original AlphaGeom
 
 ---
 
+## Data Generation
+
+To generate a synthetic dataset:
+
+```bash
+cd src/newclid/generation
+python generate.py --n_clauses=20 --n_threads=30 --n_samples=5000000 --log_level=info --timeout=7200
+```
+
+This command generates 5 million samples using 30 threads, with each problem having a timeout of 7200 seconds for DDAR. The generated data will be saved in the `src/newclid/generation/datasets/` directory.
+
+## Model Training and Evaluation
+
+We use the [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) efficient training framework to fine-tune our language model. The complete process consists of two main stages: supervised fine-tuning (SFT) and comprehensive evaluation.
+
+### Training and Evaluation Script
+
+The entire pipeline is orchestrated by the `scripts/train_eval.sh` script, which performs the following steps:
+
+1. **Supervised Fine-tuning (SFT)**:
+   - Base model: Qwen/Qwen3-0.6B-Base
+   - Dataset: Synthetic geometry problems with complete proof steps
+   - Training configuration:
+     - Full parameter fine-tuning
+     - 8x GPUs
+     - Maximum sequence length: 2048 tokens
+     - Batch size: 8 per device
+     - Learning rate: 1e-4 with warmup ratio of 0.1
+     - Flash attention and Liger kernel optimizations enabled
+     - Single epoch training
+
+2. **Comprehensive Evaluation**:
+   - Evaluates on multiple benchmarks (dev_jgex.txt, dev_imo.txt)
+   - Uses beam search with configurable parameters (decoding_size, beam_size)
+   - Parallel execution with 40 workers
+   - Depth-limited search (depth=4) for proof discovery
+
+To run the complete training and evaluation pipeline:
+
+```bash
+bash scripts/train_eval.sh
+```
+
+Note: Before running the evaluation, you need to modify the `checkpoints` array in the script to include the actual checkpoint directories (e.g., "checkpoint-10000"). The training part will run automatically, and after training is complete, the script will evaluate the model on the specified datasets with different decoding configurations.
+
+---
+
 ## Acknowledgements
 
 - Thanks to the [AlphaGeometry](https://github.com/google-deepmind/alphageometry) team for their pioneering work.
