@@ -52,7 +52,7 @@ This command generates 5 million samples using 30 threads, with each problem hav
 
 ## Model Training and Evaluation
 
-We use the [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) efficient training framework to fine-tune our language model. The complete process consists of two main stages: supervised fine-tuning (SFT) and comprehensive evaluation.
+We use the [ms-swift](https://github.com/modelscope/ms-swift) efficient training framework to fine-tune our language model. The complete process consists of two main stages: supervised fine-tuning (SFT) and comprehensive evaluation.
 
 ### Training and Evaluation Script
 
@@ -91,7 +91,7 @@ Note: Before running the evaluation, you need to modify the `checkpoints` array 
 - Thanks to the [AlphaGeometry](https://github.com/google-deepmind/alphageometry) team for their pioneering work.
 - Built upon the [Newclid](https://github.com/xxx/newclid) framework.
 - Uses [Qwen3](https://github.com/QwenLM/Qwen3) as the base language model.
-- Model training is supported by the [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) efficient training framework.
+- Model training is supported by the [ms-swift](https://github.com/modelscope/ms-swift) efficient training framework.
 ## Institution
 
 Zhejiang University
