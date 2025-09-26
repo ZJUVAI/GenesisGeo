@@ -39,6 +39,23 @@ GenesisGeo proves 24 of the 30 theorems, closely matching the original AlphaGeom
 
 ---
 
+## Installation
+
+```bash
+git clone https://github.com/ZJUVAI/GenesisGeo.git
+cd GenesisGeo
+pip install -e .
+```
+
+**Compile Python extensions**
+
+```bash
+cd src/newclid
+c++ -O3 -Wall -shared -std=c++14 -march=native -funroll-loops -flto `python3 -m pybind11 --includes` matchinC.cpp -o matchinC`python3-config --extension-suffix` -fPIC
+cd dependencies
+c++ -O3 -Wall -shared -std=c++14 -march=native -funroll-loops -flto `python3 -m pybind11 --includes` geometry.cpp -o geometry`python3-config --extension-suffix` -fPIC
+```
+
 ## Data Generation
 
 To generate a synthetic dataset:
@@ -83,6 +100,18 @@ bash scripts/train_eval.sh
 ```
 
 Note: Before running the evaluation, you need to modify the `checkpoints` array in the script to include the actual checkpoint directories (e.g., "checkpoint-10000"). The training part will run automatically, and after training is complete, the script will evaluate the model on the specified datasets with different decoding configurations.
+
+### Run Evaluation with Our Open-Source Models
+
+```bash
+# single model
+python scripts/evaluation.py --problems_path problems_datasets/imo_ag_
+30.txt --model_path ZJUVAI/GenesisGeo --max_workers 80 --decoding_size 32 --beam_size 512 --search_depth 4 
+
+# ensemble of two models
+python scripts/evaluation.py --problems_path problems_datasets/imo_ag_
+30.txt --model_path ZJUVAI/GenesisGeo-250915a ZJUVAI/GenesisGeo-250915b  --max_workers 80 --decoding_size 32 --beam_size 512 --search_depth 4
+```
 
 ---
 
