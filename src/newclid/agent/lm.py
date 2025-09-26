@@ -43,66 +43,55 @@ class LMAgent(DeductiveAgent):
         self.model_path = model_path
         self.models = []
         self.tokenizers = []
+        # Load all models and tokenizers
+        for path in self.model_path:
+            model = AutoModelForCausalLM.from_pretrained(
+                path,
+                torch_dtype="auto",
+                device_map="auto", #"sequential",
+                attn_implementation="flash_attention_2"  # Sliding Window Attention is enabled but not implemented for others
+            )
+            tokenizer = AutoTokenizer.from_pretrained(path)
+            self.models.append(model)
+            self.tokenizers.append(tokenizer)
         
     @torch.no_grad()
-    def inference(self, query: str, response_prefix: str = '<aux>'):
-        if not self.models or not self.tokenizers:
-            # Clear any existing models/tokenizers
-            self.models.clear()
-            self.tokenizers.clear()
-            
-            # Load all models and tokenizers
-            for path in self.model_path:
-                model = AutoModelForCausalLM.from_pretrained(
-                    path,
-                    torch_dtype="auto",
-                    device_map="auto", #"sequential",
-                    attn_implementation="flash_attention_2"  # Sliding Window Attention is enabled but not implemented for others
-                )
-                tokenizer = AutoTokenizer.from_pretrained(path)
-                self.models.append(model)
-                self.tokenizers.append(tokenizer)
-        
+    def inference(self, model, tokenizer, query: str, response_prefix: str = '<aux>'):
         aux_dsl_dict = {}
         # Process each model/tokenizer pair
-        for model, tokenizer in zip(self.models, self.tokenizers):
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": query}
-            ]
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-            # text = query
-            model_prompt_inputs = tokenizer([text], return_tensors="pt")
-            text += response_prefix
-            model_inputs = tokenizer([text], return_tensors="pt").to('cuda')
-            bad_words_ids = tokenizer(["<", " <"]).input_ids
-            past_key_values = DynamicCache()
-            generated_output = model.generate(
-                **model_inputs,
-                max_new_tokens=100,
-                num_beams=self.decoding_size,
-                num_return_sequences=self.decoding_size,
-                pad_token_id=151643,
-                eos_token_id=2587, #' ;' #29
-                # bad_words_ids=bad_words_ids,
-                return_dict_in_generate=True, 
-                output_scores=True,
-                past_key_values=past_key_values,
-            )
-            scores = generated_output.sequences_scores
-            generated_output = generated_output.sequences[:, model_prompt_inputs.input_ids.shape[1]:]
-            aux_dsls = tokenizer.batch_decode(generated_output, skip_special_tokens=True)
-            for aux_dsl, score in zip(aux_dsls, scores):
-                score = score.item()
-                if aux_dsl in aux_dsl_dict:
-                    if score > aux_dsl_dict[aux_dsl]:
-                        aux_dsl_dict[aux_dsl] = score
-                else:
-                    aux_dsl_dict[aux_dsl] = score
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": query}
+        ]
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        # text = query
+        model_prompt_inputs = tokenizer([text], return_tensors="pt")
+        text += response_prefix
+        model_inputs = tokenizer([text], return_tensors="pt").to('cuda')
+        bad_words_ids = tokenizer(["<", " <"]).input_ids
+        past_key_values = DynamicCache()
+        generated_output = model.generate(
+            **model_inputs,
+            max_new_tokens=100,
+            num_beams=self.decoding_size,
+            num_return_sequences=self.decoding_size,
+            pad_token_id=151643,
+            eos_token_id=2587, #' ;' #29
+            # bad_words_ids=bad_words_ids,
+            return_dict_in_generate=True, 
+            output_scores=True,
+            past_key_values=past_key_values,
+        )
+        scores = generated_output.sequences_scores
+        generated_output = generated_output.sequences[:, model_prompt_inputs.input_ids.shape[1]:]
+        aux_dsls = tokenizer.batch_decode(generated_output, skip_special_tokens=True)
+        for aux_dsl, score in zip(aux_dsls, scores):
+            score = score.item()
+            aux_dsl_dict[aux_dsl] = score
             
         return aux_dsl_dict # key: aux, value: score
 
@@ -133,72 +122,76 @@ class LMAgent(DeductiveAgent):
         # else seek help from llm
         else:
             rules_ref = ray.put(rules)
-            # defs_ref = ray.put(base_proof.defs)
             future_info = dict()
             running_futures = []
-    
-            beam_queue = BeamQueue(max_size=self.beam_size)
-            beam_queue.add(node=(self.problemJGEX, base_proof), val=0)
-            for depth in range(self.search_depth):
-                new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
-                beam_queue_list = [(q[0], q[2]) for q in beam_queue.queue]
-                beam_queue_list.sort(key=lambda x: x[0], reverse=True)
-                for prev_score, (problem, proof) in beam_queue_list:
-                # for prev_score, (problem, proof) in beam_queue:
-                    if time.time() - t0 > timeout:
-                        ray.shutdown()
-                        return infos(False, 'Timeout')
-                    proof_ref = ray.put(proof)
-                    
-                    # Stragety 1: insert the aux string into problem and predict the next aux
-                    p_dsl = self.problem_to_dsl(problem, base_proof.defs)
-                    aux_dsl_dict = self.inference(p_dsl, '<aux> x00')
-                    for aux_dsl, score in aux_dsl_dict.items():
-                        try:
-                            aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
-                            if aux:
-                                # create new problem as new task
-                                new_problem = problem.with_more_construction(aux)  # will recreate the problem
-                                # sumbit ray task
-                                future = run_ddar_remote.remote(new_problem, proof_ref, aux, rules_ref, t0, timeout)
-                                future_info[future] = (new_problem, prev_score, score)
-                                running_futures.append(future)       
-                        except Exception as e:
-                            continue
-                    # Stragey 2: keep the aux string behind previous '<aux> x00' (AG).
-                    # Not implement yet
+            
+            beam_queues = []
+            for i in range(len(self.models)):
+                q = BeamQueue(max_size=self.beam_size)
+                q.add(node=(self.problemJGEX, base_proof), val=0)
+                beam_queues.append(q)
 
-                    # check any done task. if we find a solution early, we can save time
-                    done, running_futures = ray.wait(running_futures, timeout=0)
-                    for f in done:
-                        res = ray.get(f)
-                        if res is None:
-                            continue
-                        elif res.check_goals():
-                            for task in running_futures:
-                                ray.cancel(task, force=True)
+            for depth in range(self.search_depth):
+                new_beam_queues = []
+                for i, beam_queue in enumerate(beam_queues):
+                    new_queue = BeamQueue(max_size=self.beam_size)  # to replace beam_queue.
+                    for prev_score, (problem, proof) in beam_queue:
+                    # for prev_score, (problem, proof) in beam_queue:
+                        if time.time() - t0 > timeout:
                             ray.shutdown()
-                            return infos(True, str(new_problem))
-                        elif depth < self.search_depth -1:
-                            new_problem, prev_score, score = future_info[f]
-                            new_queue.add(node=(new_problem, res), val=prev_score+score)
-                # check remaining tasks
-                while running_futures:
-                    done, running_futures = ray.wait(running_futures, num_returns=min(1000, len(running_futures)))
-                    for f in done:
-                        res = ray.get(f)
-                        if res is None:
-                            continue
-                        elif res.check_goals():
-                            new_problem, prev_score, score = future_info[f]
-                            for task in running_futures:
-                                ray.cancel(task, force=True)
-                            ray.shutdown()
-                            return infos(True, str(new_problem))
-                        elif depth < self.search_depth -1:
-                            new_problem, prev_score, score = future_info[f]
-                            new_queue.add(node=(new_problem, res), val=prev_score+score)
-                beam_queue = new_queue
+                            return infos(False, 'Timeout')
+                        proof_ref = ray.put(proof)
+                        
+                        # Stragety 1: insert the aux string into problem and predict the next aux
+                        p_dsl = self.problem_to_dsl(problem, base_proof.defs)
+                        aux_dsl_dict = self.inference(self.models[i], self.tokenizers[i], p_dsl, '<aux> x00')
+                        for aux_dsl, score in aux_dsl_dict.items():
+                            try:
+                                aux = self.try_dsl_to_constructions(aux_dsl[len('<aux> x00'):])
+                                if aux:
+                                    # create new problem as new task
+                                    new_problem = problem.with_more_construction(aux)  # will recreate the problem
+                                    # sumbit ray task
+                                    future = run_ddar_remote.remote(new_problem, proof_ref, aux, rules_ref, t0, timeout)
+                                    future_info[future] = (new_problem, prev_score, score)
+                                    running_futures.append(future)       
+                            except Exception as e:
+                                continue
+                        # Stragey 2: keep the aux string behind previous '<aux> x00' (AG).
+                        # Not implement yet
+
+                        # check any done task. if we find a solution early, we can save time
+                        done, running_futures = ray.wait(running_futures, timeout=0)
+                        for f in done:
+                            res = ray.get(f)
+                            if res is None:
+                                continue
+                            elif res.check_goals():
+                                for task in running_futures:
+                                    ray.cancel(task, force=True)
+                                ray.shutdown()
+                                return infos(True, str(new_problem))
+                            elif depth < self.search_depth -1:
+                                new_problem, prev_score, score = future_info[f]
+                                new_queue.add(node=(new_problem, res), val=prev_score+score)
+                    # check remaining tasks
+                    while running_futures:
+                        done, running_futures = ray.wait(running_futures, num_returns=min(1000, len(running_futures)))
+                        for f in done:
+                            res = ray.get(f)
+                            if res is None:
+                                continue
+                            elif res.check_goals():
+                                new_problem, prev_score, score = future_info[f]
+                                for task in running_futures:
+                                    ray.cancel(task, force=True)
+                                ray.shutdown()
+                                return infos(True, str(new_problem))
+                            elif depth < self.search_depth -1:
+                                new_problem, prev_score, score = future_info[f]
+                                new_queue.add(node=(new_problem, res), val=prev_score+score)
+                    new_beam_queues.append(new_queue)
+                beam_queues = new_beam_queues
 
             ray.shutdown()
             return infos(False, 'Tried but failed.')
@@ -372,12 +365,6 @@ class LMAgent(DeductiveAgent):
         return data_problem
     
     @staticmethod
-    def add_construction(proof: "ProofState", s: str) -> None:
-        clauses = Clause.parse_line(s)
-        for clause in clauses:
-            proof.add_construction(clause)
-
-    @staticmethod
     def run_ddar(proof: "ProofState", rules: list[Rule], start_time: int, timeout: int = 3600): 
         rule_buffer: list[Rule] = []
         application_buffer: list[Dependency] = []
@@ -424,7 +411,10 @@ def run_ddar_remote(problem, proof, aux, rules: list[Rule], start_time: int, tim
             )
         except Exception:
             return
-    proof = LMAgent.run_ddar(proof, rules, start_time, timeout)
+    try:
+        proof = LMAgent.run_ddar(proof, rules, start_time, timeout)
+    except Exception:
+        return
     return proof
     
     
