@@ -1,6 +1,6 @@
 # GenesisGeo: Reproduction of AlphaGeometry
 
-[📊 Dataset](https://huggingface.co/datasets/ZJUVAI/GenesisGeo) • [🤖 Model](https://huggingface.co/ZJUVAI/GenesisGeo)  • [📃Paper]()
+[📊 Dataset](https://huggingface.co/datasets/ZJUVAI/GenesisGeo) • [🤖 Model](https://huggingface.co/ZJUVAI/GenesisGeo)  • [📃Paper](https://zjuvailab.feishu.cn/file/KaB1bx50Ko2OU4xFUFpcN6XJn5b)
 
 We present **GenesisGeo**, a reproduction of [AlphaGeometry](https://www.nature.com/articles/s41586-023-06747-5). Based on the [Newclid](https://arxiv.org/abs/2411.11938) framework, we implement the **synthetic data generation** pipeline, accelerate DDARN by 120×, and instantiate a neuro-symbolic prover using a Qwen3-0.6B-Base model fine-tuned solely on our synthetic data as its language model. This prover **proves 24 of 30 theorems in the IMO-AG-30 benchmark**, closely approaching the 25 of 30 result reported by the original AG system and confirming the fidelity and efficacy of our reproduction.
 
