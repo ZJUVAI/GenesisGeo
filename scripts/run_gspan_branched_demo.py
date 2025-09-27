@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-分叉子图挖掘一键运行脚本。
-- 目的：`python run_gspan_branched_demo.py` 即按脚本内推荐超参运行，不会卡住。
-- 特点：集中管理超参 CONFIG；默认采用小数据、强剪枝与限流（扩展步数上限 + 标签全局支持剪枝）。
-- 注意：为避免包的重依赖，这里直接按路径加载 proof_graph.py。
-"""
+"""分叉/规则仅挖掘的一键入口：直接运行本脚本，按脚本内 CONFIG 执行，默认小数据+强剪枝+限流。"""
 from __future__ import annotations
 import os
 import sys
@@ -24,7 +19,8 @@ SRC_DIR = os.path.join(REPO_ROOT, "../src")
 PROOF_GRAPH_PY = os.path.join(SRC_DIR, "newclid", "data_discovery", "proof_graph.py")
 MINING_PIPELINE_PY = os.path.join(SRC_DIR, "newclid", "data_discovery", "mining_pipeline.py")
 # 默认使用更小的 lil 数据集以保证快速稳定运行
-DEFAULT_JSON = os.path.join(SRC_DIR, "newclid", "data_discovery", "r07_expanded_problems_results.json")
+DEFAULT_JSON = os.path.join(SRC_DIR, "newclid", "data_discovery/data", "r07_expanded_problems_results.json")
+# DEFAULT_JSON = os.path.join(SRC_DIR, "newclid", "data_discovery/data", "jgex_ag_231_results.json")
 
 # 集中管理的默认超参（分组展示，便于快速修改）
 CONFIG = {
@@ -32,13 +28,13 @@ CONFIG = {
     "json": DEFAULT_JSON,           # 输入结果 JSON
     "top_k": 5,                     # 结果预览 Top-K
     "quiet": True,                  # 安静输出
-    "mode": "rule_only",            # fact_rule rule_only
+    "mode": "fact_rule",            # fact_rule rule_only
 
     # ===== rule_only 专用 =====
-    "rule_only_max_nodes_ratio": 0.1,  # 有效 max_nodes=ceil(max_rules_per_problem * ratio)；<=0 忽略
+    "rule_only_max_nodes_ratio": 0.5,  # 有效 max_nodes=ceil(max_rules_per_problem * ratio)；<=0 忽略
 
     # ===== 常用：核心阈值（结构/支持） =====
-    "min_support": "5",             # 支持度（字符串，内部解析为 int/float）
+    "min_support": "2",             # 支持度（字符串，内部解析为 int/float）
     "max_nodes": 15,                # 搜索上限（节点数）
     "min_rule_nodes": 3,            # 最少规则节点
     "min_edges": 3,                 # 最少边数
@@ -60,11 +56,13 @@ CONFIG = {
 
     # ===== 不常用：预算与日志 =====
     "sample_embeddings": 2,            # 代表性嵌入数
-    "debug_limit_expansions": 1000000,  # 扩展步数上限（seeds_mproc 为全局限额）
+    "debug_limit_expansions": 500000,  # 扩展步数上限（seeds_mproc 为全局限额）
     "debug_log_every": 5000,           # 调试日志频率
     "time_budget_seconds": None,       # 总时长预算（秒）
     "attach_producer": True,           # 允许接入生产者规则
     "max_producer_depth": 1,           # 生产者规则向上深度
+
+
 }
 
 
@@ -148,10 +146,12 @@ def main(argv=None):
                         help="1 to enable, 0 to disable (attach producer rule up to max_producer_depth)")
     parser.add_argument("--max-producer-depth", default=CONFIG["max_producer_depth"], type=int)
 
+
     # ----- rule_only 专用 -----
     parser.add_argument("--rule-only-max-nodes-ratio", default=CONFIG["rule_only_max_nodes_ratio"], type=float,
                         help="When mode=rule_only and ratio>0, set effective max_nodes=ceil(max rules-per-problem * ratio)")
     args = parser.parse_args(argv)
+    setattr(args, "strip_clock_side_in_schema", 1)
     dbg_every = max(1, int(args.debug_log_every))
 
     mod = _load_proof_graph_module()
@@ -462,55 +462,7 @@ def main(argv=None):
     out_dir = os.path.abspath(args.out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    # Debug: 收集含 unknown 的 schema 的题目并落盘（rule_only 模式常见）
-    def _write_unknown_problems_txt():
-        try:
-            unknown_details = []
-            unknown_pids = set()
-            for i, p in enumerate(patterns):
-                if args.mode == "fact_rule":
-                    expr, _ = miner.pattern_to_schema_branched(p)
-                else:
-                    expr, _ = miner.pattern_to_schema_rules_only(p)
-                if not isinstance(expr, str):
-                    continue
-                if "unknown" in expr:
-                    pids = p.get("pids", [])
-                    for pid in pids:
-                        unknown_pids.add(pid)
-                    unknown_details.append({
-                        "rank": i,
-                        "support": p.get("support"),
-                        "pids": pids,
-                        "schema": expr,
-                    })
-
-            if not unknown_details:
-                return None
-
-            out_txt = os.path.join(out_dir, "unknown_problem.txt")
-            with open(out_txt, "w", encoding="utf-8") as f:
-                f.write(f"created_at: {datetime.now().isoformat()}\n")
-                f.write(f"mode: {args.mode}\n")
-                f.write(f"total_patterns: {len(patterns)}\n")
-                f.write(f"unknown_patterns: {len(unknown_details)}\n")
-                f.write(f"unique_problem_ids: {len(unknown_pids)}\n")
-                f.write("unknown_problem_ids:\n")
-                for pid in sorted(unknown_pids):
-                    f.write(f"- {pid}\n")
-                f.write("\npatterns_with_unknown:\n")
-                for item in unknown_details:
-                    f.write(f"[rank {item['rank']}] support={item['support']} pids={item['pids']}\n")
-                    f.write(f"schema: {item['schema']}\n\n")
-            print(f"unknown problems written to: {out_txt}")
-            return out_txt
-        except Exception as e:
-            print(f"failed to write unknown_problem.txt: {e}")
-            return None
-
-    # 仅在 rule_only 下默认写出，便于排查数据来源问题
-    if args.mode == "rule_only":
-        _write_unknown_problems_txt()
+    # 不做 schema 级后处理/审计（移除 unknown_problem.txt 生成）
 
     # 按你的要求：不在结果中包含 input.json 信息
 
@@ -525,7 +477,7 @@ def main(argv=None):
     merged_edges = sum(len(vs) for vs in miner.G.out_edges.values())
     problems = len(pg.fact_id_map)
 
-    # 调用封装好的 MiningPipeline 完成后处理与写盘
+    # 调用封装好的 MiningPipeline 完成写盘（不包含任何后处理，MiningPipeline 已简化为仅汇总+渲染）
     mp_mod = _load_mining_pipeline_module()
     MiningPipeline = getattr(mp_mod, "MiningPipeline")
     # 将有效 max_nodes 传入 pipeline 以便写入参数摘要

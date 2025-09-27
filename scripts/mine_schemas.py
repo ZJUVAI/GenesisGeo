@@ -36,7 +36,7 @@ CONFIG = {
 
     # ===== 常用：核心阈值（结构/支持） =====
     "min_support": "2",             # 支持度（字符串，内部解析为 int/float）
-    "max_nodes": 15,                # 搜索上限（节点数）
+    "max_nodes": 20,                # 搜索上限（节点数）
     "min_rule_nodes": 3,            # 最少规则节点
     "min_edges": 3,                 # 最少边数
     "min_rule_indeg2_count": 1,     # fact_rule：至少一个规则入度≥2（0 关闭）
@@ -57,7 +57,7 @@ CONFIG = {
 
     # ===== 不常用：预算与日志 =====
     "sample_embeddings": 2,            # 代表性嵌入数
-    "debug_limit_expansions": 500000,  # 扩展步数上限（seeds_mproc 为全局限额）
+    "debug_limit_expansions": 5000000,  # 扩展步数上限（seeds_mproc 为全局限额）
     "debug_log_every": 5000,           # 调试日志频率
     "time_budget_seconds": None,       # 总时长预算（秒）
     "attach_producer": True,           # 允许接入生产者规则

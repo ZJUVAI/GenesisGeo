@@ -1,18 +1,43 @@
 """
 证明图构建器 ProofGraph
 
-目标：
-- 从题目解析结果(JSON: results[*].proof.analysis / numerical_check / proof)构建分层有向图。
-- 节点分两类：fact 节点(奇数层) 与 rule 节点(偶数层)。
-- 不区分边类型，仅存储有向边(src, dst)。
-- 不做去重，fact 的 args 不参与 FSM（仅保留，后续FSM确定后再用）。
-- analysis 与 numerical_check 统一按“pred args [ID]”解析为 fact 节点。
-- proof 中每一步按“conclusion_pred args [NEW_ID] RULE [PID] [PID] ...”解析，并连边：前提fact→rule, rule→结论fact。
+功能概述（当前实现）：
+- 从题目解析结果(JSON: results[*].proof.analysis / numerical_check / proof 及附带元数据)构建分层有向图。
+- 节点两类：
+    - fact 节点(奇数层)：谓词与点参数（args）所对应的事实；可带 produced_by/used_by 关联。
+    - rule 节点(偶数层)：一次推理步骤；带 premises/conclusion 关联。
+- 边为有向且无类型：前提 fact → rule，rule → 结论 fact。
+- 题级元数据：
+    - point_coords: {problem_id: {point_lines: [str], points: [{name,x,y}]}}
+    - point_rely_on: {problem_id: {point: {deps...}}}
+    - aux_points: {problem_id: [str]}  辅助构造点名列表（若上游提供）。
 
-日志策略：
-- 所有“忽略/跳过/占位/冲突”必须通过 logger 以及可选 print 提示。
+兼容性说明：
+- 保留原有公开 API（from_results_json/obj、nodes/edges 等）。
+- 仅新增字段，不改变既有字段含义与挖掘算法行为。
 
-保留 FSM 导出接口占位：to_gspan / to_gspan_files（暂不实现）。
+元数据字段（节点级）：
+- Fact 节点：
+    - node_id: "F:{problem_id}:{id_local}"
+    - type: "fact"
+    - label: 谓词名
+    - args: [str]
+    - id_local: 局部 ID
+    - problem_id: str
+    - layer: int
+    - produced_by: Optional[str]  生成该 fact 的规则节点（若存在）
+    - used_by: list[str]         消费该 fact 的规则节点列表
+- Rule 节点：
+    - node_id: "R:{problem_id}:{step_index}:{code}"
+    - type: "rule"
+    - code: 规则代码
+    - step_index: int
+    - problem_id: str
+    - layer: int
+    - premises: list[str]      前提 fact 节点 ID
+    - conclusion: Optional[str] 结论 fact 节点 ID
+
+保留 FSM 导出接口占位：to_gspan / to_gspan_files（未实现）。
 """
 
 from __future__ import annotations
@@ -21,6 +46,11 @@ import json
 import logging
 import re
 from typing import Dict, List, Optional, Tuple, Any, Set
+
+
+# 回滚开关：若设为 False，将关闭“新增元数据的填充”（保留图结构不变）
+ENABLE_PG_METADATA_REWRITE: bool = True
+
 
 
 class ProofGraph:
@@ -42,12 +72,16 @@ class ProofGraph:
     _TAGS_RE = re.compile(r"<\/?\w+>")
 
     def __init__(self, *, verbose: bool = True, log_level: int = logging.INFO) -> None:
-        self.nodes: Dict[str, Dict[str, Any]] = {}
-        self.edges: List[Tuple[str, str]] = []
-        self.fact_id_map: Dict[str, Dict[str, str]] = {}
-        self.rule_step_map: Dict[str, Dict[int, str]] = {}
+        self.nodes = {}
+        self.edges = []
+        self.fact_id_map = {}
+        self.rule_step_map = {}
         # 每题的点依赖映射：{problem_id: {point: set(deps)}}
-        self.point_rely_on: Dict[str, Dict[str, Set[str]]] = {}
+        self.point_rely_on = {}
+        # 每题的点坐标缓存：{problem_id: {"point_lines": list[str], "points": list[dict]}}
+        self.point_coords = {}
+        # 每题的辅助点列表：{problem_id: [str]}
+        self.aux_points = {}
 
         # 统计/诊断
         self.stats = {
@@ -167,6 +201,9 @@ class ProofGraph:
             "id_local": id_local,
             "problem_id": problem_id,
             "layer": int(layer),
+            # 新增：默认的元数据字段
+            "produced_by": None,
+            "used_by": [],
         }
         key_map[id_local] = node_id
         self.logger.info(
@@ -243,17 +280,11 @@ class ProofGraph:
         for pid in premise_ids:
             fmap = self.fact_id_map[problem_id]
             if pid not in fmap:
-                # 创建占位 fact
-                self.stats["placeholders"] += 1
-                self._log(
-                    logging.WARNING,
-                    f"premise_missing_placeholder_created: problem={problem_id} premise_id=[{pid}] label=unknown",
+                # 直接抛错：不再创建 unknown 占位 fact
+                raise ValueError(
+                    f"Missing premise fact id [{pid}] for problem {problem_id} at step {step_index} using rule {rule_code}"
                 )
-                node_id = self._add_fact(
-                    problem_id, pid, label="unknown", args=[], layer=1, source_hint="placeholder"
-                )
-            else:
-                node_id = fmap[pid]
+            node_id = fmap[pid]
             premise_node_ids.append(node_id)
             max_layer = max(max_layer, int(self.nodes[node_id]["layer"]))
 
@@ -270,6 +301,9 @@ class ProofGraph:
             "step_index": int(step_index),
             "problem_id": problem_id,
             "layer": int(rule_layer),
+            # 新增：结构元数据
+            "premises": list(premise_node_ids) if ENABLE_PG_METADATA_REWRITE else [],
+            "conclusion": None,
         }
         self.rule_step_map[problem_id][step_index] = rule_node_id
         self.logger.info(
@@ -279,6 +313,14 @@ class ProofGraph:
         # 前提 → 规则 边
         for pnid in premise_node_ids:
             self.edges.append((pnid, rule_node_id))
+            if ENABLE_PG_METADATA_REWRITE:
+                try:
+                    # 记录消费该 fact 的规则
+                    self.nodes[pnid].setdefault("used_by", [])
+                    if rule_node_id not in self.nodes[pnid]["used_by"]:
+                        self.nodes[pnid]["used_by"].append(rule_node_id)
+                except Exception:
+                    pass
 
         # 结论 fact
         concl_fact_node_id = self._ensure_conclusion_fact(
@@ -287,6 +329,13 @@ class ProofGraph:
 
         # 规则 → 结论 边
         self.edges.append((rule_node_id, concl_fact_node_id))
+
+        # 回填 rule 的结论引用
+        if ENABLE_PG_METADATA_REWRITE:
+            try:
+                self.nodes[rule_node_id]["conclusion"] = concl_fact_node_id
+            except Exception:
+                pass
 
         return rule_node_id, concl_fact_node_id
 
@@ -307,6 +356,10 @@ class ProofGraph:
                 self.logger.info(
                     f"conclusion_already_exists: {node_id} matches, produced_by={produced_by}"
                 )
+                if ENABLE_PG_METADATA_REWRITE:
+                    # 若未登记生成者，则补记
+                    if exist.get("produced_by") in (None, ""):
+                        exist["produced_by"] = produced_by
                 return node_id
             else:
                 self.stats["warnings"] += 1
@@ -320,6 +373,11 @@ class ProofGraph:
         node_id = self._add_fact(
             problem_id, id_local, label=label, args=args, layer=layer, source_hint=f"produced_by:{produced_by}"
         )
+        if ENABLE_PG_METADATA_REWRITE:
+            try:
+                self.nodes[node_id]["produced_by"] = produced_by
+            except Exception:
+                pass
         return node_id
 
     # -------------------------------
@@ -332,12 +390,39 @@ class ProofGraph:
         """
         problem_id = str(result_obj.get("problem_id", "unknown"))
         proof_block = result_obj.get("proof", {}) or {}
-        analysis_text = proof_block.get("analysis", "")
-        numerical_text = proof_block.get("numerical_check", "")
-        proof_text = proof_block.get("proof", "")
+        # 兼容 proof 为 dict 或 str 的两种结构
+        if isinstance(proof_block, dict):
+            analysis_text = proof_block.get("analysis", "")
+            numerical_text = proof_block.get("numerical_check", "")
+            proof_text = proof_block.get("proof", "")
+        else:
+            # 当 proof 为纯字符串（如异常信息或仅有步骤文本）时
+            analysis_text = ""
+            numerical_text = ""
+            proof_text = str(proof_block)
+
+        # 可选：缓存该题的点坐标信息（如果上游已提供）
+        try:
+            coords: Dict[str, Any] = {}
+            pls = result_obj.get("point_lines")
+            pts = result_obj.get("points")
+            if isinstance(pls, list) and pls and all(isinstance(s, str) for s in pls):
+                coords["point_lines"] = list(pls)
+            if isinstance(pts, list) and pts and all(isinstance(d, dict) for d in pts):
+                coords["points"] = list(pts)
+            if coords:
+                self.point_coords[str(problem_id)] = coords
+        except Exception:
+            pass
+
+        # 坐标缓存已在上方 try 块处理
 
         # 解析点依赖 point_rely_on（支持放在 proof_block 或顶层 result_obj）
-        rely_src = proof_block.get("point_rely_on") or result_obj.get("point_rely_on") or {}
+        # 注意：proof_block 可能是 dict 或 str，只有在为 dict 时才可 .get
+        if isinstance(proof_block, dict):
+            rely_src = proof_block.get("point_rely_on") or result_obj.get("point_rely_on") or {}
+        else:
+            rely_src = result_obj.get("point_rely_on") or {}
         if isinstance(rely_src, dict):
             mapping: Dict[str, Set[str]] = {}
             for pt, deps in rely_src.items():
@@ -352,6 +437,14 @@ class ProofGraph:
         else:
             # 若无依赖信息，记录空映射
             self.point_rely_on[str(problem_id)] = {}
+
+        # 解析辅助构造点列表（若存在）
+        try:
+            aux = result_obj.get("aux_points")
+            if isinstance(aux, list) and all(isinstance(a, str) for a in aux):
+                self.aux_points[str(problem_id)] = list(aux)
+        except Exception:
+            pass
 
         # 初始事实（layer=1）
         self.parse_facts_from_text(problem_id, analysis_text)
@@ -417,6 +510,68 @@ class ProofGraph:
                 self.logger.info("per-problem averages: problems=0 (no data)")
         except Exception as e:
             self.logger.warning(f"failed to compute per-problem averages: {e}")
+
+    # -------------------------------
+    # 便捷构造与说明接口
+    # -------------------------------
+    @classmethod
+    def build_from_results_json(cls, path: str, *, verbose: bool = True, log_level: int = logging.INFO) -> "ProofGraph":
+        """类构造器：从 JSON 路径直接构建 ProofGraph 实例。"""
+        inst = cls(verbose=verbose, log_level=log_level)
+        inst.from_results_json(path)
+        return inst
+
+    def describe_schema(self) -> Dict[str, Any]:
+        """返回当前图节点/边与题级元数据的字段说明（用于自描述/调试/文档）。"""
+        return {
+            "fact_node": {
+                "node_id": "F:{problem_id}:{id_local}",
+                "type": "fact",
+                "label": "predicate",
+                "args": ["A", "B", "C", ...],
+                "id_local": "local id in brackets",
+                "problem_id": "string",
+                "layer": "int, odd",
+                "produced_by": "Optional[str] rule node id",
+                "used_by": ["rule node id", ...],
+            },
+            "rule_node": {
+                "node_id": "R:{problem_id}:{step_index}:{code}",
+                "type": "rule",
+                "code": "rule code",
+                "step_index": "int",
+                "problem_id": "string",
+                "layer": "int, even",
+                "premises": ["fact node id", ...],
+                "conclusion": "fact node id",
+            },
+            "edge": ["(src_node_id, dst_node_id) directed"],
+            "problem_meta": {
+                "point_coords": {"point_lines": ["point a x y"], "points": [{"name": "a", "x": 0.0, "y": 0.0}]},
+                "point_rely_on": {"p": ["deps..."]},
+                "aux_points": ["m", "n", ...],
+            },
+            "rendered": {
+                "nodes": [{"idx": 0, "type": "fact|rule", "label": "cong(a,b,c,...)"}],
+                "edges": [[0,1],[1,2]],
+            },
+        }
+
+    def get_problem_summary(self, problem_id: str) -> Dict[str, Any]:
+        """汇总单题的节点/边统计与元数据（便于快速审计）。"""
+        pid = str(problem_id)
+        facts = [nd for nd in self.nodes.values() if nd.get("type") == "fact" and nd.get("problem_id") == pid]
+        rules = [nd for nd in self.nodes.values() if nd.get("type") == "rule" and nd.get("problem_id") == pid]
+        edges = [(u, v) for (u, v) in self.edges if self.nodes.get(u, {}).get("problem_id") == pid]
+        return {
+            "problem_id": pid,
+            "facts": len(facts),
+            "rules": len(rules),
+            "edges": len(edges),
+            "point_coords": self.point_coords.get(pid),
+            "point_rely_on": {k: sorted(list(v)) for k, v in self.point_rely_on.get(pid, {}).items()},
+            "aux_points": self.aux_points.get(pid, []),
+        }
 
     # -------------------------------
     # FSM 导出占位
@@ -1313,6 +1468,350 @@ class GSpanMiner:
         out.sort(key=lambda r: (sum(1 for lb in r["labels"] if lb.startswith("R:")), len(r["edges"]), r["support"]), reverse=True)
         self.logger.info(f"branched-mining done: patterns={len(out)}")
         return out
+
+    # ===============================
+    # 可视化：按题目生成 rendered 与 PNG
+    # ===============================
+    def _viz__parse_pred_args(self, label: str):
+        """解析形如 'pred a b c' 或 'pred(a,b,c)' 的标签为 (pred, [args])。
+        ProofGraph 内部事实节点的 label 是谓词名，args 在节点中；但为了通用性，这里也支持 pred(xxx) 文本。
+        """
+        try:
+            if "(" in label and label.endswith(")"):
+                pred, rest = label.split("(", 1)
+                args = rest[:-1]
+                parts = [a.strip() for a in args.split(",") if a.strip()]
+                return pred.strip(), parts
+            # 空格分割的简易兜底
+            toks = label.split()
+            if toks:
+                return toks[0].strip(), toks[1:]
+            return label, []
+        except Exception:
+            return label, []
+
+    def _viz__fact_points(self, fact_node: Dict[str, Any]) -> List[str]:
+        """从 fact 节点获取参与点集合：优先使用节点 args；否则从 label 文本解析。
+        对 aconst/rconst 等尾常量做忽略处理。
+        """
+        args = list(fact_node.get("args", []) or [])
+        if not args:
+            pred, parts = self._viz__parse_pred_args(str(fact_node.get("label", "")))
+            args = parts
+        pred = str(fact_node.get("label", ""))
+        # 若 label 本身是谓词名，则 pred 不含括号；此处仅在 pred 需要时处理
+        p0 = pred.split("(", 1)[0].strip()
+        if p0 in {"aconst", "rconst"} and len(args) >= 1:
+            return [a for a in args[:-1]]
+        return args
+
+    def build_rendered_for_problem(self, problem_id: str, *, label_mode: str = "legend") -> Dict[str, Any]:
+        """基于当前图构建单题目的 rendered 结构：{"nodes": [{idx,type,label}], "edges": [(u,v),...]}
+
+        - label_mode："full" | "short" | "legend"（legend 模式只影响 draw 阶段的显示，rendered 仍存 raw label）。
+        - 事实节点 label 采用 "pred(a,b,...)" 形式，规则节点 label 为其 code。
+        - 仅包含该 problem_id 的节点与边，节点 idx 重新编号（0..N-1）。
+        """
+        pid = str(problem_id)
+        # 收集节点
+        node_ids = [nid for nid, nd in self.nodes.items() if nd.get("problem_id") == pid]
+        if not node_ids:
+            return {"nodes": [], "edges": []}
+        # 建立映射
+        nid2idx: Dict[str, int] = {}
+        nodes_out: List[Dict[str, Any]] = []
+        for idx, nid in enumerate(sorted(node_ids)):
+            nd = self.nodes[nid]
+            ntype = nd.get("type")
+            if ntype == "fact":
+                pred = str(nd.get("label", ""))
+                args = nd.get("args", []) or []
+                if args:
+                    label = f"{pred}({','.join(str(a) for a in args)})"
+                else:
+                    label = pred
+            else:
+                # rule: 使用 code
+                label = str(nd.get("code", nd.get("label", "rule")))
+            nodes_out.append({"idx": idx, "type": ntype, "label": label, "_orig": nid})
+            nid2idx[nid] = idx
+
+        # 收集边（仅保留同题边）
+        edges_out: List[Tuple[int, int]] = []
+        for (u, v) in self.edges:
+            u_nd = self.nodes.get(u)
+            v_nd = self.nodes.get(v)
+            if not u_nd or not v_nd:
+                continue
+            if u_nd.get("problem_id") != pid or v_nd.get("problem_id") != pid:
+                continue
+            if u not in nid2idx or v not in nid2idx:
+                continue
+            edges_out.append((nid2idx[u], nid2idx[v]))
+
+        return {"nodes": [{k: v for k, v in nd.items() if k != "_orig"} for nd in nodes_out], "edges": edges_out}
+
+    def draw_problem_png(
+        self,
+        problem_id: str,
+        out_png: str,
+        *,
+        label_mode: str = "legend",
+        style_opts: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """将指定题目的证明图绘制为 PNG。
+
+        视觉规则：
+        - 前提节点（入度=0 的 fact）边框加粗；
+        - 结论节点（出度=0 的 fact）蓝色底、蓝色边框、边框加粗；
+        - 含辅助点的 fact 节点（与 aux_points 交集非空）橙色底；
+        - 其它 fact 节点绿色底；
+        - 规则节点浅灰底；
+        - 若结论与辅助冲突，以结论蓝优先。
+        """
+    # Visualization always enabled
+
+        # 依赖按需导入
+        try:
+            import networkx as nx  # type: ignore
+            import matplotlib  # type: ignore
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt  # type: ignore
+        except Exception as e:
+            raise RuntimeError(
+                "缺少依赖：需要 networkx 与 matplotlib。请安装后重试。"\
+                f" 导入错误：{type(e).__name__}: {e}"
+            )
+        try:
+            import pydot  # noqa: F401, type: ignore
+        except Exception as e:
+            # 允许回退
+            pydot = None  # type: ignore
+
+        rendered = self.build_rendered_for_problem(problem_id, label_mode=label_mode)
+        nodes = rendered.get("nodes") or []
+        edges = rendered.get("edges") or []
+        if not nodes:
+            raise ValueError(f"problem {problem_id} has no nodes to render")
+
+        # 计算入度/出度
+        indeg: Dict[int, int] = {n.get("idx"): 0 for n in nodes}
+        outdeg: Dict[int, int] = {n.get("idx"): 0 for n in nodes}
+        for (u, v) in edges:
+            outdeg[u] = outdeg.get(u, 0) + 1
+            indeg[v] = indeg.get(v, 0) + 1
+
+        # 组织 union of aux points（按题）
+        aux_set = set(self.aux_points.get(str(problem_id), []) or [])
+
+        # 构图
+        import networkx as nx  # type: ignore
+        G = nx.DiGraph()
+        for n in nodes:
+            G.add_node(n["idx"], ntype=n.get("type"), raw_label=str(n.get("label", "")))
+        for (u, v) in edges:
+            G.add_edge(u, v)
+
+        # 布局：优先 graphviz
+        try:
+            if pydot is not None:
+                pos = nx.drawing.nx_pydot.graphviz_layout(G, prog="dot")
+            else:
+                raise RuntimeError("pydot not available")
+        except Exception:
+            pos = nx.spring_layout(G, seed=42)
+
+        # 样式参数
+        COLOR_FACT_OK = "#e0ffe0"       # 绿色
+        COLOR_FACT_AUX = "#ffe4b5"      # 橙色（Moccasin）
+        COLOR_FACT_CONCL = "#e0f2ff"    # 蓝色
+        COLOR_RULE = "#f0f0f0"          # 浅灰
+        COLOR_BORDER = "#333333"
+        COLOR_CONCL_BORDER = "#007bff"
+
+        # 生成每个节点的显示标签（根据 label_mode）
+        def short_label(raw: str) -> str:
+            try:
+                if "(" in raw and raw.endswith(")"):
+                    return raw.split("(", 1)[0].strip()
+                return raw.split()[0]
+            except Exception:
+                return raw
+
+        legend_lines: List[str] = []
+        fact_counter = 0
+        rule_counter = 0
+        display_label: Dict[int, str] = {}
+        # 用于含辅助点判定：需要从原节点取 args，因此先用 rendered 的 raw_label 与 PG 节点结合
+        # 建立 idx -> 原节点对象映射
+        idx2orig: Dict[int, Dict[str, Any]] = {}
+        # 构建 orig 查找：依赖 build_rendered_for_problem 的顺序与 fields
+        # 为避免在 rendered 中暴露 _orig，我们通过重建：按 label 匹配可能不唯一，改为直接从 self.nodes 过滤该 problem 的顺序映射
+        pid = str(problem_id)
+        # 重新建立 nid 列表与 idx 映射（与 build_rendered_for_problem 使用相同规则：按 node_id 排序）
+        node_ids = [nid for nid, nd in self.nodes.items() if nd.get("problem_id") == pid]
+        node_ids_sorted = sorted(node_ids)
+        nid2idx_local = {nid: i for i, nid in enumerate(node_ids_sorted)}
+        for nid, nd in self.nodes.items():
+            if nd.get("problem_id") != pid:
+                continue
+            idx = nid2idx_local[nid]
+            idx2orig[idx] = nd
+
+        for n in nodes:
+            idx = n.get("idx")
+            ntype = n.get("type")
+            raw = str(n.get("label", ""))
+            if label_mode == "short":
+                lab = short_label(raw)
+            elif label_mode == "legend":
+                if ntype == "rule":
+                    rule_counter += 1
+                    lab = f"R{rule_counter}"
+                    legend_lines.append(f"{lab}: {raw}")
+                else:
+                    fact_counter += 1
+                    # 多结论时不单独标 C，这里统一使用编号
+                    lab = f"F{fact_counter}"
+                    legend_lines.append(f"{lab}: {raw}")
+            else:
+                lab = raw
+            display_label[idx] = lab
+
+        # 颜色/形状/线宽计算
+        node_colors: Dict[int, str] = {}
+        node_edge_colors: Dict[int, str] = {}
+        node_linewidths: Dict[int, float] = {}
+        node_sizes: Dict[int, int] = {}
+        node_shapes: Dict[int, str] = {}
+
+        for n in nodes:
+            idx = n.get("idx")
+            ntype = n.get("type")
+            node_edge_colors[idx] = COLOR_BORDER
+            node_linewidths[idx] = 1.0
+            if ntype == "rule":
+                node_shapes[idx] = 's'
+                node_colors[idx] = COLOR_RULE
+                node_sizes[idx] = 1300
+            else:
+                node_shapes[idx] = 'o'
+                node_sizes[idx] = 1600
+                # 判断是否结论（出度为 0）
+                is_concl = outdeg.get(idx, 0) == 0
+                # 判断是否前提（入度为 0）
+                is_prem = indeg.get(idx, 0) == 0
+                # 判断是否含辅助点
+                has_aux = False
+                try:
+                    orig = idx2orig.get(idx)
+                    pts = set(self._viz__fact_points(orig or {}))
+                    if aux_set and pts and (pts & aux_set):
+                        has_aux = True
+                except Exception:
+                    has_aux = False
+
+                if is_concl:
+                    node_colors[idx] = COLOR_FACT_CONCL
+                    node_edge_colors[idx] = COLOR_CONCL_BORDER
+                    node_linewidths[idx] = 2.0
+                elif has_aux:
+                    node_colors[idx] = COLOR_FACT_AUX
+                else:
+                    node_colors[idx] = COLOR_FACT_OK
+                if is_prem:
+                    node_linewidths[idx] = 2.0
+
+        # 分形状绘制
+        import matplotlib.pyplot as plt  # type: ignore
+        fig_size = (12, 9)
+        if isinstance(style_opts, dict) and isinstance(style_opts.get("figsize"), (list, tuple)):
+            try:
+                w, h = style_opts.get("figsize")
+                fig_size = (float(w), float(h))
+            except Exception:
+                pass
+        fig, ax = plt.subplots(figsize=fig_size)
+        ax.axis("off")
+
+        import networkx as nx  # type: ignore
+        nx.draw_networkx_edges(G, pos, ax=ax, arrows=True, arrowstyle='-|>', arrowsize=15, width=1.2, edge_color="#777777")
+
+        # 聚合同形状节点
+        shape_map: Dict[str, List[int]] = {}
+        for n in nodes:
+            shape_map.setdefault(node_shapes[n["idx"]], []).append(n["idx"])
+        for shape, nodelist in shape_map.items():
+            nx.draw_networkx_nodes(
+                G, pos,
+                nodelist=nodelist, node_shape=shape,
+                node_color=[node_colors[nid] for nid in nodelist],
+                edgecolors=[node_edge_colors[nid] for nid in nodelist],
+                linewidths=[node_linewidths[nid] for nid in nodelist],
+                node_size=[node_sizes[nid] for nid in nodelist],
+                ax=ax,
+            )
+
+        # 标签
+        font_size = 8
+        if isinstance(style_opts, dict) and isinstance(style_opts.get("font_size"), (int, float)):
+            try:
+                font_size = int(style_opts.get("font_size"))
+            except Exception:
+                pass
+        nx.draw_networkx_labels(G, pos, labels=display_label, font_size=font_size, ax=ax)
+
+        # legend
+        if label_mode == "legend" and legend_lines:
+            legend_text = "Legend:\n" + "\n".join(legend_lines)
+            ax.text(0.99, 0.99, legend_text, transform=ax.transAxes, ha='right', va='top',
+                    fontsize=max(7, font_size-1),
+                    bbox=dict(boxstyle='round', fc='white', ec='#999999', alpha=0.85))
+
+        # 保存
+        from pathlib import Path as _Path
+        outp = _Path(out_png)
+        outp.parent.mkdir(parents=True, exist_ok=True)
+        fig.tight_layout()
+        fig.savefig(outp, format="png", dpi=200)
+        plt.close(fig)
+
+    def render_all_problems_to_dir(
+        self,
+        out_dir: str,
+        *,
+        label_mode: str = "legend",
+        overwrite: bool = True,
+        show_progress: bool = True,
+    ) -> Dict[str, Any]:
+        """批量渲染当前图中所有题目，保存为 PNG：{out_dir}/proof_{problem_id}.png
+        返回统计信息。
+        """
+        from pathlib import Path as _Path
+        out_base = _Path(out_dir)
+        out_base.mkdir(parents=True, exist_ok=True)
+        # 收集题目 ID
+        pids: List[str] = sorted({str(nd.get("problem_id")) for nd in self.nodes.values() if nd.get("problem_id") is not None})
+        total = 0
+        done = 0
+        skipped = 0
+        failed = 0
+        for pid in pids:
+            out_png = out_base / f"proof_{pid}.png"
+            if out_png.exists() and not overwrite:
+                skipped += 1
+                continue
+            try:
+                self.draw_problem_png(pid, str(out_png), label_mode=label_mode)
+                done += 1
+            except Exception:
+                failed += 1
+            total += 1
+            if show_progress and total % 10 == 0:
+                print(f"[render] {total}/{len(pids)} done={done} skipped={skipped} failed={failed}")
+        if show_progress:
+            print(f"[render] finished: total={len(pids)} done={done} skipped={skipped} failed={failed}")
+        return {"total": total, "done": done, "skipped": skipped, "failed": failed, "out_dir": str(out_base)}
 
     # ------------------------- 并行支持：按种子构建与从种子扩展（branched） -------------------------
     def build_branched_seeds(

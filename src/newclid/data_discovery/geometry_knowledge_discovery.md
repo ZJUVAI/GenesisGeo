@@ -224,6 +224,8 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
 
 ## 5. 实现与代码结构
 
+（完整的 data_discovery 代码与数据清单见文末“附录A”。）
+
 ### 5.1 近期更新速览（与脚本/输出对齐）
 - 新增“规则仅挖掘”模式（rules-only）：在合并图上仅以规则节点建图与扩展，最终再基于嵌入回溯重建 schema；显著减小搜索图规模，同时保留可读化输出。
 - 分叉挖掘（branched）鲁棒性修复：
@@ -238,11 +240,15 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
 - aconst/rconst 语义修正：其最后一个参数是数值常量（非点/变量），不计入依赖/变量闭包；在 schema 渲染时保留字面量、不参与变量重命名。
 - 日志改进：在总节点/边统计后，追加 per-problem 平均节点/边数，便于设置 `max_nodes`。
 
+- 求解输出增强：在 `scripts/run_batch.py` 生成的结果中，每题对象新增两项以便审计与后续绘图/重放：
+  - `point_lines`: 形如 `point a x y` 的行列表（按点名排序）；
+  - `points`: 结构化数组 `[{"name": str, "x": float, "y": float}]`。
+
 并行与脚本更新（多进程 seeds_mproc）
 - 新增“种子级并行挖掘”通道：
   - 子进程仅负责搜索（按 seed 扩展并通过 emit 推送原始模式对象），不做 schema/过滤。
   - 主进程集中完成 schema 转换、两层去重（结构签名 + 规范化 schema）、过滤（可选丢弃 unknown、变量闭包兜底与依赖过滤）与写入（流式或批量）。
-- 脚本参数（`Newclid/scripts/run_gspan_branched_demo.py`）：支持常见命令行参数，但推荐直接编辑脚本内 CONFIG 以控制引擎/阈值/剪枝/时间预算等。
+- 脚本参数（`Newclid/scripts/mine_schemas.py`）：支持常见命令行参数，推荐编辑脚本顶部的 CONFIG 常量以控制引擎/阈值/剪枝/时间预算等。
 - 全局扩展预算（重要变化）：
   - seeds_mproc 下，`debug_limit_expansions` 作为“全体子进程共享”的严格上限实现，使用 `multiprocessing.Semaphore` 作为跨进程预算；每次可导致结构增长的扩展尝试前均会尝试消耗 1 个配额，耗尽后所有 worker 将不再产生新扩展。
   - `single` 与 `seeds` 引擎下则为“当前一次运行/当前种子内”的本地上限。
@@ -252,7 +258,10 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
   - 结果通道使用 `qout`；每个 worker 结束时会向 `qout` 发送一次 `None` 作为完成信号，主进程据此统计 worker 退出并收尾。
   - 加入 `maxsize` 以防止输出洪泛，emit 端采用带超时的 `put` 避免阻塞。
 - 日志顺序：不再调用整体 `run_*`，而是在主进程汇总后统一记录耗时。
-入口脚本：仓库根目录提供薄封装 `run_gspan_branched_demo.py`，可直接 `python run_gspan_branched_demo.py` 运行，相当于调用 `Newclid/scripts/run_gspan_branched_demo.py`。
+推荐入口脚本：
+- `Newclid/scripts/mine_schemas.py`：挖掘（分叉/规则仅），写出结构化 patterns 与载荷
+- `Newclid/scripts/filt_schemas.py`：读取挖掘结果进行筛选与审计，生成终态 JSON 与 NDJSON 审计
+- `Newclid/scripts/render_mined_schemas.py`：将已筛选或原始挖掘结果进行可视化渲染
 
 ### 5.2 数据模型与主要类
 - ProofGraph
@@ -278,8 +287,9 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
 
 ### 5.3 运行方法（命令）
 ```sh
-/usr/bin/env python3 Newclid/scripts/run_gspan_demo.py
-/usr/bin/env python3 run_gspan_branched_demo.py
+/usr/bin/env python3 Newclid/scripts/mine_schemas.py
+/usr/bin/env python3 Newclid/scripts/filt_schemas.py
+/usr/bin/env python3 Newclid/scripts/render_mined_schemas.py
 ```
 超参与模式从脚本内 `CONFIG` 修改。
 
@@ -309,28 +319,19 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
   - 审计文件使用 NDJSON（每行一条）。
   实现参考 `MiningPipeline._dump_pretty_mixed(...)`。
 
-#### 5.4.1 后处理管线（MiningPipeline）与审计文件
+#### 5.4.1 后处理职责拆分：SchemaMiner 与 SchemaFilter
 - 入口：`MiningPipeline(pg, miner, args, out_dir).run(...)`。
-- 处理阶段：
-  1) schema 生成（基于 `pattern_to_schema_*`），并保留 `schema_before_dependency` 字段用于对照；
-   2) 过滤 unknown：若在配置中启用“丢弃 unknown”，则直接丢弃包含 `unknown()` 的 schema；
-  3) 依赖过滤（可选）：仅对首个嵌入进行三分支判定：
-     - 若所有前提点集均是结论点及其依赖并集的子集（all_subset），丢弃；
-     - 若均不是子集（all_not_subset），丢弃；
-     - 若部分是子集，则保留并裁剪掉不满足子集条件的前提，重建 `schema_after`；
-     注：`aconst/rconst` 的最后一个参数被视为字面量，不参与点集/依赖判断；
-  4) 变量闭包兜底（可选）：结论参数集合需为前提参数集合的子集，且同样忽略 `aconst/rconst` 的最后一个参数；
-  5) 两层去重：
-     - 结构签名去重：按 `(labels, sorted(edges))`；
-     - 规范化 schema 去重：变量重命名与前提无序排序后的键；
-  6) 最终“同结论按前提集合最小化”：对相同结论组内，若某条的前提集合严格包含另一条，则丢弃前者（胜者为前提更少的那条）。规范化时 `aconst/rconst` 的最后一个参数保留字面量、不变量化。
-- 审计输出（与结果分开，NDJSON，一行一条）：
-  - step1：`audit_{mode}_step1_after_unknown.ndjson`（unknown 过滤后样本）；
-  - step2-kept：`audit_{mode}_step2_dep_kept.ndjson`（依赖过滤保留/裁剪的明细，含 schema_before/schema_after、union_rely、各前提判定）；
-  - step2-dropped：`audit_{mode}_step2_dep_dropped.ndjson`（依赖过滤丢弃原因与细节）；
-  - step3：`audit_{mode}_step3_after_varclosure.ndjson`（变量闭包后样本）；
-  - step4：`audit_{mode}_step4_final_dedup.ndjson`（两层去重后样本，含 `schema_before_dependency`）；
-  - step5-dropped：`audit_{mode}_step5_subset_min_dropped.ndjson`（“前提集合最小化”阶段被丢弃的记录，包含赢家/输家对照）。
+- 最新职责边界：
+  - SchemaMiner：核心挖掘与 schema 生成类（`src/newclid/data_discovery/schema_miner.py`）。由 `scripts/mine_schemas.py` 驱动，负责从输入结果构建证明图、运行分叉/规则仅挖掘、生成 `schema` 与 `schema_before_dependency`，并收集 `rendered/point_lines/points` 等载荷，写出 `branched_mining.json` 或 `rules_only_mining.json`。
+  - SchemaFilter：独立类（`src/newclid/data_discovery/schema_filter.py`），负责 unknown 过滤、依赖过滤、变量闭包检查、两层去重与“同结论按前提集合最小化”，并产出各阶段审计输出。
+  - 脚本入口：`scripts/filt_schemas.py`，以常量配置方式读取挖掘结果并调用 `SchemaFilter` 产出终态 JSON 与审计文件。
+- 审计输出（由 SchemaFilter 生成，NDJSON，每行一条）：
+  - step1：`audit_{mode}_step1_after_unknown.ndjson`
+  - step2-kept：`audit_{mode}_step2_dep_kept.ndjson`
+  - step2-dropped：`audit_{mode}_step2_dep_dropped.ndjson`
+  - step3：`audit_{mode}_step3_after_varclosure.ndjson`
+  - step4：`audit_{mode}_step4_final_dedup.ndjson`
+  - step5-dropped：`audit_{mode}_step5_subset_min_dropped.ndjson`
 
 额外文件（rule_only）：
 - `unknown_problem.txt`：当某些题目缺少必要的 rule-only 邻接信息而被跳过时，记录其 problem_id，便于后续检查数据完整性。
@@ -351,6 +352,44 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
   - facts：从“首个嵌入”回溯重建，按 schema 变量渲染 `pred(X...)`，并给出 `role`：`premise | internal | conclusion`。
   - 边：`fr_edges`（前提→规则）、`rf_edges`（规则→fact）。
   - 说明：此模式下 fact 不是搜索图的一部分，因而通过嵌入映射回原合并图获取。
+
+#### 5.4.3 可视化增强使用示例（配合过滤环节）
+
+当你完成“按点覆盖/按 rely_on 二次筛选”后，可直接基于筛选产物进行可视化，并按 union_rely 对前提节点分色、在图上标注 union_rely 集与 schema 文本，同时通过 legend 模式将长标签外移以避免拥挤。
+
+- 入口类：`src/newclid/data_discovery/schema_visualizer.py` 中的 `SchemaVisualizer`
+- 推荐调用（按二次筛选产物 partition_by_rely_on.json 分桶渲染）：
+
+```python
+from newclid.data_discovery.schema_visualizer import SchemaVisualizer
+
+viz = SchemaVisualizer()
+stats = viz.render_from_rely_on_file(
+  partition_json_path="src/newclid/data_discovery/data/partition_by_rely_on.json",
+  buckets=[
+    "candidate_schemas",        # 通过第二次筛选的候选
+    "candidate_schemas_type2",  # 互不包含情形
+    "discarded_schemas",        # 被丢弃（并集等于/真子集等情况）
+    "error_schemas",            # 点集不闭合等错误
+  ],
+  base_out_dir="src/newclid/data_discovery/data/schema_fig",
+  max_items_per_bucket=50,          # 0 表示不限制
+  overwrite=True,
+  label_mode="legend",             # 将冗长标签移至右侧 Legend，提高可读性
+  highlight_kind=True,              # 前提/中间/结论差异化底色/描边
+  enable_union_rely_styling=True,   # 基于 union_rely 对前提进行二次分色
+  style_opts={"figsize": (14, 9), "font_size": 8},
+)
+print(stats)
+```
+
+渲染效果说明：
+- 规则节点为方形，fact 节点为圆形；唯一结论 fact 使用蓝色描边；
+- 前提 fact 若其点集包含于 union_rely，底色为浅绿色；否则为浅橙色（便于与 union_rely 的差集对比）；
+- 左上角会显示当前 schema 文本，左下角显示 `union_rely = { ... }`；
+- `label_mode="legend"` 时，节点上使用短名（F1/F2/R1/C），右上角 Legend 显示短名与完整标签映射，避免节点内文字拥挤；
+- 也可通过 `label_mode="short"` 显示谓词短名，或 `"full"` 直接显示完整 `pred(X,...)` 标签；
+- 通过 `style_opts` 可覆盖画布大小与字体等；如需关闭“分类着色”，将 `highlight_kind=False`。
 
 ### 5.5 多进程实现要点与顺序（seeds_mproc）
 - 任务分发：`JoinableQueue` 承载种子；启动 worker 前先投递与 worker 数相等的哨兵 `None`。
@@ -388,7 +427,7 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
 
 ### 实验部分
 
-- [ ] __(9.11)完成并调试翻译schema的代码（处理ar前提）__
+- [x] __(9.11) 能够测试现有的schema是否满足要求（通过Yuclid实现）__
 - [ ] __(9.12)调试挖掘代码：辅助点部分的正确性 + 超参（效率/数量）__
 - [ ] (9.13)验证方案II
 - [ ] (9.14)实验目标设计 & 消融实验设计
@@ -418,6 +457,102 @@ simtrir A B C P Q R, cong A B P Q => contrir A B C P Q R
 | 0922-0925    | 最终检查           |             |
 |              | 投稿               |             |
 
+
+## 附录
+
+### 附录A：data_discovery 代码与数据目录清单
+
+本附录基于 main ↔ discovery 的差异与当前目录扫描，统计与 data_discovery 功能有关的新增代码与生成数据。若后续有增删，将在附录处持续更新。
+
+#### A.1 代码（按功能分类，列至文件级）
+
+- 图构建与数据解析
+  - `src/newclid/data_discovery/proof_graph.py`：解析 analysis/numerical_check/proof，构建题内证明图与合并图
+  - `src/newclid/data_discovery/data_processor.py`：结果 JSON 读取/规范化与数据预处理工具
+  - `src/newclid/data_discovery/solver_utils.py`：求解与外部工具适配的辅助函数
+  - `src/newclid/data_discovery/expand_problem.py`：题目扩展/辅助点相关预处理
+  - 测试
+    - `src/newclid/data_discovery/test_graph_construction.py`：图构建单测
+    - `tests/test_proof_graph.py`：证明图相关单测
+
+- 规则抽取与管理
+  - `src/newclid/data_discovery/rule_extractor.py`：从模式/图中抽取 schema/规则
+  - `src/newclid/data_discovery/rules_manager.py`：规则集装载/切换/统计
+  - 规则配置
+    - `src/newclid/default_configs/rules_basic.txt`（新增，基础规则集）
+    - `src/newclid/default_configs/rules_backup.txt`（新增，备份）
+    - `src/newclid/default_configs/rules.txt`（修改，完整规则集）
+
+- 挖掘/筛选/可视化
+  - `src/newclid/data_discovery/schema_miner.py`：挖掘与 schema 生成（分叉/规则仅）
+  - `src/newclid/data_discovery/schema_filter.py`：schema 筛选与审计（unknown/依赖/变量闭包/去重/最小化）
+  - `src/newclid/data_discovery/schema_visualizer.py`：基于 rendered 的图可视化
+  - 运行脚本（推荐在脚本顶部 CONFIG 设参）
+    - `scripts/mine_schemas.py`：挖掘入口（分叉/规则仅），落盘 `branched_mining.json` / `rules_only_mining.json`
+    - `scripts/filt_schemas.py`：筛选与审计入口，产出终态 JSON 与 NDJSON 审计
+    - `scripts/render_mined_schemas.py`：可视化入口
+    - `scripts/run_gspan_demo.py`：路径挖掘 demo（stdout）
+    - `scripts/check_discovery.py`：发现流程自检/报告
+  - 测试
+    - `tests/test_gspan.py`、`tests/test_gspan_branched.py`、`tests/test_gspan_branched_step.py`：挖掘相关单测
+
+- 批处理与评估
+  - `scripts/schema_eval.py`：批量 schema 评估入口（对 schema 与 schema_before 进行两次高层处理）
+  - `src/newclid/data_discovery/schema_evaluator.py`：Schema 批评估的实现（类/函数）
+  - `src/newclid/data_discovery/iterative_rules_pipeline.py`：迭代规则集/评估的管线
+  - 批量运行
+    - `scripts/run_batch.py`：集中参数的批处理入口（建议使用此脚本）
+    - `src/newclid/data_discovery/run_batch.py`：兼容保留（建议改用 scripts 版本）
+
+- 数据与样例（输入/参考）
+  - `src/newclid/data_discovery/r07_expanded_problems_results_lil.json`：r07 扩展结果（轻量版）
+  - 其他（用于开发/统计）
+    - `src/newclid/data_discovery/discovery_aux_data.jsonl`
+    - `src/newclid/data_discovery/lil_data.jsonl`
+    - `src/newclid/data_discovery/rules_with_discovery.txt`
+
+- 其他工具
+  - `scripts/translate_rule_to_problem.py`：规则到题目转写工具
+
+- 包装与入口
+  - `src/newclid/data_discovery/__init__.py`：模块导出
+  - `src/newclid/data_discovery/summary_and_todo.md`：阶段记录（文档）
+
+#### A.2 生成数据产物（结果与审计）
+
+统一落盘目录：`src/newclid/data_discovery/data/`（审计为 NDJSON）。
+
+| 文件 | 角色 | 生成脚本/来源 | 说明 |
+|---|---|---|---|
+| `branched_mining.json` | 分叉挖掘结果 | `scripts/mine_schemas.py` | 结构化结果（patterns、统计、params、timing 等） |
+| `rules_only_mining.json` | 规则仅挖掘结果 | `scripts/mine_schemas.py` | 规则图挖掘，回溯重建 facts |
+| `branched_mining.schema.results.json` | schema 评估结果（schema） | `scripts/schema_eval.py` | “一个输入一个输出”策略 |
+| `branched_mining.schema_before.results.json` | schema 评估结果（schema_before） | `scripts/schema_eval.py` | 与 schema 分开落盘 |
+| `branched_mining.schema.rules.txt` | 规则导出（schema） | `scripts/schema_eval.py`/后处理 | 人审/导入用 |
+| `branched_mining.schema.split.txt` | schema 可读拆分/翻译报告 | `scripts/schema_eval.py` | 含 translate 失败原因与原 schema |
+| `branched_mining.schema_before.split.txt` | schema_before 可读拆分/翻译报告 | `scripts/schema_eval.py` | 同上（before） |
+| `audit_fact_rule_engine_expansions.ndjson` | 分叉挖掘引擎审计 | `scripts/mine_schemas.py` | 扩展尝试日志（seeds/expansions） |
+| `audit_fact_rule_engine_seeds.ndjson` | 分叉挖掘引擎审计 | `scripts/mine_schemas.py` | 初始种子审计 |
+| `audit_fact_rule_step1_after_unknown.ndjson` | 分叉筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | unknown 过滤后样本 |
+| `audit_fact_rule_step2_dep_kept.ndjson` | 分叉筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 依赖过滤保留/裁剪明细 |
+| `audit_fact_rule_step2_dep_dropped.ndjson` | 分叉筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 依赖过滤丢弃原因 |
+| `audit_fact_rule_step3_after_varclosure.ndjson` | 分叉筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 变量闭包后样本 |
+| `audit_fact_rule_step4_final_dedup.ndjson` | 分叉筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 两层去重后样本 |
+| `audit_fact_rule_step5_subset_min_dropped.ndjson` | 分叉筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | “前提集合最小化”丢弃记录 |
+| `audit_rule_only_engine_expansions.ndjson` | 规则仅引擎审计 | `scripts/mine_schemas.py` | 扩展尝试日志（seeds/expansions） |
+| `audit_rule_only_engine_seeds.ndjson` | 规则仅引擎审计 | `scripts/mine_schemas.py` | 初始种子审计 |
+| `audit_rule_only_step1_after_unknown.ndjson` | 规则仅筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | unknown 过滤后样本 |
+| `audit_rule_only_step2_dep_kept.ndjson` | 规则仅筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 依赖过滤保留/裁剪明细 |
+| `audit_rule_only_step2_dep_dropped.ndjson` | 规则仅筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 依赖过滤丢弃原因 |
+| `audit_rule_only_step3_after_varclosure.ndjson` | 规则仅筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 变量闭包后样本 |
+| `audit_rule_only_step4_final_dedup.ndjson` | 规则仅筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | 两层去重后样本 |
+| `audit_rule_only_step5_subset_min_dropped.ndjson` | 规则仅筛选审计 | `scripts/filt_schemas.py`（SchemaFilter） | “前提集合最小化”丢弃记录 |
+| `tmp_fact_rule_patterns.ndjson` | 中间模式快照 | 挖掘阶段 | 原始模式流式缓存 |
+| `sch_split_test.txt` | 调试/单测小样 | 工具调试 | 翻译/拆分快速校验 |
+
+补充：输入/参考数据（位于 `src/newclid/data_discovery/`）
+- `r07_expanded_problems_results_lil.json`
+- 其他：`discovery_aux_data.jsonl`、`lil_data.jsonl`、`rules_with_discovery.txt`
 
 ### 附录：Schema 批量提取与评估（scripts/schema_eval.py）
 

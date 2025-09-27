@@ -21,9 +21,9 @@ from typing import Dict, List, Tuple, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # 默认输入：筛选后的最终 JSON（包含 patterns 数组，每项含 rendered/nodes/edges）
-INPUT_PATH = REPO_ROOT / "src/newclid/data_discovery/data/filt_out/branched_mining.json"
+INPUT_PATH = REPO_ROOT / "src/newclid/data_discovery/data/filt_out/partition_by_rule_union_rely.json"
 # 输出目录：仅产出 PNG 文件
-OUTPUT_DIR = REPO_ROOT / "src/newclid/data_discovery/data/schema_fig"
+OUTPUT_DIR = REPO_ROOT / "src/newclid/data_discovery/data/filt_out/schema_fig_rule_union"
 # 最多导出多少个 schema（避免一次性生成过多图片）；设为 0 表示导出全部
 MAX_PATTERNS = 0
 # 已存在同名文件是否覆盖

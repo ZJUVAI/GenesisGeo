@@ -687,24 +687,11 @@ class SchemaFilter:
     # ---------- post-filter: partition by point coverage ----------
     def partition_by_point_coverage(self, items: Iterable[dict] | Iterable[str], with_reason: bool = True,
                                     strip_clock_side: bool = True):
+        """第一阶段（统一输出格式版）
+
+        返回：{"stage": "deduplication", "buckets": {...}}
+        Record: {schema,prem_points,concl_points,pre_union,union_rely(None),rendered}
         """
-        基于点覆盖关系将 schema 分为三类：
-        - error_schemas：前提点并集是结论点集合的真子集（覆盖不足）或 schema 解析异常/缺失结论/缺失前提。
-        - discarded_schemas：前提点并集等于结论点集合（无辅助点）。
-        - candidate_schemas：其余（通常为前提点并集严格大于结论点集合，存在辅助点）。
-
-        统计时，默认先移除 sameclock/sameside 前提后再计算点集合（strip_clock_side=True）。
-
-        输入：
-        - items：可为 schema 字符串迭代器，或包含 "schema" 字段的字典迭代器（与本模块输出 item 兼容）。
-        - with_reason：是否返回详细信息（包含 prem_points / concl_points / relation / rendered）。
-        - strip_clock_side：是否在统计前移除 sameclock/sameside 前提。
-
-        输出：
-        - dict: {"error_schemas": [...], "discarded_schemas": [...], "candidate_schemas": [...]}。
-          当 with_reason=True 时，元素为详细记录；否则为原输入元素。
-        """
-
         def _get_schema_and_rendered(x) -> tuple[str, Any, Any]:
             if isinstance(x, str):
                 return x, x, None
@@ -712,151 +699,134 @@ class SchemaFilter:
                 return str(x.get("schema") or ""), x, x.get("rendered")
             return "", x, None
 
-        def _points_from_args(pred: str, args: list[str]) -> list[str]:
-            # 忽略 aconst/rconst 尾常量；其他参数全部视作点。
+        def _points(pred: str, args: list[str]) -> list[str]:
             if pred in {"aconst", "rconst"} and len(args) >= 1:
                 return [a for a in args[:-1] if a]
             return [a for a in args if a]
 
-        out = {
-            "error_schemas": [],
-            "discarded_schemas": [],
-            "candidate_schemas": [],
-        }
-
+        buckets = {"candidate_schemas": [], "discarded_schemas": [], "error_schemas": []}
         for it in items:
-            schema, original_item, rendered = _get_schema_and_rendered(it)
-            if not schema or "=>" not in schema:
-                rec = original_item if not with_reason else {
-                    "item": original_item,
-                    "schema": schema,
-                    "schema_cleaned": schema,
+            raw, _orig, rendered = _get_schema_and_rendered(it)
+            if not raw or "=>" not in raw:
+                buckets["error_schemas"].append({"schema": raw or "", "prem_points": [], "concl_points": [], "pre_union": [], "union_rely": None, "rendered": rendered if isinstance(rendered, dict) else None})
+                continue
+            try:
+                cleaned = self._drop_premises_by_predicates(raw, {"sameclock", "sameside"}) if strip_clock_side else raw
+                prem, concl = self.parse_schema(cleaned)
+                if not prem or not concl:
+                    buckets["error_schemas"].append({"schema": cleaned, "prem_points": [], "concl_points": [], "pre_union": [], "union_rely": None, "rendered": rendered if isinstance(rendered, dict) else None})
+                    continue
+                prem_pts = set()
+                for p, a in prem:
+                    prem_pts.update(_points(p, a))
+                c_pred, c_args = concl
+                concl_pts = set(_points(c_pred, c_args))
+                if not prem_pts or not concl_pts:
+                    buckets["error_schemas"].append({"schema": cleaned, "prem_points": [], "concl_points": [], "pre_union": [], "union_rely": None, "rendered": rendered if isinstance(rendered, dict) else None})
+                    continue
+                if prem_pts < concl_pts:
+                    b = "error_schemas"
+                elif prem_pts == concl_pts:
+                    b = "discarded_schemas"
+                else:
+                    b = "candidate_schemas"
+                buckets[b].append({
+                    "schema": cleaned,
+                    "prem_points": sorted(prem_pts),
+                    "concl_points": sorted(concl_pts),
+                    "pre_union": sorted(prem_pts),
+                    "union_rely": None,
+                    "rendered": rendered if isinstance(rendered, dict) else None,
+                })
+            except Exception:
+                buckets["error_schemas"].append({"schema": raw or "", "prem_points": [], "concl_points": [], "pre_union": [], "union_rely": None, "rendered": rendered if isinstance(rendered, dict) else None})
+        return {"stage": "deduplication", "buckets": buckets}
+
+        def _points_from_args(pred: str, args: list[str]) -> list[str]:
+            if pred in {"aconst", "rconst"} and len(args) >= 1:
+                return [a for a in args[:-1] if a]
+            return [a for a in args if a]
+
+        buckets = {"candidate_schemas": [], "discarded_schemas": [], "error_schemas": []}
+        for it in items:
+            schema_raw, _orig, rendered = _get_schema_and_rendered(it)
+            if not schema_raw or "=>" not in schema_raw:
+                buckets["error_schemas"].append({
+                    "schema": schema_raw or "",
                     "prem_points": [],
                     "concl_points": [],
-                    "relation": "unknown",
-                    "reason": "malformed_or_no_arrow",
-                }
-                if with_reason and rendered is not None:
-                    rec["rendered"] = rendered
-                out["error_schemas"].append(rec)
+                    "pre_union": [],
+                    "union_rely": None,
+                    "rendered": rendered if isinstance(rendered, dict) else None,
+                })
                 continue
-
             try:
-                schema_for_calc = self._drop_premises_by_predicates(schema, {"sameclock", "sameside"}) if strip_clock_side else schema
-                prem, concl = self.parse_schema(schema_for_calc)
-                if not prem:
-                    rec = original_item if not with_reason else {
-                        "item": original_item,
-                        "schema": schema,
-                        "schema_cleaned": schema_for_calc,
+                schema_clean = self._drop_premises_by_predicates(schema_raw, {"sameclock", "sameside"}) if strip_clock_side else schema_raw
+                prem, concl = self.parse_schema(schema_clean)
+                if not prem or not concl:
+                    buckets["error_schemas"].append({
+                        "schema": schema_clean,
                         "prem_points": [],
                         "concl_points": [],
-                        "relation": "unknown",
-                        "reason": "no_premises",
-                    }
-                    if with_reason and rendered is not None:
-                        rec["rendered"] = rendered
-                    out["error_schemas"].append(rec)
+                        "pre_union": [],
+                        "union_rely": None,
+                        "rendered": rendered if isinstance(rendered, dict) else None,
+                    })
                     continue
-                if not concl:
-                    rec = original_item if not with_reason else {
-                        "item": original_item,
-                        "schema": schema,
-                        "schema_cleaned": schema_for_calc,
-                        "prem_points": [],
-                        "concl_points": [],
-                        "relation": "unknown",
-                        "reason": "no_conclusion",
-                    }
-                    if with_reason and rendered is not None:
-                        rec["rendered"] = rendered
-                    out["error_schemas"].append(rec)
-                    continue
-
-                # collect union of premise points and conclusion points
                 prem_points_set = set()
                 for pred, args in prem:
                     prem_points_set.update(_points_from_args(pred, args))
                 concl_pred, concl_args = concl
                 concl_points_set = set(_points_from_args(concl_pred, concl_args))
-
-                # decide relation and bucket
-                relation = "unknown"
-                bucket = "candidate_schemas"
-                if concl_points_set and prem_points_set:
-                    if prem_points_set < concl_points_set:
-                        relation = "subset"
-                        bucket = "error_schemas"
-                    elif prem_points_set == concl_points_set:
-                        relation = "equal"
-                        bucket = "discarded_schemas"
-                    else:
-                        relation = "superset"
-                        bucket = "candidate_schemas"
+                if not prem_points_set or not concl_points_set:
+                    buckets["error_schemas"].append({
+                        "schema": schema_clean,
+                        "prem_points": [],
+                        "concl_points": [],
+                        "pre_union": [],
+                        "union_rely": None,
+                        "rendered": rendered if isinstance(rendered, dict) else None,
+                    })
+                    continue
+                if prem_points_set < concl_points_set:
+                    target_bucket = "error_schemas"
+                elif prem_points_set == concl_points_set:
+                    target_bucket = "discarded_schemas"
                 else:
-                    # 缺失任一集合，视作错误分类
-                    relation = "unknown"
-                    bucket = "error_schemas"
-
-                if with_reason:
-                    rec = {
-                        "item": original_item,
-                        "schema": schema,
-                        "schema_cleaned": schema_for_calc,
-                        "prem_points": sorted(list(prem_points_set)),
-                        "concl_points": sorted(list(concl_points_set)),
-                        "relation": relation,
-                    }
-                    if rendered is not None:
-                        rec["rendered"] = rendered
-                    out[bucket].append(rec)
-                else:
-                    out[bucket].append(original_item)
-
-            except Exception as e:
-                rec = original_item if not with_reason else {
-                    "item": original_item,
-                    "schema": schema,
-                    "schema_cleaned": schema,
+                    target_bucket = "candidate_schemas"
+                buckets[target_bucket].append({
+                    "schema": schema_clean,
+                    "prem_points": sorted(prem_points_set),
+                    "concl_points": sorted(concl_points_set),
+                    "pre_union": sorted(prem_points_set),
+                    "union_rely": None,
+                    "rendered": rendered if isinstance(rendered, dict) else None,
+                })
+            except Exception:
+                buckets["error_schemas"].append({
+                    "schema": schema_raw or "",
                     "prem_points": [],
                     "concl_points": [],
-                    "relation": "unknown",
-                    "reason": f"exception: {type(e).__name__}",
-                }
-                if with_reason and rendered is not None:
-                    rec["rendered"] = rendered
-                out["error_schemas"].append(rec)
-
-        return out
+                    "pre_union": [],
+                    "union_rely": None,
+                    "rendered": rendered if isinstance(rendered, dict) else None,
+                })
+        return {"stage": "deduplication", "buckets": buckets}
 
     # ---------- post-filter: partition by rely_on on conclusion ----------
     def partition_by_rely_on(self, candidate_items: Iterable[dict], with_reason: bool = True,
                              one_hop_only: bool = True):
+        """第二阶段（统一输出格式版）
+
+        输入：第一阶段 buckets["candidate_schemas"] 的记录（统一结构）。
+        输出：{"stage": "rely_on", "buckets": {...}}
+
+        分类（已合并 candidate_schemas_type2）：
+            - pre_union == union_rely 或 pre_union ⊂ union_rely → discarded_schemas
+            - 其它（包含 union_rely ⊂ pre_union 及部分交叠情况） → candidate_schemas
+            - 缺 rely_on 数据 / 解析失败 → error_schemas
+        说明：原 candidate_schemas_type2 已合并进入 candidate_schemas，以便后续统一处理。
         """
-        基于结论点的 rely_on 信息，对 candidate_schemas 做二次筛选。
-
-        输入（与 scripts/filt_schemas.py 产物兼容）：
-        - candidate_items: `partition_by_point_coverage.json` 中的 candidate_schemas 数组元素，每个元素应包含：
-          - prem_points: List[str]  （变量名域 X1...，已按约定剔除 sameclock/sameside）
-          - concl_points: List[str] （变量名域 X1...）
-          - item: 原始条目字典，建议包含 rendered/schema 等
-            - rendered.schema_vars: Dict[orig_point_name -> var_name]，用于名称域对齐
-            - rendered.rely_on 或 item.rely_on 或 item.point_rely_on: Dict[point_name -> Iterable[point_name]]
-              依赖可在原点名域或变量名域；将基于 schema_vars 做映射到变量名域
-
-        规则：
-        - pre_union = set(prem_points)
-        - union_rely = concl_points ∪ (⋃ rely_on(concl_point))
-        分类：
-          1) pre_union == union_rely               -> discarded_schemas
-          2) pre_union ⊂ union_rely（真子集）      -> discarded_schemas
-          3) union_rely ⊂ pre_union（真子集）      -> candidate_schemas
-          4) 互不包含/部分交叠无包含               -> candidate_schemas_type2
-        解析失败/缺字段 -> error_schemas
-
-        返回：dict，同上述四分类；当 with_reason=True 时，记录诊断字段（pre_union/union_rely/relation/reason/rendered 等）。
-        """
-
         def _get_schema_vars(d: dict | None) -> dict:
             if not isinstance(d, dict):
                 return {}
@@ -864,7 +834,6 @@ class SchemaFilter:
             return sv if isinstance(sv, dict) else {}
 
         def _get_rely_map_any(rec: dict) -> dict:
-            # 优先 rendered.rely_on，其次 item.rely_on，再次 item.point_rely_on
             item = rec.get("item") if isinstance(rec, dict) else None
             rendered = rec.get("rendered") if isinstance(rec, dict) else None
             if isinstance(rendered, dict):
@@ -881,7 +850,6 @@ class SchemaFilter:
             return {}
 
         def _map_name_to_var(name: str, schema_vars: dict) -> str:
-            # schema_vars: orig_name -> var_name（如 'a' -> 'X1'）
             if not name:
                 return name
             if name.startswith("X"):
@@ -889,52 +857,38 @@ class SchemaFilter:
             v = schema_vars.get(name)
             return v if isinstance(v, str) and v else name
 
-        out = {
-            "discarded_schemas": [],
-            "candidate_schemas": [],
-            "candidate_schemas_type2": [],
-            "error_schemas": [],
-        }
-
+        buckets = {"candidate_schemas": [], "discarded_schemas": [], "error_schemas": []}
         for rec in candidate_items:
             try:
                 prem_points = list(rec.get("prem_points") or [])
                 concl_points = list(rec.get("concl_points") or [])
+                schema = rec.get("schema") or ""
+                rendered = rec.get("rendered") if isinstance(rec.get("rendered"), dict) else None
                 if not prem_points or not concl_points:
-                    if with_reason:
-                        out["error_schemas"].append({
-                            "item": rec.get("item"),
-                            "schema": rec.get("schema"),
-                            "prem_points": prem_points,
-                            "concl_points": concl_points,
-                            "reason": "missing_prem_or_concl_points",
-                        })
-                    else:
-                        out["error_schemas"].append(rec)
+                    buckets["error_schemas"].append({
+                        "schema": schema,
+                        "prem_points": prem_points or [],
+                        "concl_points": concl_points or [],
+                        "pre_union": sorted(set(prem_points or [])),
+                        "union_rely": None,
+                        "rendered": rendered,
+                    })
                     continue
 
-                # 名称域对齐：把 rely_on map 到变量名域
-                item = rec.get("item") if isinstance(rec, dict) else None
-                rendered = rec.get("rendered") or (item.get("rendered") if isinstance(item, dict) else None)
                 schema_vars = _get_schema_vars(rendered)
                 rely_map_any = _get_rely_map_any(rec)
                 if not rely_map_any:
-                    if with_reason:
-                        e = {
-                            "item": item,
-                            "schema": rec.get("schema"),
-                            "prem_points": prem_points,
-                            "concl_points": concl_points,
-                            "reason": "missing_rely_on",
-                        }
-                        if isinstance(rendered, dict):
-                            e["rendered"] = rendered
-                        out["error_schemas"].append(e)
-                    else:
-                        out["error_schemas"].append(rec)
+                    buckets["error_schemas"].append({
+                        "schema": schema,
+                        "prem_points": prem_points,
+                        "concl_points": concl_points,
+                        "pre_union": sorted(set(prem_points)),
+                        "union_rely": None,
+                        "rendered": rendered,
+                    })
                     continue
 
-                # 将 rely_on 的 key 和 value 都映射为变量名域
+                # 变量域映射
                 rely_map_var: dict[str, set[str]] = {}
                 for k, vs in rely_map_any.items():
                     if not isinstance(vs, (list, tuple, set)):
@@ -947,13 +901,11 @@ class SchemaFilter:
                     rely_map_var.setdefault(k_var, set()).update(vals)
 
                 pre_union = set(prem_points)
-                # union_rely = concl_points ∪ rely_on(concl_point)
                 union_rely = set(concl_points)
                 for cp in concl_points:
                     deps = set(rely_map_var.get(cp, set()))
                     union_rely |= deps
                     if not one_hop_only:
-                        # 简单广度式传递闭包（可选）；默认不开启
                         frontier = set(deps)
                         seen = set(deps)
                         while frontier:
@@ -965,38 +917,176 @@ class SchemaFilter:
                             frontier = nxt
                         union_rely |= seen
 
-                # 四类分类
-                if pre_union == union_rely:
-                    bucket = "discarded_schemas"; relation = "equal"
-                elif pre_union < union_rely:
-                    bucket = "discarded_schemas"; relation = "pre_subset_of_union_rely"
-                elif union_rely < pre_union:
-                    bucket = "candidate_schemas"; relation = "union_rely_subset_of_pre"
+                # 分类：discarded 同原逻辑；其余全部 candidate（合并了原 type2）
+                if pre_union == union_rely or pre_union < union_rely:
+                    target_bucket = "discarded_schemas"
                 else:
-                    bucket = "candidate_schemas_type2"; relation = "incomparable"
+                    target_bucket = "candidate_schemas"
 
-                if with_reason:
-                    rec_out = {
-                        "item": item,
-                        "schema": rec.get("schema"),
-                        "pre_union": sorted(list(pre_union)),
-                        "union_rely": sorted(list(union_rely)),
-                        "relation": relation,
-                    }
-                    if isinstance(rendered, dict):
-                        rec_out["rendered"] = rendered
-                    out[bucket].append(rec_out)
-                else:
-                    out[bucket].append(rec)
+                buckets[target_bucket].append({
+                    "schema": schema,
+                    "prem_points": prem_points,
+                    "concl_points": concl_points,
+                    "pre_union": sorted(pre_union),
+                    "union_rely": sorted(union_rely),
+                    "rendered": rendered,
+                })
+            except Exception:
+                buckets["error_schemas"].append({
+                    "schema": rec.get("schema") if isinstance(rec, dict) else "",
+                    "prem_points": [],
+                    "concl_points": [],
+                    "pre_union": [],
+                    "union_rely": None,
+                    "rendered": rec.get("rendered") if isinstance(rec.get("rendered"), dict) else None,
+                })
+        return {"stage": "rely_on", "buckets": buckets}
 
-            except Exception as e:
-                if with_reason:
-                    out["error_schemas"].append({
-                        "item": rec.get("item") if isinstance(rec, dict) else rec,
-                        "schema": rec.get("schema") if isinstance(rec, dict) else None,
-                        "reason": f"exception: {type(e).__name__}",
+    # ---------- post-filter: partition by rule union_rely (third stage) ----------
+    def partition_by_rule_union_rely(self, items: Iterable[dict], with_reason: bool = True):
+        """第三阶段（统一输出格式版 / pruning）
+
+        输入：第二阶段 buckets 中的 candidate_schemas + candidate_schemas_type2 记录。
+        输出：{"stage": "pruning", "buckets": {"candidate_schemas_final": [...], ...}}
+
+        判定：存在任意 rule 其相邻所有 fact 点集（解析成功且非空）均包含于 union_rely → 丢弃；否则保留。
+        缺失必要数据（rendered / union_rely / graph结构） → error_schemas。
+        仅输出统一简化 record，不再包含 rule 诊断细节。
+        """
+        def _extract_points_from_fact_label(label: str):
+            try:
+                if "(" in label and label.endswith(")"):
+                    pred, rest = label.split("(", 1)
+                    args = [a.strip() for a in rest[:-1].split(",") if a.strip()]
+                    if pred in {"aconst", "rconst"} and len(args) >= 1:
+                        return [a for a in args[:-1]]
+                    return args
+                return []
+            except Exception:
+                return []
+
+        buckets = {
+            "candidate_schemas_final": [],
+            "discarded_schemas": [],
+            "error_schemas": [],
+        }
+
+        for rec in items:
+            try:
+                if not isinstance(rec, dict):
+                    buckets["error_schemas"].append({
+                        "schema": "",
+                        "prem_points": [],
+                        "concl_points": [],
+                        "pre_union": [],
+                        "union_rely": None,
+                        "rendered": None,
                     })
-                else:
-                    out["error_schemas"].append(rec)
+                    continue
+                schema = rec.get("schema")
+                union_rely = rec.get("union_rely") or rec.get("union_rely_set")
+                if not isinstance(union_rely, (list, tuple, set)):
+                    buckets["error_schemas"].append({
+                        "schema": schema or "",
+                        "prem_points": rec.get("prem_points") or [],
+                        "concl_points": rec.get("concl_points") or [],
+                        "pre_union": rec.get("pre_union") or [],
+                        "union_rely": None,
+                        "rendered": rec.get("rendered") if isinstance(rec.get("rendered"), dict) else None,
+                    })
+                    continue
+                union_rely_set = set(str(x) for x in union_rely)
 
-        return out
+                # rendered 可能位于 rec.rendered 或 rec.item.rendered
+                rendered = rec.get("rendered") if isinstance(rec.get("rendered"), dict) else None
+                if not rendered:
+                    item = rec.get("item") if isinstance(rec.get("item"), dict) else None
+                    if item and isinstance(item.get("rendered"), dict):
+                        rendered = item.get("rendered")
+                if not isinstance(rendered, dict):
+                    buckets["error_schemas"].append({
+                        "schema": schema or "",
+                        "prem_points": rec.get("prem_points") or [],
+                        "concl_points": rec.get("concl_points") or [],
+                        "pre_union": rec.get("pre_union") or [],
+                        "union_rely": sorted(list(union_rely_set)),
+                        "rendered": None,
+                    })
+                    continue
+
+                nodes = rendered.get("nodes") or []
+                edges = rendered.get("edges") or []
+                if not (isinstance(nodes, list) and isinstance(edges, list) and nodes and edges):
+                    buckets["error_schemas"].append({
+                        "schema": schema or "",
+                        "prem_points": rec.get("prem_points") or [],
+                        "concl_points": rec.get("concl_points") or [],
+                        "pre_union": rec.get("pre_union") or [],
+                        "union_rely": sorted(list(union_rely_set)),
+                        "rendered": rendered,
+                    })
+                    continue
+
+                # 索引构建
+                node_by_idx = {n.get("idx"): n for n in nodes if isinstance(n, dict)}
+                rule_indices = [n.get("idx") for n in nodes if isinstance(n, dict) and n.get("type") == "rule"]
+                fact_indices = {n.get("idx") for n in nodes if isinstance(n, dict) and n.get("type") == "fact"}
+                in_edges: dict[int, set[int]] = {}
+                out_edges: dict[int, set[int]] = {}
+                for u, v in edges:
+                    out_edges.setdefault(u, set()).add(v)
+                    in_edges.setdefault(v, set()).add(u)
+
+                trigger_rules = []
+                if not rule_indices:
+                    buckets["candidate_schemas_final"].append({
+                        "schema": schema or "",
+                        "prem_points": rec.get("prem_points") or [],
+                        "concl_points": rec.get("concl_points") or [],
+                        "pre_union": rec.get("pre_union") or [],
+                        "union_rely": sorted(list(union_rely_set)),
+                        "rendered": rendered,
+                    })
+                    continue
+
+                for ridx in rule_indices:
+                    neigh_in = [x for x in in_edges.get(ridx, set()) if x in fact_indices]
+                    neigh_out = [x for x in out_edges.get(ridx, set()) if x in fact_indices]
+                    fact_neigh = sorted(set(neigh_in + neigh_out))
+                    all_subset = True
+                    parse_any = False
+                    if not fact_neigh:
+                        trigger_rules.append(ridx)
+                        continue
+                    for fidx in fact_neigh:
+                        nobj = node_by_idx.get(fidx, {})
+                        raw_label = str(nobj.get("label", ""))
+                        pts = _extract_points_from_fact_label(raw_label)
+                        if pts:
+                            parse_any = True
+                        pts_set = set(pts)
+                        subset_ok = bool(pts) and pts_set.issubset(union_rely_set)
+                        if not subset_ok:
+                            all_subset = False
+                    if all_subset and parse_any:
+                        trigger_rules.append(ridx)
+
+                target_bucket = "discarded_schemas" if trigger_rules else "candidate_schemas_final"
+                buckets[target_bucket].append({
+                    "schema": schema or "",
+                    "prem_points": rec.get("prem_points") or [],
+                    "concl_points": rec.get("concl_points") or [],
+                    "pre_union": rec.get("pre_union") or [],
+                    "union_rely": sorted(list(union_rely_set)),
+                    "rendered": rendered,
+                })
+            except Exception:
+                buckets["error_schemas"].append({
+                    "schema": rec.get("schema") if isinstance(rec, dict) else "",
+                    "prem_points": [],
+                    "concl_points": [],
+                    "pre_union": [],
+                    "union_rely": None,
+                    "rendered": rec.get("rendered") if isinstance(rec.get("rendered"), dict) else None,
+                })
+        return {"stage": "pruning", "buckets": buckets}

@@ -170,7 +170,7 @@ class SchemaVisualizer:
         except Exception:
             pos = nx.spring_layout(G, seed=42)
 
-        # 风格
+        # 风格：为所有 fact 节点着色；若提供 union_rely，则依据节点点集是否包含于 union_rely 决定绿/橙；结论为蓝色；premise 加粗边框
         node_colors, node_edge_colors, node_linewidths, node_sizes, node_shapes = {}, {}, {}, {}, {}
         for n_idx, n_data in G.nodes(data=True):
             ntype = n_data.get("ntype")
@@ -181,33 +181,35 @@ class SchemaVisualizer:
                 node_linewidths[n_idx] = 1.0
                 node_sizes[n_idx] = 1300
             else:
+                # fact 节点
                 node_shapes[n_idx] = 'o'
                 node_sizes[n_idx] = 1600
-                if highlight_kind:
-                    # premise?
-                    if indeg.get(n_idx, 0) == 0:
-                        if enable_union_rely_styling and union_rely_set:
-                            # 检查该前提 fact 的点是否包含于 union_rely
-                            # 通过标签解析点名（与 schema 变量域对应）
-                            raw_lab = next((nn.get("label") for nn in nodes if nn.get("idx") == n_idx), None)
-                            pts = set(self._fact_points_from_label(str(raw_lab)))
-                            node_colors[n_idx] = COLOR_PREMISE if pts.issubset(union_rely_set) else COLOR_PREMISE_OUT
-                        else:
-                            node_colors[n_idx] = COLOR_PREMISE
-                        node_edge_colors[n_idx] = COLOR_BORDER
-                        node_linewidths[n_idx] = 1.0
-                    elif n_idx == unique_concl_idx:
-                        node_colors[n_idx] = COLOR_CONCLUSION
-                        node_edge_colors[n_idx] = COLOR_CONCLUSION_BORDER
-                        node_linewidths[n_idx] = 2.0
-                    else:
-                        node_colors[n_idx] = COLOR_INTERMEDIATE_FACT
-                        node_edge_colors[n_idx] = COLOR_BORDER
-                        node_linewidths[n_idx] = 1.0
+
+                # 默认边框
+                node_edge_colors[n_idx] = COLOR_BORDER
+                node_linewidths[n_idx] = 1.0
+
+                # 先按 union_rely 或兜底规则决定底色
+                if enable_union_rely_styling and union_rely_set:
+                    raw_lab = next((nn.get("label") for nn in nodes if nn.get("idx") == n_idx), None)
+                    pts = set(self._fact_points_from_label(str(raw_lab)))
+                    node_colors[n_idx] = COLOR_PREMISE if pts.issubset(union_rely_set) else COLOR_PREMISE_OUT
                 else:
-                    node_colors[n_idx] = COLOR_INTERMEDIATE_FACT
-                    node_edge_colors[n_idx] = COLOR_BORDER
-                    node_linewidths[n_idx] = 1.0
+                    # 无 union_rely：premise 绿色，其余（非结论）橙色
+                    if indeg.get(n_idx, 0) == 0:
+                        node_colors[n_idx] = COLOR_PREMISE
+                    else:
+                        node_colors[n_idx] = COLOR_PREMISE_OUT
+
+                # 结论节点颜色优先为蓝色（覆盖绿/橙），并加粗边框
+                if n_idx == unique_concl_idx:
+                    node_colors[n_idx] = COLOR_CONCLUSION
+                    node_edge_colors[n_idx] = COLOR_CONCLUSION_BORDER
+                    node_linewidths[n_idx] = 2.0
+
+                # premise（入度为 0）边框加粗
+                if indeg.get(n_idx, 0) == 0:
+                    node_linewidths[n_idx] = 2.0
 
         shape_map = {}
         for idx, shape in node_shapes.items():
