@@ -1,0 +1,150 @@
+angle_bisector
+a = free a; b = free b; c = free c; d = angle_bisector d b a c
+external_bisector
+a = free a; b = free b; c = free c; d = external_bisector d b a c
+angle_mirror
+a = free a; b = free b; c = free c; d = angle_mirror d b a c
+circle
+a = free a; b = free b; c = free c; o = circle o a b c
+circumcenter
+a = free a; b = free b; c = free c; o = circumcenter o a b c
+eq_quadrangle
+a b c d = eq_quadrangle a b c d
+iso_trapezoid
+a b c d = iso_trapezoid a b c d
+eq_triangle
+b = free b; c = free c; x = eq_triangle x b c
+eqangle2
+a = free a; b = free b; c = free c; x = eqangle2 x a b c
+eqdia_quadrangle
+a b c d = eqdia_quadrangle a b c d
+eqdistance
+a = free a; b = free b; c = free c; e = eqdistance e a b c
+foot
+a = free a; b = free b; c = free c; h = foot h a b c
+free_point
+a = free a
+incenter
+a = free a; b = free b; c = free c; i = incenter i a b c
+incenter2
+a = free a; b = free b; c = free c; x y z i = incenter2 x y z i a b c
+excenter
+a = free a; b = free b; c = free c; i = excenter i a b c
+excenter2
+a = free a; b = free b; c = free c; x y z i = excenter2 x y z i a b c
+centroid
+a = free a; b = free b; c = free c; x y z g = centroid x y z g a b c
+ninepoints
+a = free a; b = free b; c = free c; x y z i = ninepoints x y z i a b c
+intersection_cc
+o = free o; a = free a; w = free w; e = intersection_cc e o w a
+intersection_lc
+a = free a; o = free o; b = free b; x = intersection_lc x a o b
+intersection_ll
+a = free a; b = free b; c = free c; d = free d; e = intersection_ll e a b c d
+intersection_lp
+a = free a; b = free b; c = free c; d = free d; e = free e; x = intersection_lp x a b c d e
+intersection_lt
+a = free a; b = free b; c = free c; d = free d; e = free e; x = intersection_lt x a b c d e
+intersection_pp
+a = free a; b = free b; c = free c; d = free d; e = free e; f = free f; x = intersection_pp x a b c d e f
+intersection_tt
+a = free a; b = free b; c = free c; d = free d; e = free e; f = free f; x = intersection_tt x a b c d e f
+iso_triangle
+a b c = iso_triangle a b c
+lc_tangent
+a = free a; o = free o; x = lc_tangent x a o
+midpoint
+a = free a; b = free b; m = midpoint m a b
+mirror
+a = free a; b = free b; d = mirror d a b
+nsquare
+a = free a; b = free b; x = nsquare x a b
+on_aline
+a = free a; b = free b; c = free c; d = free d; e = free e; f = on_aline f a b c d e
+on_bline
+a = free a; b = free b; c = on_bline c a b
+on_circle
+a = free a; b = free b; c = on_circle c a b
+on_line
+a = free a; b = free b; c = on_line c a b
+on_pline
+a = free a; b = free b; c = free c; d = on_pline d a b c
+on_tline
+a = free a; b = free b; c = free c; d = on_tline d a b c
+orthocenter
+a = free a; b = free b; c = free c; h = orthocenter h a b c
+parallelogram
+a = free a; b = free b; c = free c; d = parallelogram a b c d
+pentagon
+a b c d e = pentagon a b c d e
+psquare
+a = free a; b = free b; x = psquare x a b
+quadrangle
+a b c d = quadrangle a b c d
+r_trapezoid
+a b c d = r_trapezoid a b c d
+r_triangle
+a b c = r_triangle a b c
+rectangle
+a b c d = rectangle a b c d
+reflect
+a = free a; b = free b; c = free c; d = reflect d a b c
+risos
+a b c = risos a b c
+segment
+a b = segment a b
+shift
+b = free b; c = free c; d = free d; x = shift x b c d
+square
+a = free a; b = free b; x y = square a b x y
+isquare
+a b c d = isquare a b c d
+trapezoid
+a b c d = trapezoid a b c d
+triangle
+a b c = triangle a b c
+triangle12
+a b c = triangle12 a b c
+trisect
+a = free a; b = free b; c = free c; x y = trisect x y a b c
+trisegment
+a = free a; b = free b; x y = trisegment x y a b
+on_dia
+a = free a; b = free b; c = on_dia c a b
+ieq_triangle
+a b c = ieq_triangle a b c
+cc_tangent
+o = free o; a = free a; w = free w; b = free b; x y z i = cc_tangent x y z i o a w b
+eqangle3
+a = free a; b = free b; c = free c; d = free d; e = free e; x = eqangle3 x a b c d e
+tangent
+o = free o; b = free b; a = free a; c d = tangent c d a o b
+on_circum
+a = free a; b = free b; c = free c; d = on_circum d a b c
+on_pline0
+a = free a; b = free b; c = free c; x = on_pline0 x a b c
+iso_triangle0
+a b c = iso_triangle0 a b c
+iso_triangle_vertex
+b = free b; c = free c; x = iso_triangle_vertex x b c
+iso_triangle_vertex_angle
+b = free b; c = free c; x = iso_triangle_vertex_angle x b c
+on_aline0
+a = free a; b = free b; c = free c; d = free d; e = free e; f = free f; g = free g; x= on_aline0 x a b c d e f g
+eqratio
+a = free a; b = free b; c = free c; d = free d; e = free e; f = free f; g = free g; x= eqratio x a b c d e f g
+eqratio6
+a = free a; b = free b; c = free c; d = free d; e = free e; f = free f; x = eqratio6 x a b c d e f
+rconst
+a = free a; b = free b; c = free c; x = rconst a b c x 1/2
+rconst2
+a = free a; b = free b; x = rconst2 x a b 1/2
+aconst
+a = free a; b = free b; c = free c; x = aconst a b c x 2pi/3
+s_angle
+a = free a; b = free b; x = s_angle a b x 30o
+lconst
+a = free a; x = lconst x a 3
+between_bound
+a = free a; b = free b; x = between_bound x a b
