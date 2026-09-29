@@ -10,7 +10,7 @@
 
 ## Overview
 
-GenesisGeo is a neuro-symbolic system that proves geometry theorems by combining a symbolic deduction engine (DDAR) with a neural language model. It is a full-stack reproduction and extension of [AlphaGeometry](https://www.nature.com/articles/s41586-023-06747-5), built on top of [Newclid/DDAR](https://arxiv.org/abs/2411.11938).
+GenesisGeo is a neuro-symbolic system that proves geometry theorems by combining a symbolic deduction engine (DDAR) with a vision-language model. It uses rendered diagrams and formal problem statements to propose auxiliary constructions, then resumes symbolic deduction to check whether they prove the goal.
 
 **Highlights:**
 
