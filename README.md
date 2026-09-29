@@ -10,22 +10,23 @@
 
 ## Overview
 
-GenesisGeo is a neuro-symbolic system that proves geometry theorems by combining a symbolic deduction engine (DDARN) with a neural language model. It is a full-stack reproduction and extension of [AlphaGeometry](https://www.nature.com/articles/s41586-023-06747-5), built on top of [Newclid/DDAR](https://arxiv.org/abs/2411.11938).
+GenesisGeo is a neuro-symbolic system that proves geometry theorems by combining a symbolic deduction engine (DDAR) with a neural language model. It is a full-stack reproduction and extension of [AlphaGeometry](https://www.nature.com/articles/s41586-023-06747-5), built on top of [Newclid/DDAR](https://arxiv.org/abs/2411.11938).
 
 **Highlights:**
 
-- Synthetic data generation pipeline producing **3 million** unique geometry problems with proof traces
-- Enhanced DDARN engine with **120x** speedup over the original implementation
+- Synthetic data generation pipeline producing **1 million** multimodal geometry problems with diagrams and machine-checkable proof traces
+- Enhanced DDAR engine with **~20x** speedup over the AlphaGeometry engine
 - Neuro-symbolic prover fine-tuned from **Qwen3-VL-2B**
 
-## Results (GenesisGeo-2B)
+## Results
 
-| Benchmark | Score |
-|-----------|:-----:|
-| IMO-AG-30 | **29/30** |
-| IMO-95 | **63/95** |
-| HAGeo-409 | **278/409** |
+| Variant | IMO-30 | IMO-95 | HAGeo-409 |
+|---------|-------:|-------:|----------:|
+| Text | 28/30 | 59/95 | 270/409 |
+| Vision + Text | **29/30** | **63/95** | **278/409** |
 
+Paper-reported results with a 32 × 512 × 4 search budget and a
+60-minute time limit per problem.
 
 ## Setup
 
@@ -39,7 +40,7 @@ uv sync --extra full
 
 ## Data Generation
 
-Generate synthetic geometry problems with proof traces:
+Generate synthetic geometry problems with proof traces and diagrams:
 
 ```bash
 python src/newclid/generation/pipeline.py \
@@ -47,6 +48,7 @@ python src/newclid/generation/pipeline.py \
   --n_samples 1000000 \
   --n_threads 20 \
   --aux_only 2 \
+  --img 3 \
   --seed_cache
 ```
 
@@ -77,7 +79,7 @@ python src/newclid/generation/pipeline.py \
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--dir` | `./datasets` | Output directory |
-| `--img` | `0` | Image mode: `0` = none, `1` = annotated only, `2` = plain only, `3` = both |
+| `--img` | `0` | Image mode: `0` = none, `1` = annotated only, `2` = unannotated only, `3` = both |
 | `--direct_png` / `--no-direct_png` | `enabled` | Save PNG directly or keep the legacy `svg -> png` pipeline |
 | `--img_pixels` | `512` | Output image width in pixels |
 | `--prune` / `--no-prune` | `enabled` | Prune clauses to keep only the deepest clause chain |
@@ -112,14 +114,13 @@ python scripts/launch_vllm_server.py \
   --gpu_ids 0,1,2,3
 ```
 
-### Qwen3 (Text)
+### Qwen3-VL (Text)
 
 ```bash
 python scripts/evaluation.py \
-  --agent qwen3_text \
+  --agent qwen3_vl_text \
   --problems_path benchmarks/dev_imo.txt \
   --vllm_base_url http://127.0.0.1:8000 \
-  --think false \
   --decoding_size 32 \
   --beam_size 512 \
   --search_depth 4 \
@@ -127,9 +128,9 @@ python scripts/evaluation.py \
   --timeout 3600
 ```
 
-Use `--think true` to start the text model with `<think>` and extract the generated `<aux>` block instead of forcing the next point name. The VL agent starts directly from `<aux>` for Qwen3-VL-Instruct checkpoints.
+The `qwen3_text` agent supports `--think true` to start with `<think>` and extract the generated `<aux>` block instead of forcing the next point name. The Qwen3-VL agents start directly from `<aux>` for Qwen3-VL-Instruct checkpoints.
 
-### Qwen3-VL
+### Qwen3-VL (Vision + Text)
 
 ```bash
 python scripts/evaluation.py \
@@ -147,10 +148,10 @@ python scripts/evaluation.py \
 
 | File | Description |
 |------|-------------|
-| `benchmarks/imo_ag_30.txt` | IMO-AG-30 (30 problems) |
+| `benchmarks/imo_30.txt` | IMO-30 (30 problems) |
 | `benchmarks/imo_95.txt` | IMO-95 (95 problems) |
 | `benchmarks/hageo_409.txt` | HAGeo-409 (409 problems) |
-| `benchmarks/jgex_ag_231.txt` | JGEX-AG-231 (231 problems) |
+| `benchmarks/jgex_231.txt` | JGEX-AG-231 (231 problems) |
 | `benchmarks/dev_imo.txt` | Small IMO development subset |
 | `benchmarks/dev_jgex.txt` | Small JGEX development subset |
 | `benchmarks/examples.txt` | Mixed example and debugging problems |
@@ -166,7 +167,7 @@ GenesisGeo/
 │   ├── api.py                      # GeometricSolver interface
 │   ├── proof.py                    # Proof state management
 │   ├── agent/                      # Reasoning agents
-│   │   ├── ddarn.py                # DDARN symbolic engine
+│   │   ├── ddarn.py                # DDAR symbolic engine
 │   │   ├── base.py                 # Shared neural-guided search logic
 │   │   └── vllm.py                 # vLLM text and vision-language agents
 │   ├── evaluation/                 # vLLM evaluation runtime and trace helpers
