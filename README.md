@@ -4,7 +4,7 @@
 
 **Neuro-Symbolic Geometry Theorem Proving at Olympiad Level**
 
-[![Paper](https://img.shields.io/badge/arXiv-2509.21896-b31b1b.svg)](https://arxiv.org/abs/2509.21896) [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
+[![Paper](https://img.shields.io/badge/arXiv-2509.21896-b31b1b.svg)](https://arxiv.org/abs/2509.21896) [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE) [![Model](https://img.shields.io/badge/🤗_Model-GenesisGeo--2B-blue.svg)](https://huggingface.co/ZJUVAI/GenesisGeo-2B)
 
 </div>
 
