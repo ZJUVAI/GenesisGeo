@@ -10,6 +10,8 @@ from newclid.numerical.geometries import (
     LineNum,
     ObjNum,
     PointNum,
+    RayNum,
+    SegmentNum,
     circle_circle_intersection,
     line_circle_intersection,
     line_line_intersection,
@@ -304,6 +306,16 @@ def sketch_isos(args: tuple[PointNum, ...], rng: Generator) -> tuple[PointNum, .
 def sketch_line(args: tuple[PointNum, ...], **kwargs: Any) -> LineNum:
     a, b = args
     return LineNum(a, b)
+
+
+def sketch_ray(args: tuple[PointNum, ...], **kwargs: Any) -> RayNum:
+    a, b = args
+    return RayNum(a, b)
+
+
+def sketch_segline(args: tuple[PointNum, ...], **kwargs: Any) -> SegmentNum:
+    a, b = args
+    return SegmentNum(a, b)
 
 
 def sketch_cyclic(args: tuple[PointNum, ...], **kwargs: Any) -> CircleNum:

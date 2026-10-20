@@ -6,7 +6,7 @@ from newclid.numerical import close_enough, nearly_zero, sign
 import numpy as np
 
 
-ObjNum = Union["PointNum", "LineNum", "CircleNum"]
+ObjNum = Union["PointNum", "LineNum", "CircleNum", "RayNum", "SegmentNum"]
 
 
 class PointNum:
@@ -305,6 +305,81 @@ class CircleNum(FormNum):
         return result
 
 
+class RayNum(FormNum):
+    """Numerical ray: starts at `a`, passes through `b`, extends beyond `b`."""
+
+    def __init__(self, a: PointNum, b: PointNum):
+        self.a = a
+        self.b = b
+        self.line = LineNum(a, b)
+
+    def _param(self, p: PointNum) -> float:
+        ab = self.b - self.a
+        denom = ab.dot(ab)
+        return (p - self.a).dot(ab) / denom
+
+    def contains(self, p: PointNum, eps: float = -1e-9) -> bool:
+        return self._param(p) >= eps
+
+    def sample_within(
+        self, points: Sequence[PointNum], *, trials: int = 5, rng: Generator
+    ) -> PointNum:
+        """Sample a point on the ray, biased away from existing points."""
+        center = sum(points, PointNum(0.0, 0.0)) / len(points)
+        radius = max([p.distance(center) for p in points] + [self.a.distance(center)])
+        radius = max(radius, self.a.distance(self.b)) * 2 + 1.0
+
+        ab = self.b - self.a
+        ab_len = np.sqrt(ab.dot(ab))
+        direction = ab / ab_len
+
+        result = None
+        best = -1.0
+        for _ in range(trials):
+            t = rng.uniform(0.0, radius)
+            x = self.a + direction * t
+            mind = min([x.distance(p) for p in points])
+            if mind > best:
+                best = mind
+                result = x
+        assert result
+        return result
+
+
+class SegmentNum(FormNum):
+    """Numerical segment: strictly between `a` and `b`."""
+
+    def __init__(self, a: PointNum, b: PointNum):
+        self.a = a
+        self.b = b
+        self.line = LineNum(a, b)
+
+    def _param(self, p: PointNum) -> float:
+        ab = self.b - self.a
+        denom = ab.dot(ab)
+        return (p - self.a).dot(ab) / denom
+
+    def contains(self, p: PointNum, eps: float = 1e-9) -> bool:
+        t = self._param(p)
+        return eps <= t <= 1.0 - eps
+
+    def sample_within(
+        self, points: Sequence[PointNum], *, trials: int = 5, rng: Generator
+    ) -> PointNum:
+        """Sample a point strictly within the segment [a, b]."""
+        result = None
+        best = -1.0
+        for _ in range(trials):
+            t = rng.uniform(0.0, 1.0)
+            x = self.a + (self.b - self.a) * t
+            mind = min([x.distance(p) for p in points])
+            if mind > best:
+                best = mind
+                result = x
+        assert result
+        return result
+
+
 def perpendicular_bisector(p1: "PointNum", p2: "PointNum") -> "LineNum":
     midpoint = (p1 + p2) * 0.5
     return LineNum(midpoint, midpoint + PointNum(p2.y - p1.y, p1.x - p2.x))
@@ -336,6 +411,10 @@ def solve_quad(a: float, b: float, c: float) -> tuple[float, ...]:
 
 
 def intersect(a: FormNum, b: FormNum):
+    if isinstance(a, (RayNum, SegmentNum)):
+        return tuple(p for p in intersect(a.line, b) if a.contains(p))
+    if isinstance(b, (RayNum, SegmentNum)):
+        return tuple(p for p in intersect(a, b.line) if b.contains(p))
     if isinstance(a, CircleNum):
         if isinstance(b, CircleNum):
             return circle_circle_intersection(a, b)

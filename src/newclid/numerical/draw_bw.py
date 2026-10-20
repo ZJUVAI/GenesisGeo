@@ -151,7 +151,7 @@ def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "blac
         seg(p(2), p(3))
         seg(p(0), p(1))
 
-    elif cname == "on_line":
+    elif cname in ("on_line", "on_ray", "on_segment"):
         seg(p(0), p(1))
         seg(p(0), p(2))
 

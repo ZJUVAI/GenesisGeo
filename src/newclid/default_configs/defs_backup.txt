@@ -202,6 +202,18 @@ a b = diff a b
 x : coll x a b
 line a b
 
+on_ray x a b
+x : x a b
+a b = diff a b
+x : coll x a b
+ray a b
+
+on_segment x a b
+x : x a b
+a b = diff a b
+x : coll x a b
+segline a b
+
 on_pline x a b c
 x : x a b c
 a b c = diff b c, ncoll a b c
