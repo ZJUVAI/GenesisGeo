@@ -129,14 +129,22 @@ class GoalFilter:
             [args[4], args[5], args[6], args[7]],
         ]
         for arg_set in parallel_sets:
+            # Skip pairs where both segments are the same line (e.g., AD vs AD)
+            # — this doesn't represent a meaningful angle relationship.
+            if {arg_set[0], arg_set[1]} == {arg_set[2], arg_set[3]}:
+                continue
             sm = Statement.from_tokens(["acompute"] + arg_set, dep_graph)
             if sm and sm.check():
                 return False
         for arg_set in parallel_sets:
+            if {arg_set[0], arg_set[1]} == {arg_set[2], arg_set[3]}:
+                continue
             sm = Statement.from_tokens(["para"] + arg_set, dep_graph)
             if sm.check():
                 return False
         for arg_set in parallel_sets:
+            if {arg_set[0], arg_set[1]} == {arg_set[2], arg_set[3]}:
+                continue
             sm = Statement.from_tokens(["perp"] + arg_set, dep_graph)
             if sm.check():
                 return False

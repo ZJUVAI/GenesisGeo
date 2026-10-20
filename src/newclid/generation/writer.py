@@ -9,7 +9,6 @@ import logging
 import os
 
 import ray
-import cairosvg
 from PIL import Image, ImageOps
 
 POINT_COORDS_GRID_SIZE = 256
@@ -17,6 +16,9 @@ POINT_COORDS_GRID_SIZE = 256
 
 def convert_svg_to_png(svg_path, png_path, width=1024):
     """Convert SVG file to PNG format."""
+    # Lazy import to avoid cairo dependency when not needed
+    import cairosvg
+
     output_dir = os.path.dirname(png_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)

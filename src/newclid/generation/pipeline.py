@@ -17,6 +17,7 @@ from newclid.generation.statistics import Statistics, get_first_predicate
 from newclid.generation.filter import GoalFilter
 from newclid.generation.worker import ProblemWorker
 from newclid.generation.writer import Writer
+from newclid.discovery.utils.rule_parser import to_pipe_format
 
 # logging.basicConfig(level=logging.DEBUG, force=True)
 
@@ -44,6 +45,8 @@ class ProblemPipeline:
         using_exp=False,
         direct_png=True,
         img_pixels=512,
+        custom_rules_path=None,
+        triple_symmetry=True,
     ):
         if img_pixels <= 0:
             raise ValueError("img_pixels must be a positive integer")
@@ -74,6 +77,15 @@ class ProblemPipeline:
         self.using_exp = using_exp
         self.direct_png = direct_png
         self.img_pixels = img_pixels
+        self.custom_rules_path = custom_rules_path
+        self.triple_symmetry = triple_symmetry
+        self.custom_rules = load_custom_rules(custom_rules_path)
+        if self.custom_rules:
+            logging.info(
+                "Loaded %d custom rule(s) from %s",
+                len(self.custom_rules),
+                self.custom_rules_path,
+            )
 
         self.use_seed_cache = seed_cache
         self.base_seed = base_seed
@@ -190,6 +202,8 @@ class ProblemPipeline:
                     self.remove_coords,
                     self.construction_config,
                     fl_statement,
+                    self.custom_rules,
+                    self.triple_symmetry,
                 )
 
         if not ray.is_initialized():
@@ -198,10 +212,25 @@ class ProblemPipeline:
         max_pending = int(self.n_threads * 1.5)
         pending_tasks = {}
 
+        HEARTBEAT_INTERVAL = 30  # seconds; print progress even with 0 new samples
+
         start_time = time.time()
         last_logged_written = self.writer.written_count
         last_logged_time = start_time
+        last_heartbeat_time = start_time
         smoothed_speed = None
+        tasks_since_log = 0
+        failed_tasks_since_log = 0
+        # 被 DEADLINE 截断、且已经产出过 aux 样本的任务数（见 worker.py）。
+        aux_truncated_since_log = 0
+        aux_truncated_total = 0
+        # 反向重构统计（见 worker.py::_try_reverse_reconstruction）：候选数、
+        # stage-a 直接可证被丢弃数、stage-b 加了辅助点仍证不出被丢弃数、
+        # 最终保留数——全部累计到当前进程存活期间。
+        recon_candidates_total = 0
+        recon_solved_without_aux_total = 0
+        recon_unsolved_with_aux_total = 0
+        recon_kept_total = 0
 
         while self.writer.written_count < self.n_samples:
             done, _ = ray.wait(list(pending_tasks.keys()), num_returns=1, timeout=10)
@@ -219,6 +248,21 @@ class ProblemPipeline:
                     task_success = False
 
                 _, seed = pending_tasks.pop(task_id)
+                tasks_since_log += 1
+                if not task_success:
+                    failed_tasks_since_log += 1
+                else:
+                    if summary.get("aux_truncated", False):
+                        aux_truncated_since_log += 1
+                        aux_truncated_total += 1
+                    recon_candidates_total += summary.get("recon_candidates", 0)
+                    recon_solved_without_aux_total += summary.get(
+                        "recon_solved_without_aux", 0
+                    )
+                    recon_unsolved_with_aux_total += summary.get(
+                        "recon_unsolved_with_aux", 0
+                    )
+                    recon_kept_total += summary.get("recon_kept", 0)
 
                 if task_success:
                     if self.use_seed_cache:
@@ -289,10 +333,44 @@ class ProblemPipeline:
                                 f"DDAR: {summary['runtime']:2.0f} + "
                                 f"Proc: {summary['process_goal_runtime']:3.0f} | "
                                 f"Speed: {smoothed_speed:3.0f} samp/s | "
-                                f"ETA: {timedelta(seconds=int(eta_seconds))}"
+                                f"ETA: {timedelta(seconds=int(eta_seconds))} | "
+                                f"AuxTrunc: {aux_truncated_total} | "
+                                f"Recon: cand={recon_candidates_total} "
+                                f"noAux={recon_solved_without_aux_total} "
+                                f"aux_fail={recon_unsolved_with_aux_total} "
+                                f"kept={recon_kept_total}"
                             )
                             last_logged_written = self.writer.written_count
                             last_logged_time = now
+                            last_heartbeat_time = now
+                            tasks_since_log = 0
+                            failed_tasks_since_log = 0
+                            aux_truncated_since_log = 0
+            # Heartbeat: print progress periodically even when no new samples
+            # were written, so a stalled run is distinguishable from a slow one.
+            now = time.time()
+            if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+                pending_draw = len(self.writer.pending_draw_tasks)
+                pending_write = len(self.writer.pending_write_data)
+                logging.info(
+                    f"{millify(self.writer.written_count)}/{millify(self.n_samples)} "
+                    f"(+0, {tasks_since_log} tasks done in last {now - last_heartbeat_time:.0f}s, "
+                    f"{failed_tasks_since_log} failed, "
+                    f"{aux_truncated_since_log} aux-truncated "
+                    f"({aux_truncated_total} total), "
+                    f"pending: {len(pending_tasks)} running "
+                    f"+ {pending_draw}+{pending_write} draw/write) "
+                    f"in {now - start_time:5.0f}s | "
+                    f"Recon: cand={recon_candidates_total} "
+                    f"noAux={recon_solved_without_aux_total} "
+                    f"aux_fail={recon_unsolved_with_aux_total} "
+                    f"kept={recon_kept_total}"
+                )
+                last_heartbeat_time = now
+                tasks_since_log = 0
+                failed_tasks_since_log = 0
+                aux_truncated_since_log = 0
+
             for task, (s_time, _) in list(pending_tasks.items()):
                 if time.time() - s_time > self.timeout:
                     print(f"⚠️ Task {task} timeout. Canceling")
@@ -336,6 +414,41 @@ def load_construction_config(config_path: str | None) -> dict | None:
     if not isinstance(config, dict):
         raise ValueError("Construction config JSON must contain a top-level object.")
     return config
+
+
+def load_custom_rules(rules_path: str | None) -> list[str] | None:
+    """Load extra DDAR rules and convert them to CSolver's pipe format.
+
+    Accepts a `.txt` file with one `premises => conclusion` rule per line
+    (same grammar as `default_configs/rules.txt`, e.g. the output of the
+    discovery/reduction pipeline's `reduced_rules.txt`), or a `.jsonl` file
+    where each line is a JSON object with a `rule_text` field (e.g.
+    `reduced_rules.jsonl`).
+    """
+    if not rules_path:
+        return None
+
+    rule_texts: list[str] = []
+    guards_list: list[str] = []
+    is_jsonl = rules_path.endswith(".jsonl") or rules_path.endswith(".json")
+    with open(rules_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if is_jsonl:
+                rec = json.loads(line)
+                rule_texts.append(rec["rule_text"])
+                guards_list.append(rec.get("guards", ""))
+            else:
+                rule_texts.append(line)
+                guards_list.append("")
+
+    return [
+        to_pipe_format(f"custom_{i:05d}", rule_texts[i],
+                       guards=guards_list[i] if i < len(guards_list) else "")
+        for i in range(len(rule_texts))
+    ]
 
 
 def positive_int(value: str) -> int:
@@ -422,6 +535,14 @@ def main():
         required=False,
         default=None,
         help="Optional JSON file defining construction sets and sampler steps",
+    )
+    parser.add_argument(
+        "--custom_rules_path",
+        required=False,
+        default=None,
+        help="Optional extra DDAR rules file (.txt with 'premises => conclusion' "
+        "lines, or .jsonl with a 'rule_text' field per line) to add to the "
+        "solver's rule set, e.g. discovery/reduction output reduced_rules.txt",
     )
     parser.add_argument(
         "--seed_cache",
@@ -534,6 +655,7 @@ def main():
         using_exp=args.using_exp,
         direct_png=args.direct_png,
         img_pixels=args.img_pixels,
+        custom_rules_path=args.custom_rules_path,
     )
     write_cli_args(
         os.path.join(generator.writer.output_dir, generator.file_prefix + "_params.json"),
