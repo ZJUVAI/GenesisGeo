@@ -31,7 +31,7 @@ def _process_chunk(
     from newclid.discovery.extraction.eqpoint_merge import merge_eqpoints
     from newclid.discovery.extraction.graph_manager import (
         SingleProofGraph,
-        graph_contains_predicates,
+        graph_skip_reason,
     )
     from newclid.discovery.extraction.proposition_extractor import extract_proposition
 
@@ -43,6 +43,7 @@ def _process_chunk(
     collapsed_total = 0
     subgraphs_count = 0
     skipped_by_predicate = 0
+    skipped_by_eqpoint = 0
     merged_count = 0
     dropped_count = 0
 
@@ -67,13 +68,19 @@ def _process_chunk(
             target_graphs = subs
             subgraphs_count += len(subs)
 
-        # 按 rule_skip_predicates 丢弃整张（子）证明图。
-        if skip_set:
-            before = len(target_graphs)
-            target_graphs = [
-                g for g in target_graphs if not graph_contains_predicates(g, skip_set)
-            ]
-            skipped_by_predicate += before - len(target_graphs)
+        # 整图丢弃：rule_skip_predicates 命中 → "predicate"；裸 eqpoint → "eqpoint"
+        # （后者恒定生效 —— 见 graph_skip_reason）。两条规则对每张图分别计数，
+        # 便于在 pipeline_summary 里分辨 eqpoint 这条不变量实际拦下了多少。
+        kept_graphs = []
+        for g in target_graphs:
+            reason = graph_skip_reason(g, skip_set)
+            if reason == "predicate":
+                skipped_by_predicate += 1
+            elif reason == "eqpoint":
+                skipped_by_eqpoint += 1
+            else:
+                kept_graphs.append(g)
+        target_graphs = kept_graphs
 
         for g in target_graphs:
             prop = extract_proposition(g)
@@ -96,6 +103,7 @@ def _process_chunk(
         "collapsed_steps": collapsed_total,
         "subgraphs": subgraphs_count,
         "skipped_by_predicate": skipped_by_predicate,
+        "skipped_by_eqpoint": skipped_by_eqpoint,
         "eqpoint_merged": merged_count,
         "eqpoint_dropped_trivial": dropped_count,
     }
@@ -126,7 +134,8 @@ def extract_propositions_parallel(
         propositions: 合并后的 PropositionRecord 列表。
         failures: 构图失败记录。
         stats: 汇总统计（built / failures / collapsed_steps / subgraphs /
-        skipped_by_predicate / eqpoint_merged / eqpoint_dropped_trivial）。
+        skipped_by_predicate / skipped_by_eqpoint / eqpoint_merged /
+        eqpoint_dropped_trivial）。
     """
     import ray
 
@@ -139,7 +148,7 @@ def extract_propositions_parallel(
     if not chunks:
         return [], [], {
             "built": 0, "failures": 0, "collapsed_steps": 0,
-            "subgraphs": 0, "skipped_by_predicate": 0,
+            "subgraphs": 0, "skipped_by_predicate": 0, "skipped_by_eqpoint": 0,
             "eqpoint_merged": 0, "eqpoint_dropped_trivial": 0,
         }
 
@@ -151,7 +160,7 @@ def extract_propositions_parallel(
     failures: list[dict[str, Any]] = []
     agg: dict[str, int] = {
         "built": 0, "failures": 0, "collapsed_steps": 0,
-        "subgraphs": 0, "skipped_by_predicate": 0,
+        "subgraphs": 0, "skipped_by_predicate": 0, "skipped_by_eqpoint": 0,
         "eqpoint_merged": 0, "eqpoint_dropped_trivial": 0,
     }
     for props, fails, stats in tqdm(

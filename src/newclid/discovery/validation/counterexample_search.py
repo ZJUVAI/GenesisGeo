@@ -417,6 +417,28 @@ def _eval_sameclock(args: list[PointNum]) -> tuple[bool, float]:
     return ok, viol
 
 
+def _eval_sameside(args: list[PointNum]) -> tuple[bool, float]:
+    """sameside A B C X Y Z: A is to the same side of B->C as X is to Y->Z.
+
+    Mirrors SameSide.check_numerical: sign((B-A).(C-A)) == sign((Y-X).(Z-X)).
+    Continuous violation: 0 when signs agree, otherwise the smaller of the
+    two |dot| magnitudes (hinge — a near-zero dot on either side means the
+    point sits right on the boundary line, so this is a weak/marginal call).
+    """
+    a, b, c, x, y, z = args[0], args[1], args[2], args[3], args[4], args[5]
+    d1 = (b - a).dot(c - a)
+    d2 = (y - x).dot(z - x)
+    ok = (d1 > 0) == (d2 > 0)
+    viol = 0.0 if ok else min(abs(d1), abs(d2))
+    return ok, viol
+
+
+def _eval_nsameside(args: list[PointNum]) -> tuple[bool, float]:
+    """nsameside A B C X Y Z: negation of sameside."""
+    sat_same, viol_same = _eval_sameside(args)
+    return not sat_same, viol_same
+
+
 def _eval_obtuse(args: list[PointNum]) -> tuple[bool, float]:
     """obtuse A B C: angle ABC > 90 degrees (numerical check only)."""
     a, b, c = args[0], args[1], args[2]
@@ -461,6 +483,8 @@ _PRED_EVAL: dict[str, Callable] = {
     "sameclock": _eval_sameclock,
     "obtuse": _eval_obtuse,
     "acute": _eval_acute,
+    "sameside": _eval_sameside,
+    "nsameside": _eval_nsameside,
 }
 
 # Predicates we can handle

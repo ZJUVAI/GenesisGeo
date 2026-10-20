@@ -391,6 +391,43 @@ def graph_contains_predicates(graph: SingleProofGraph, skip_predicates: set[str]
     return any(f.predicate in skip_predicates for f in graph.facts.values())
 
 
+def graph_has_bare_eqpoint(graph: SingleProofGraph) -> bool:
+    """判断图中是否存在"裸" eqpoint —— 两个参数都不是辅助点的 eqpoint fact。
+
+    eqpoint 只允许作为辅助点之间的关系出现：``proposition_extractor`` 收集前提时
+    排除一切「参数含辅助点的 fact」(见 extract_proposition 的 aux 过滤)，所以带
+    辅助点的 eqpoint 天然进不了命题；而两个参数都是普通点的 eqpoint 一旦是给定
+    fact（produced_by 为 None）就会被当作前提收进去，泄漏进最终规则。结论侧不会
+    出问题：goal 取自原始记录的 ``?`` 子句，不可能是 eqpoint。
+    """
+    aux = set(graph.aux_points)
+    return any(
+        f.predicate == "eqpoint" and not (set(f.args) & aux)
+        for f in graph.facts.values()
+    )
+
+
+def graph_skip_reason(graph: SingleProofGraph, skip_predicates: set[str]) -> str | None:
+    """Part 1 整图丢弃判定：返回丢弃原因（``"predicate"`` / ``"eqpoint"``），保留则 None。
+
+    两条独立规则：
+
+    1. ``"predicate"``：``skip_predicates``（config: ``rule_skip_predicates``）里的
+       谓词只要在图中任一 fact 出现就整图丢弃 —— 前提、中间结论、带辅助点的、
+       没被最终规则用到的都算。
+    2. ``"eqpoint"``：恒定生效、不可配置。见 graph_has_bare_eqpoint —— 裸 eqpoint
+       有资格成为命题前提、进而泄漏进提取出的规则，整图丢弃；含辅助点的 eqpoint
+       是证明内部的正常中间步骤，保留。
+
+    合并成一个入口是为了让串行/并行两条 part1 路径共用同一套判定，不会各写一份。
+    """
+    if graph_contains_predicates(graph, skip_predicates):
+        return "predicate"
+    if graph_has_bare_eqpoint(graph):
+        return "eqpoint"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # 图约简（剪枝）已由 simplify_single_step（单步折叠）+ decomposer（按辅助点拆解）实现，
 # 见 SingleProofGraph.simplify_single_step 与 extraction/decomposer.py。

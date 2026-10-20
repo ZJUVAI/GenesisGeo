@@ -17,6 +17,7 @@ import os
 import re
 import signal
 import time
+import zlib
 from itertools import combinations, permutations
 
 import numpy as np
@@ -79,15 +80,22 @@ def _find_distant_ce(
     conclusions: list[tuple[str, list[str]]],
     nominal: dict[str, PointNum],
     n_trials: int = 5,
+    base_seed: int = 42,
 ) -> dict[str, PointNum] | None:
     """Aggressive global search for a DISTANT counterexample.
 
     Uses very large perturbations (up to 20x coordinate range) to hop
     to entirely different branches of the premise manifold.
+
+    base_seed must be deterministic per call site (e.g. derived from the
+    rule_id) — using time.time() here previously made whether a rule
+    survived NDG depend on the wall-clock moment discover() happened to run,
+    so the same rule could be kept or dropped on different batch runs with
+    no code or data change.
     """
     for trial in range(n_trials):
         # Each trial: start from perturbed nominal, optimize
-        rng = np.random.RandomState(42 + trial * 137 + int(time.time() * 1000) % 10000)
+        rng = np.random.RandomState((base_seed + trial * 137) % (2**32))
         # Build perturbation: mix of random directions with large scale
         x0 = np.zeros(2 * len(nominal))
         point_names = sorted(nominal.keys())
@@ -135,6 +143,16 @@ def generate_all_candidates(point_names: list[str]) -> list[tuple[str, list[str]
             candidates.append(("sameclock", [a, b, c, d, e, f]))
     for a, b, c in combinations(point_names, 3):
         candidates.append(("ncoll", [a, b, c]))
+    # sameside A B C X Y Z: A vs. B->C同侧 X vs. Y->Z. 复用sameclock已有的
+    # "两组三点各自互不相同、六点里至少4个不同"枚举方式(triple组合成对)，
+    # 只是sameside的两个三元组内部有(顶点, 边起点, 边终点)的角色区分——枚举
+    # 全部有序三元组(permutations)覆盖所有角色分配，交给counterexample_search
+    # 的数值评估和symmetry.py的_normalize_sameside在下游做等价折叠。
+    ordered_triples = list(permutations(point_names, 3))
+    for (a, b, c), (x, y, z) in combinations(ordered_triples, 2):
+        if len({a, b, c, x, y, z}) >= 4:
+            candidates.append(("sameside", [a, b, c, x, y, z]))
+            candidates.append(("nsameside", [a, b, c, x, y, z]))
     segs = list(combinations(point_names, 2))
     for (a, b), (c, d) in combinations(segs, 2):
         if len({a, b, c, d}) >= 3:
@@ -259,7 +277,19 @@ def discover(rule_id: str, rule_text: str, rename_map: dict,
                 bad_configs.append((pts, f"no_goal_build(seed={gs['seed']})"))
 
         if len(good_sets) < 2:
-            good_sets = rebuild_with_seeds(fl_problem, rename_map, seeds)
+            # strip_goal=False: a "good" configuration must actually satisfy the
+            # conclusion.  Building WITHOUT the goal (the old inherited default)
+            # let premise-satisfying counterexamples into good_sets, which makes
+            # the pair test below unsatisfiable by construction — surviving
+            # requires a candidate to differ on every (good, bad) pair AND agree
+            # across all goods, and a good that violates the conclusion behaves
+            # like just another bad.  That silently produced n_surviving=0 /
+            # no_valid_candidate for every rule reaching this branch.
+            # Step 1's try_reverse_construction classifies good vs bad with an
+            # explicit conclusion check (reverse_construction.py), so this
+            # restores the intended, consistent semantics.
+            good_sets = rebuild_with_seeds(fl_problem, rename_map, seeds,
+                                           strip_goal=False)
 
         # Strategy C (cheap): only when Strategy B also found nothing, one
         # last global-search attempt on a SINGLE good config (not looped
@@ -270,8 +300,12 @@ def discover(rule_id: str, rule_text: str, rename_map: dict,
         # "insufficient".  n_ce_trials still controls how many random
         # restarts that single attempt gets internally.
         if not bad_configs and good_sets:
+            # Deterministic per-rule seed: same rule_id always probes the same
+            # perturbations, so a rule's survival can't flip between batch
+            # runs depending on wall-clock time (see _find_distant_ce docstring).
+            ce_base_seed = zlib.crc32(rule_id.encode("utf-8")) % (2**31)
             ce_pts = _find_distant_ce(premises, conclusions, good_sets[0]["points"],
-                                      n_trials=n_ce_trials)
+                                      n_trials=n_ce_trials, base_seed=ce_base_seed)
             if ce_pts is not None and _prem_ok(ce_pts) and _concl_clearly_bad(ce_pts):
                 bad_configs.append((ce_pts, f"cheap_global_search(seed={good_sets[0]['seed']})"))
 

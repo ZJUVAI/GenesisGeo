@@ -167,6 +167,7 @@ def run_part1(
             "collapsed_steps": pstats["collapsed_steps"],
             "subgraphs": pstats["subgraphs"] if decompose else None,
             "skipped_by_predicate": pstats["skipped_by_predicate"],
+            "skipped_by_eqpoint": pstats["skipped_by_eqpoint"],
             "eqpoint_merged": pstats["eqpoint_merged"],
             "eqpoint_dropped_trivial": pstats["eqpoint_dropped_trivial"],
             "propositions": len(propositions),
@@ -175,6 +176,7 @@ def run_part1(
               f"collapsed_steps={pstats['collapsed_steps']} "
               f"subgraphs={pstats['subgraphs']} "
               f"skipped_by_predicate={pstats['skipped_by_predicate']} "
+              f"skipped_by_eqpoint={pstats['skipped_by_eqpoint']} "
               f"propositions={len(propositions)}")
         print(f"[part1] eqpoint 合并: {pstats['eqpoint_merged']} 条命题合并等价点, "
               f"{pstats['eqpoint_dropped_trivial']} 条合并后平凡被丢弃")
@@ -212,21 +214,27 @@ def run_part1(
         # 需要绘制 / 统计的目标图集
         target_graphs = subgraphs if decompose else graphs
 
-        # 按 rule_skip_predicates 丢弃整张（子）证明图：只要图中任一 fact
-        # 命中该类别谓词，整图丢弃，而不只是过滤命题的前提/结论。
+        # 整图丢弃，两条规则（见 graph_skip_reason）：rule_skip_predicates 命中的
+        # 谓词只要在图中任一 fact 出现就丢整图；裸 eqpoint（两个参数都不是辅助点）
+        # 恒定丢弃 —— 它有资格成为命题前提，会泄漏进提取出的规则。含辅助点的
+        # eqpoint 是证明内部的正常中间步骤，保留。
         rule_skip_predicates = part1_cfg.get("rule_skip_predicates") or []
+        from newclid.discovery.extraction.graph_manager import graph_skip_reason
+        skip_set = set(rule_skip_predicates)
         skipped_by_predicate = 0
-        if rule_skip_predicates:
-            from newclid.discovery.extraction.graph_manager import graph_contains_predicates
-            skip_set = set(rule_skip_predicates)
-            before = len(target_graphs)
-            target_graphs = [
-                g for g in target_graphs
-                if not graph_contains_predicates(g, skip_set)
-            ]
-            skipped_by_predicate = before - len(target_graphs)
-            print(f"[part1] rule_skip_predicates 过滤: 丢弃 {skipped_by_predicate} 张图 "
-                  f"(命中 {sorted(skip_set)}), 剩余 {len(target_graphs)} 张")
+        skipped_by_eqpoint = 0
+        kept_graphs = []
+        for g in target_graphs:
+            reason = graph_skip_reason(g, skip_set)
+            if reason == "predicate":
+                skipped_by_predicate += 1
+            elif reason == "eqpoint":
+                skipped_by_eqpoint += 1
+            else:
+                kept_graphs.append(g)
+        target_graphs = kept_graphs
+        print(f"[part1] 整图过滤: 丢弃 {skipped_by_predicate} 张(命中 {sorted(skip_set)}) "
+              f"+ {skipped_by_eqpoint} 张(裸 eqpoint), 剩余 {len(target_graphs)} 张")
 
         n = len(target_graphs)
         n_facts = sum(len(g.facts) for g in target_graphs)
@@ -237,6 +245,7 @@ def run_part1(
             "collapsed_steps": collapsed_total,
             "subgraphs": len(subgraphs) if decompose else None,
             "skipped_by_predicate": skipped_by_predicate,
+            "skipped_by_eqpoint": skipped_by_eqpoint,
             "avg_facts_per_graph": round(n_facts / n, 2) if n else 0,
             "avg_rules_per_graph": round(n_rules / n, 2) if n else 0,
         }
