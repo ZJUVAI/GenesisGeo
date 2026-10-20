@@ -115,7 +115,8 @@ def resolve_construction_config(
         available_constructions: Optional set of valid construction names for validation.
 
     Returns:
-        Dict with keys `step1_pool`, `step2_pool`, `step3_pool`.
+        Dict with keys `step1_pool`, `step2_pool`, `step3_pool`, plus
+        `weights` (dict[str, float]) and `compatibility` (dict[str, dict[str, float]]).
     """
     config = _resolve_config_source(construction_config)
     sets = config.get("construction_sets", {})
@@ -136,7 +137,34 @@ def resolve_construction_config(
             f"Construction config is missing required keys: {', '.join(missing)}."
         )
 
+    # Load optional weights (default 1.0 for any construction not listed)
+    weights: dict[str, float] = {}
+    raw_weights = config.get("construction_weights", {})
+    if isinstance(raw_weights, dict):
+        for k, v in raw_weights.items():
+            if isinstance(k, str) and not k.startswith("_") and isinstance(v, (int, float)):
+                weights[k] = float(v)
+
+    # Load optional compatibility matrix
+    compatibility: dict[str, dict[str, float]] = {}
+    raw_compat = config.get("construction_compatibility", {})
+    if isinstance(raw_compat, dict):
+        for src, targets in raw_compat.items():
+            if isinstance(src, str) and not src.startswith("_") and isinstance(targets, dict):
+                compatibility[src] = {}
+                for tgt, factor in targets.items():
+                    if isinstance(tgt, str) and isinstance(factor, (int, float)):
+                        compatibility[src][tgt] = float(factor)
+
+    # Strength of argument reuse (see ProblemSampler._map_construction_args).
+    # 0.0 keeps the historical "every argument a distinct point" behaviour.
+    raw_repetition = config.get("construction_arg_repetition", 0.0)
+    arg_repetition = (
+        float(raw_repetition) if isinstance(raw_repetition, (int, float)) else 0.0
+    )
+
     return {
+        "arg_repetition": arg_repetition,
         "step1_pool": _expand_set_names(
             config["step1_sets"],
             sets,
@@ -155,4 +183,6 @@ def resolve_construction_config(
             available_constructions,
             "step3_single_sets",
         ),
+        "weights": weights,
+        "compatibility": compatibility,
     }
