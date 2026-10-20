@@ -50,7 +50,7 @@ public:
     const Slope &s3() const { return _s3; }
     const Slope &s4() const { return _s4; }
 
-    std::vector<std::unique_ptr<Equation>> as_equation_slope(bool exp, bool using_ar) const override;
+    std::vector<std::unique_ptr<Equation>> as_equation_slope(bool exp) const override;
 
     bool numerical_only() const { return false; }
 

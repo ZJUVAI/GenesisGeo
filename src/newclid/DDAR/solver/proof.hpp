@@ -21,6 +21,7 @@ enum class ProofState : uint8_t
     PROVED_AR_DISTLOG,
     PROVED_BY_THEOREM,
     PROVED_BY_DOUBLEPOINT,
+    PROVED_AR_SIMPLIFIED,
 };
 
 class Proof
@@ -51,6 +52,8 @@ public:
     void set_proved(Proof *doublepoint, Proof *original);
 
     void set_proved(ProofState state);
+
+    void update(std::vector<Proof *> deps);
 
     void print_equations() const;
 

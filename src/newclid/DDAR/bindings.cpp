@@ -11,7 +11,10 @@
 #include <tuple>
 #include <string>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
+#include <functional>
+#include <algorithm>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -39,6 +42,287 @@ std::string join(const StatementTokens &tokens)
         oss << tokens[i];
     }
     return oss.str();
+}
+
+// ===========================================================================
+// simplify_ar 前后依赖图分析。
+//   - detect_cycles: 在依赖图中查找循环论证（有向环），返回所有找到的环。
+//     每个节点 = 语句字符串，边 node -> dep 表示 node 依赖 dep。正常证明图应为
+//     DAG；若出现环，说明存在循环论证（A 依赖 B 且 B（传递）依赖 A）。
+//   - dep_count_distribution: 统计每个节点的直接依赖数目分布，用于对比简化前后。
+// ===========================================================================
+
+// 从 DepGraph 构建邻接表：node 字符串 -> 其依赖 node 字符串列表。
+static std::unordered_map<std::string, std::vector<std::string>>
+build_adjacency(const DepGraph &graph)
+{
+    std::unordered_map<std::string, std::vector<std::string>> adj;
+    for (const auto &entry : graph)
+    {
+        const std::string node = join(std::get<0>(entry));
+        std::vector<std::string> deps;
+        deps.reserve(std::get<1>(entry).size());
+        for (const auto &dep : std::get<1>(entry))
+        {
+            deps.push_back(join(dep));
+        }
+        adj[node] = std::move(deps);
+    }
+    return adj;
+}
+
+// 用三色 DFS 查找有向环。发现回边（指向当前递归栈中节点）即提取环节。
+// 返回去重后的环列表（每个环以其构成节点集合去重，避免同一环被多次报告）。
+static std::vector<std::vector<std::string>>
+detect_cycles(const std::unordered_map<std::string, std::vector<std::string>> &adj)
+{
+    enum Color
+    {
+        WHITE,
+        GRAY,
+        BLACK
+    };
+    std::unordered_map<std::string, int> color;
+    std::vector<std::string> path; // 当前递归路径（栈）
+    std::vector<std::vector<std::string>> cycles;
+    std::unordered_set<std::string> reported; // 已报告环的规范化签名，去重
+
+    std::function<void(const std::string &)> dfs = [&](const std::string &u)
+    {
+        color[u] = GRAY;
+        path.push_back(u);
+
+        auto it = adj.find(u);
+        if (it != adj.end())
+        {
+            for (const std::string &v : it->second)
+            {
+                // 依赖节点可能不是图中的键（如初始前提），视为叶子跳过。
+                if (adj.find(v) == adj.end())
+                {
+                    continue;
+                }
+                int c = color.count(v) ? color[v] : WHITE;
+                if (c == WHITE)
+                {
+                    dfs(v);
+                }
+                else if (c == GRAY)
+                {
+                    // 找到回边 u -> v：环为 path 中从 v 开始到 u 结束的段。
+                    auto start = std::find(path.begin(), path.end(), v);
+                    std::vector<std::string> cycle(start, path.end());
+
+                    // 规范化签名去重（按最小节点旋转 + 内容拼接）。
+                    std::vector<std::string> sig = cycle;
+                    auto minit = std::min_element(sig.begin(), sig.end());
+                    std::rotate(sig.begin(), minit, sig.end());
+                    std::string key;
+                    for (const auto &s : sig)
+                        key += s + " || ";
+                    if (reported.insert(key).second)
+                    {
+                        cycles.push_back(std::move(cycle));
+                    }
+                }
+            }
+        }
+
+        path.pop_back();
+        color[u] = BLACK;
+    };
+
+    for (const auto &kv : adj)
+    {
+        if (!color.count(kv.first) || color[kv.first] == WHITE)
+        {
+            dfs(kv.first);
+        }
+    }
+    return cycles;
+}
+
+// 完整打印依赖图：每个结论节点，及其推导规则、直接依赖列表。
+static void print_dep_graph(const DepGraph &graph, const std::string &label)
+{
+    cout << "----- [dep_graph dump: " << label << "] (" << graph.size() << " nodes) -----" << endl;
+    for (const auto &entry : graph)
+    {
+        const std::string node = join(std::get<0>(entry));
+        const auto &deps = std::get<1>(entry);
+        const std::string &reason = std::get<2>(entry);
+        cout << node << "   [reason: " << reason << "]" << endl;
+        for (const auto &dep : deps)
+        {
+            cout << "    <- " << join(dep) << endl;
+        }
+    }
+    cout << "----------------------------------------------------------" << endl;
+}
+
+// 检测同一结论（谓词字符串）在图中出现多次、且依赖集合不同的情况。
+// DepGraph 是 vector，不去重同名结论；若同一结论被证明了两次且依赖链不同，
+// 说明存在冗余或互相矛盾的证明分支（例如 simplify_ar 改写后残留旧节点）。
+// 返回值：每组重复结论对应其在 graph 中的下标列表（同组内依赖不完全相同）。
+static std::vector<std::vector<size_t>>
+detect_duplicate_nodes(const DepGraph &graph)
+{
+    std::unordered_map<std::string, std::vector<size_t>> occurrences;
+    for (size_t i = 0; i < graph.size(); ++i)
+    {
+        occurrences[join(std::get<0>(graph[i]))].push_back(i);
+    }
+
+    auto dep_signature = [&](size_t idx)
+    {
+        std::vector<std::string> deps;
+        for (const auto &dep : std::get<1>(graph[idx]))
+            deps.push_back(join(dep));
+        std::sort(deps.begin(), deps.end());
+        return deps;
+    };
+
+    std::vector<std::vector<size_t>> duplicates;
+    for (const auto &kv : occurrences)
+    {
+        if (kv.second.size() < 2)
+            continue;
+
+        const auto first_sig = dep_signature(kv.second[0]);
+        bool differs = false;
+        for (size_t k = 1; k < kv.second.size(); ++k)
+        {
+            if (dep_signature(kv.second[k]) != first_sig)
+            {
+                differs = true;
+                break;
+            }
+        }
+        if (differs)
+            duplicates.push_back(kv.second);
+    }
+    return duplicates;
+}
+
+// 打印一个依赖图的分析结果：循环论证 + 依赖数目分布 + 重复结论（不同依赖）检测。
+static void analyze_dep_graph(const DepGraph &graph, const std::string &label)
+{
+    auto adj = build_adjacency(graph);
+
+    // node 字符串 -> 该结论的证明理由（reason），用于在环里标注每个节点由哪
+    // 个阶段/规则得到（如 "AR Simplified" 来自 run_new 改写，"AR with Slope"
+    // 是原生 AR）。这样看环就能立刻判断是哪个环节引入的回边。
+    std::unordered_map<std::string, std::string> reason_of;
+    for (const auto &entry : graph)
+    {
+        reason_of[join(std::get<0>(entry))] = std::get<2>(entry);
+    }
+
+    cout << "===== [dep_graph analysis: " << label << "] =====" << endl;
+    cout << "nodes (proved statements): " << graph.size() << endl;
+
+    // ---- 循环论证检测 ----
+    auto cycles = detect_cycles(adj);
+    if (cycles.empty())
+    {
+        cout << "cycles: none (graph is acyclic)" << endl;
+    }
+    else
+    {
+        cout << "cycles: " << cycles.size() << " circular-reasoning cycle(s) found!" << endl;
+        for (size_t i = 0; i < cycles.size(); ++i)
+        {
+            cout << "  cycle #" << i << " (length " << cycles[i].size() << "):" << endl;
+            for (const auto &node : cycles[i])
+            {
+                auto rit = reason_of.find(node);
+                const std::string reason = (rit != reason_of.end()) ? rit->second : "?";
+                cout << "    -> " << node << "   [reason: " << reason << "]" << endl;
+                // 同时打印该节点的完整直接依赖，便于看清回边从哪条依赖闭合。
+                auto ait = adj.find(node);
+                if (ait != adj.end())
+                {
+                    for (const auto &dep : ait->second)
+                    {
+                        cout << "         dep: " << dep << endl;
+                    }
+                }
+            }
+            // 闭合回到起点，直观展示环。
+            cout << "    -> " << cycles[i].front() << " (back to start)" << endl;
+        }
+    }
+
+    // ---- 重复结论检测（同一谓词被不同依赖证明两次）----
+    auto duplicates = detect_duplicate_nodes(graph);
+    if (duplicates.empty())
+    {
+        cout << "duplicate conclusions: none" << endl;
+    }
+    else
+    {
+        cout << "duplicate conclusions: " << duplicates.size()
+             << " statement(s) proved multiple times with different dependencies!" << endl;
+        for (const auto &group : duplicates)
+        {
+            const std::string stmt = join(std::get<0>(graph[group[0]]));
+            cout << "  statement: " << stmt << " (" << group.size() << " occurrences)" << endl;
+            for (size_t idx : group)
+            {
+                const std::string &reason = std::get<2>(graph[idx]);
+                cout << "    occurrence [reason: " << reason << "]" << endl;
+                for (const auto &dep : std::get<1>(graph[idx]))
+                {
+                    cout << "      <- " << join(dep) << endl;
+                }
+            }
+        }
+    }
+
+    // ---- 依赖数目分布 ----
+    std::map<size_t, size_t> hist; // 依赖数 -> 节点个数
+    size_t total_deps = 0;
+    size_t max_deps = 0;
+    for (const auto &entry : graph)
+    {
+        size_t n = std::get<1>(entry).size();
+        ++hist[n];
+        total_deps += n;
+        max_deps = std::max(max_deps, n);
+    }
+    double mean = graph.empty() ? 0.0 : static_cast<double>(total_deps) / graph.size();
+    cout << "dependency-count distribution (num_deps: num_nodes):" << endl;
+    for (const auto &kv : hist)
+    {
+        cout << "  " << kv.first << ": " << kv.second << endl;
+    }
+    cout << "  [total_deps=" << total_deps << " max_deps=" << max_deps
+         << " mean=" << mean << "]" << endl;
+
+    // ---- 机器可读汇总（JSONL，一行一个 run）----
+    // 以固定前缀 DEPGRAPH_JSONL 打头，分析脚本可用该前缀从混杂的 stdout/txt
+    // 里精确过滤出这些行；其余人类可读输出不受影响。dep_hist 的键为「前提数」，
+    // 值为「拥有该前提数的结论节点个数」，即前提（依赖）数分布。
+    cout << "DEPGRAPH_JSONL {"
+         << "\"label\":\"" << label << "\""
+         << ",\"nodes\":" << graph.size()
+         << ",\"cycles\":" << cycles.size()
+         << ",\"duplicate_conclusions\":" << duplicates.size()
+         << ",\"total_deps\":" << total_deps
+         << ",\"max_deps\":" << max_deps
+         << ",\"mean\":" << mean
+         << ",\"dep_hist\":{";
+    bool first = true;
+    for (const auto &kv : hist)
+    {
+        if (!first)
+            cout << ",";
+        cout << "\"" << kv.first << "\":" << kv.second;
+        first = false;
+    }
+    cout << "}}" << endl;
+
+    cout << "=================================================" << endl;
 }
 
 // 将定理字符串列表转换为 CustomRule 列表
@@ -150,32 +434,28 @@ extern "C"
         DDARSolver solver(&problem, config_map);
         solver.run(max_level);
 
-        DepGraph dep_graph = solver.dependency_graph();
-
-        // for (const auto &tupleElem : dep_graph)
+        // 简化前后依赖图分析（循环论证检测 + 依赖数分布对比），
+        // 仅在 config 里显式打开 "analyze_ar_simplify" 时执行，避免刷屏。
+        // const bool do_analyze = true;
+        //     config_map.count("analyze_ar_simplify") && config_map.at("analyze_ar_simplify");
+        // DepGraph dep_graph_before;
+        // if (do_analyze)
         // {
-        //     const StatementTokens &tokens = std::get<0>(tupleElem);
-        //     const std::vector<StatementTokens> &dependencies = std::get<1>(tupleElem);
-        //     const std::string &reason = std::get<2>(tupleElem);
-
-        //     if (reason == "Numerical Check" || reason == "Trivial")
-        //     {
-        //         continue;
-        //     }
-
-        //     std::cout << "Statement: " << join(tokens) << endl;
-
-        //     std::cout << "Dependencies:" << endl;
-        //     for (const auto &dep : dependencies)
-        //     {
-        //         std::cout << "  - " << join(dep) << endl;
-        //     }
-
-        //     std::cout << "Reason: " << reason << endl;
-        //     std::cout << "---------------------------------------\n";
+        //     dep_graph_before = solver.dependency_graph();
         // }
 
-        // solver.print_equations();
+        // 求解结束后，对前提过多的 AR 推导尝试简化
+        solver.simplify_ar();
+
+        DepGraph dep_graph = solver.dependency_graph();
+
+        // if (do_analyze)
+        // {
+        //     print_dep_graph(dep_graph_before, "before simplify_ar");
+        //     print_dep_graph(dep_graph, "after simplify_ar");
+        //     analyze_dep_graph(dep_graph_before, "before simplify_ar");
+        //     analyze_dep_graph(dep_graph, "after simplify_ar");
+        // }
 
         return make_pair(solver.is_solved(), dep_graph);
     }
@@ -210,7 +490,29 @@ extern "C"
 
         solver.run(max_level);
 
+        // 简化前后依赖图分析（循环论证检测 + 依赖数分布对比），
+        // 仅在 config 里显式打开 "analyze_ar_simplify" 时执行，避免刷屏。
+        // const bool do_analyze =
+        //     config_map.count("analyze_ar_simplify") && config_map.at("analyze_ar_simplify");
+        // DepGraph dep_graph_before;
+        // if (do_analyze)
+        // {
+        //     dep_graph_before = solver.dependency_graph();
+        // }
+
+        // 求解结束后，对前提过多的 AR 推导尝试简化
+        solver.simplify_ar();
+
         DepGraph dep_graph = solver.dependency_graph();
+
+        // if (do_analyze)
+        // {
+        //     print_dep_graph(dep_graph_before, "before simplify_ar");
+        // print_dep_graph(dep_graph, "after simplify_ar");
+        //     analyze_dep_graph(dep_graph_before, "before simplify_ar");
+        //     analyze_dep_graph(dep_graph, "after simplify_ar");
+        // }
+
         return make_pair(solver.is_solved(), dep_graph);
     }
 

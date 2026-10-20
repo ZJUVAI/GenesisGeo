@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <memory>
+#include <unordered_map>
 #include "problem.hpp"
 #include "matcher.hpp"
 #include "ar/linear_system.hpp"
@@ -57,11 +58,19 @@ public:
 
     bool run(size_t max_levels);
 
+    // 对前提数量过多的 AR 推导语句尝试简化（用若干步 DD 推理替代单步 AR）。
+    // 在 run() 收尾时调用；逐个候选交由 ARSimplifier 处理，成功则改写其依赖。
+    void simplify_ar();
+
     size_t get_level() const { return _level; }
 
     bool is_solved() const { return _solved; }
 
     const std::vector<Proof *> &goals() const { return _goals; }
+
+    const std::vector<Proof *> &checked_statements() const { return _checked_statements; }
+
+    const Problem &problem() const { return *_problem; }
 
     Proof *insert_statement(const std::unique_ptr<Statement> &p);
 

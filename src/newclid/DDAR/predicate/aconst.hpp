@@ -5,11 +5,17 @@
 #include <string>
 #include <vector>
 #include "predicate/statement.hpp"
+#include "type/slope.hpp"
+#include "type/angle.hpp"
 #include "type/rational.hpp"
 
 class AConst : public Statement
 {
 public:
+    // Constructor from two slopes directly: angle(s1, s2) = rhs * π
+    AConst(const Slope &s1, const Slope &s2, const Rational &rhs);
+
+    // Constructor from an angle (for backward compatibility)
     AConst(const Angle &ang, const Rational &rhs);
 
     std::string name() const override;
@@ -26,7 +32,9 @@ public:
 
     std::vector<statement_arg> args() const override;
 
-    const Angle &angle() const { return _angle; }
+    const Slope &s1() const { return _s1; }
+
+    const Slope &s2() const { return _s2; }
 
     const Rational &rhs() const { return _rhs; }
 
@@ -35,7 +43,9 @@ public:
         return std::make_unique<AConst>(*this);
     }
 
-    std::vector<std::unique_ptr<Equation>> as_equation_slope(bool exp, bool using_ar) const override;
+    std::vector<std::unique_ptr<Equation>> as_equation_slope(bool exp) const override;
+
+    std::string to_string() const override;
 
     std::ostream &print(std::ostream &out) const override;
 
@@ -48,7 +58,8 @@ public:
     ~AConst() override = default;
 
 private:
-    Angle _angle;
+    Slope _s1;  // First slope of the angle
+    Slope _s2;  // Second slope of the angle
     Rational _rhs;
 };
 

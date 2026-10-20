@@ -73,12 +73,8 @@ ostream &Para::print(ostream &os) const
     return os << _left.left() << _left.right() << " ∥ " << _right.left() << _right.right();
 }
 
-vector<unique_ptr<Equation>> Para::as_equation_slope(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Para::as_equation_slope(bool exp) const
 {
-    if (!using_ar)
-    {
-        return {};
-    }
     vector<unique_ptr<Equation>> result;
     result.push_back(make_unique<Equation>(Equation({Term(_left), -Term(_right)})));
     return result;

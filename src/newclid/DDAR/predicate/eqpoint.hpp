@@ -39,7 +39,7 @@ public:
 
     bool trivial() const { return false; }
 
-    std::vector<std::unique_ptr<Equation>> as_equation_dist(bool exp, bool using_ar) const override;
+    std::vector<std::unique_ptr<Equation>> as_equation_dist(bool exp) const override;
 };
 
 std::ostream &operator<<(std::ostream &out, const Statement &stmt);

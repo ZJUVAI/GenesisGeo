@@ -59,9 +59,9 @@ ostream &ConstLine::print(ostream &out) const
     return out << _q2 << " ∈ " << _p << _q1;
 }
 
-vector<unique_ptr<Equation>> ConstLine::as_equation_slope(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> ConstLine::as_equation_slope(bool exp) const
 {
-    if (!using_ar)
+    if(!exp)
     {
         return {};
     }

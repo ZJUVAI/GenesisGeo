@@ -139,9 +139,9 @@ bool Coll::operator<(const Coll &other) const
     return _a < other._a;
 }
 
-vector<unique_ptr<Equation>> Coll::as_equation_dist(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Coll::as_equation_dist(bool exp) const
 {
-    if (!using_ar)
+    if (!exp)
     {
         return {};
     }

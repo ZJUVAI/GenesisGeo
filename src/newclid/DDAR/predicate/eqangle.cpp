@@ -30,7 +30,8 @@ EqAngle::EqAngle(Point p1, Point p2, Point p3, Point p4, Point p5, Point p6, Poi
 unique_ptr<Statement> EqAngle::replace(Point p, Point q) const
 {
     // Replace points in each slope
-    auto replace_in_slope = [p, q](const Slope& s) {
+    auto replace_in_slope = [p, q](const Slope &s)
+    {
         Point left = (s.left() == p) ? q : s.left();
         Point right = (s.right() == p) ? q : s.right();
         return Slope(left, right);
@@ -62,8 +63,27 @@ unique_ptr<Statement> EqAngle::clone() const
 
 bool EqAngle::check_nondegen() const
 {
-    return _s1.check_nondegen() && _s2.check_nondegen() &&
-           _s3.check_nondegen() && _s4.check_nondegen();
+    // Each slope must be non-degenerate
+    if (!_s1.check_nondegen() || !_s2.check_nondegen() ||
+        !_s3.check_nondegen() || !_s4.check_nondegen())
+        return false;
+
+    // Require that not all four slopes are parallel:
+    // at least two of the four lines must be non-parallel.
+    // If s1 is parallel to s2, s3, and s4, then all four are parallel.
+    auto are_parallel = [](const Slope &a, const Slope &b) -> bool
+    {
+        double dx1 = a.right().x() - a.left().x();
+        double dy1 = a.right().y() - a.left().y();
+        double dx2 = b.right().x() - b.left().x();
+        double dy2 = b.right().y() - b.left().y();
+        return Numerical::close_enough(dx1 * dy2, dy1 * dx2);
+    };
+
+    if (are_parallel(_s1, _s2) && are_parallel(_s1, _s3) && are_parallel(_s1, _s4))
+        return false;
+
+    return true;
 }
 
 bool EqAngle::check_equations() const
@@ -140,19 +160,15 @@ vector<EqAngle> EqAngle::permutations() const
 {
     vector<EqAngle> res;
     res.reserve(4);
-    res.emplace_back(_s1, _s2, _s3, _s4);           // original
-    res.emplace_back(_s3, _s4, _s1, _s2);           // swap left and right
-    res.emplace_back(_s2, _s1, _s4, _s3);           // negate both angles
-    res.emplace_back(_s4, _s3, _s2, _s1);           // swap and negate
+    res.emplace_back(_s1, _s2, _s3, _s4); // original
+    res.emplace_back(_s3, _s4, _s1, _s2); // swap left and right
+    res.emplace_back(_s2, _s1, _s4, _s3); // negate both angles
+    res.emplace_back(_s4, _s3, _s2, _s1); // swap and negate
     return res;
 }
 
-vector<unique_ptr<Equation>> EqAngle::as_equation_slope(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> EqAngle::as_equation_slope(bool exp) const
 {
-    if (!using_ar)
-    {
-        return {};
-    }
     vector<unique_ptr<Equation>> result;
     result.push_back(make_unique<Equation>(Equation({Term(_s1), -Term(_s2), -Term(_s3), Term(_s4)})));
     return result;

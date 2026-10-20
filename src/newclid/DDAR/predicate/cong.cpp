@@ -48,27 +48,20 @@ ostream &Cong::print(ostream &os) const
     return os << _left << " = " << _right;
 }
 
-vector<unique_ptr<Equation>> Cong::as_equation_dist(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Cong::as_equation_dist(bool exp) const
 {
-    if (!using_ar)
+    if(!exp)
     {
         return {};
     }
     vector<unique_ptr<Equation>> result;
     result.push_back(make_unique<Equation>(Equation({Term(_left), -Term(_right)})));
-    if (exp)
-    {
-        result.push_back(make_unique<Equation>(Equation({Term({_left, _left}), -Term({_right, _right})})));
-    }
+    result.push_back(make_unique<Equation>(Equation({Term({_left, _left}), -Term({_right, _right})})));
     return result;
 }
 
-vector<unique_ptr<Equation>> Cong::as_equation_distlog(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Cong::as_equation_distlog(bool exp) const
 {
-    if (!using_ar)
-    {
-        return {};
-    }
     vector<unique_ptr<Equation>> result;
     result.push_back(make_unique<Equation>(Equation({Term(DistLog(_left)), -Term(DistLog(_right))})));
     return result;

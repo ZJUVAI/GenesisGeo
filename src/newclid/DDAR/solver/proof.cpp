@@ -34,6 +34,10 @@ void Proof::ensure_equations_initialized()
 
 void Proof::prove_by_assumption()
 {
+    if (is_proved())
+    {
+        return;
+    }
     set_proved(ProofState::PROVED_BY_ASSUMPTION);
     _depth = 0;
 }
@@ -162,6 +166,7 @@ vector<Proof *> Proof::get_dependencies() const
     case ProofState::PROVED_BY_THEOREM:
         return _solver->applications()[_theoremId].hypotheses();
     case ProofState::PROVED_BY_DOUBLEPOINT:
+    case ProofState::PROVED_AR_SIMPLIFIED:
         return _deps;
     case ProofState::PROVED_AR_DIST:
     case ProofState::PROVED_AR_DISTLOG:
@@ -193,6 +198,8 @@ string Proof::reason() const
         return "AR with Slope";
     case ProofState::PROVED_BY_DOUBLEPOINT:
         return "Transfer";
+    case ProofState::PROVED_AR_SIMPLIFIED:
+        return "AR Simplified";
     default:
         return "Unknown";
     }
@@ -224,6 +231,12 @@ void Proof::set_proved(Proof *doublepoint, Proof *original)
         req->reduce();
     }
     _solver->add_established_equations(this);
+}
+
+void Proof::update(std::vector<Proof *> deps)
+{
+    _deps = std::move(deps);
+    _state = ProofState::PROVED_AR_SIMPLIFIED;
 }
 
 void Proof::set_proved(ProofState state)

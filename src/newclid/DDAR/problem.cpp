@@ -222,7 +222,24 @@ unique_ptr<Statement> Problem::create_statement(const string &type, const vector
             long long p = stoll(args[4].substr(0, args[4].find('/')));
             long long q = stoll(args[4].substr(args[4].find('/') + 1));
             Rational a = Rational(p, q);
-            return make_unique<AConst>(Angle(p1, p2, p3, p4), a);
+            // 四点里有公共端点（原来的 Angle 构造能识别的四种情形）走原路径，
+            // 行为与之前逐位一致。
+            if (p1 == p3 || p1 == p4 || p2 == p3 || p2 == p4)
+            {
+                return make_unique<AConst>(Angle(p1, p2, p3, p4), a);
+            }
+            // 零长度腿（p1==p2 或 p3==p4）是真正的退化输入，维持原来的报错。
+            if (p1 == p2 || p3 == p4)
+            {
+                throw runtime_error("Error: Invalid points.");
+            }
+            // 四点无公共端点：aconst 本来就是「两条线的夹角 = 常数」（见
+            // predicate/constant_angle.py 的 aconst AB CD Y），两条线不必共顶点。
+            // ARSimplifier 消元时把 aconst 的一条腿替换成平行/等价线段之后就是
+            // 这种形态，原来的四点 Angle 构造会在这里抛 "Invalid points."。
+            // Slope 无向且按点序归一，故对上面四种有公共端点的情形，两种构造给出
+            // 的是同一对 Slope（含 s1/s2 顺序，normalize 的 rhs 符号因此也不变）。
+            return make_unique<AConst>(Slope(p1, p2), Slope(p3, p4), a);
         }
         throw runtime_error("Invalid number of arguments for " + type);
     }

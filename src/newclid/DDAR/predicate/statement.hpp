@@ -49,9 +49,9 @@ public:
 
     virtual std::vector<std::string> to_tokens() const;
 
-    virtual std::vector<std::unique_ptr<Equation>> as_equation_slope(bool exp, bool using_ar) const { return {}; }
-    virtual std::vector<std::unique_ptr<Equation>> as_equation_dist(bool exp, bool using_ar) const { return {}; }
-    virtual std::vector<std::unique_ptr<Equation>> as_equation_distlog(bool exp, bool using_ar) const { return {}; }
+    virtual std::vector<std::unique_ptr<Equation>> as_equation_slope(bool exp) const { return {}; }
+    virtual std::vector<std::unique_ptr<Equation>> as_equation_dist(bool exp) const { return {}; }
+    virtual std::vector<std::unique_ptr<Equation>> as_equation_distlog(bool exp) const { return {}; }
 
     virtual Point max_point() const;
 

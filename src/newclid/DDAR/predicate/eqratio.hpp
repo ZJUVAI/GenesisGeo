@@ -46,8 +46,8 @@ public:
 
     bool trivial() const { return (_left_up == _left_down && _right_up == _right_down) || (_left_up == _right_up && _left_down == _right_down); }
 
-    std::vector<std::unique_ptr<Equation>> as_equation_dist(bool exp, bool using_ar) const override;
-    std::vector<std::unique_ptr<Equation>> as_equation_distlog(bool exp, bool using_ar) const override;
+    std::vector<std::unique_ptr<Equation>> as_equation_dist(bool exp) const override;
+    std::vector<std::unique_ptr<Equation>> as_equation_distlog(bool exp) const override;
 };
 
 #endif // EQRATIO_HPP

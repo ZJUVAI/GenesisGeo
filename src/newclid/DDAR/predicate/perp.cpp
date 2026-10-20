@@ -71,23 +71,15 @@ ostream &Perp::print(ostream &os) const
     return os << _left.left() << _left.right() << " ⟂  " << _right.left() << _right.right();
 }
 
-vector<unique_ptr<Equation>> Perp::as_equation_slope(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Perp::as_equation_slope(bool exp) const
 {
-    if (!using_ar)
-    {
-        return {};
-    }
     vector<unique_ptr<Equation>> result;
     result.push_back(make_unique<Equation>(Equation({Term(_left), -Term(_right)})));
     return result;
 }
 
-vector<unique_ptr<Equation>> Perp::as_equation_dist(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Perp::as_equation_dist(bool exp) const
 {
-    if (!using_ar)
-    {
-        return {};
-    }
     vector<unique_ptr<Equation>> result;
     if (!exp)
     {

@@ -80,12 +80,8 @@ Coll Secant::coll_pab() const
     return Coll(_p, _a, _b);
 }
 
-vector<unique_ptr<Equation>> Secant::as_equation_dist(bool exp, bool using_ar) const
+vector<unique_ptr<Equation>> Secant::as_equation_dist(bool exp) const
 {
-    if (!using_ar)
-    {
-        return {};
-    }
     vector<unique_ptr<Equation>> result;
     if (!exp)
     {
