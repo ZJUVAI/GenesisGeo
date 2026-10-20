@@ -70,6 +70,9 @@ public:
     // r28
     static Theorem coll_of_para(const Coll &c);
 
+    // ratio segment-to-whole (collinear): AB/BC = DE/EF → AB/AC = DE/DF
+    static Theorem ratio_segment_to_whole(const Coll &left, const Coll &right);
+
     // r82
     static Theorem para_of_coll(const Coll &c);
 

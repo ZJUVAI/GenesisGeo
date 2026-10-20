@@ -26,6 +26,7 @@ from newclid.predicates.constant_angle import (
 
 from newclid.predicates.different import Diff as Diff
 from newclid.predicates.sameclock import SameClock as SameClock
+from newclid.predicates.angle_types import Obtuse as Obtuse, Acute as Acute
 from newclid.predicates.sameside import NSameSide as NSameSide, SameSide as SameSide
 from newclid.predicates.other import Secant, ConstLine, EqPoint
 
@@ -70,6 +71,8 @@ NUMERICAL_PREDICATES = (
     SameSide,
     NSameSide,
     SameClock,
+    Obtuse,
+    Acute,
 )
 
 INTEGRATED_PREDICATES = (PythagoreanPremises, PythagoreanConclusions)

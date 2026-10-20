@@ -50,6 +50,8 @@ r07 Thales Theorem I
 para A B C D, coll O A C, ncoll O A B, coll O B D => eqratio3 A B C D O O
 r28 Overlapping parallels
 para A B A C => coll A B C
+r29 Ratio segment to whole (collinear)
+coll A B C, coll D E F, eqratio A B B C D E E F => eqratio A B A C D E D F
 r43 Orthocenter theorem
 perp a b c d, perp a c b d => perp a d b c
 r49 Recognize center of cyclic (circle)

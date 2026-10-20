@@ -542,6 +542,22 @@ Theorem Theorem::eqangle_of_cong(const Point &vertex, const Point &a, const Poin
     return theorem;
 }
 
+Theorem Theorem::ratio_segment_to_whole(const Coll &left, const Coll &right)
+{
+    // coll A B C, coll D E F, eqratio A B B C D E E F
+    // => eqratio A B A C D E D F
+    Theorem theorem("Ratio segment to whole (collinear)", "r29");
+    theorem.add_hypothesis(left.clone());
+    theorem.add_hypothesis(right.clone());
+    theorem.add_hypothesis(make_unique<EqRatio>(EqRatio(
+        Dist(left.a(), left.b()), Dist(left.b(), left.c()),
+        Dist(right.a(), right.b()), Dist(right.b(), right.c()))));
+    theorem.add_conclusion(make_unique<EqRatio>(EqRatio(
+        Dist(left.a(), left.b()), Dist(left.a(), left.c()),
+        Dist(right.a(), right.b()), Dist(right.a(), right.c()))));
+    return theorem;
+}
+
 Theorem Theorem::clone() const
 {
     Theorem thm(_name, _rule);

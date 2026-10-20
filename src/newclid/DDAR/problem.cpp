@@ -9,6 +9,9 @@
 #include "predicate/circumcenter.hpp"
 #include "predicate/coll.hpp"
 #include "predicate/ncoll.hpp"
+#include "predicate/obtuse.hpp"
+#include "predicate/acute.hpp"
+#include "predicate/nperp.hpp"
 #include "predicate/cong.hpp"
 #include "predicate/congruent_triangles.hpp"
 #include "predicate/const_line.hpp"
@@ -277,6 +280,22 @@ unique_ptr<Statement> Problem::create_statement(const string &type, const vector
         Point p3 = this->find_point(args[2]);
         return make_unique<NColl>(p1, p2, p3);
     }
+    else if(type == "obtuse")
+    {
+        if (args.size() != 3) { throw runtime_error("Invalid number of arguments for " + type); }
+        Point p1 = this->find_point(args[0]);
+        Point p2 = this->find_point(args[1]);
+        Point p3 = this->find_point(args[2]);
+        return make_unique<Obtuse>(p1, p2, p3);
+    }
+    else if(type == "acute")
+    {
+        if (args.size() != 3) { throw runtime_error("Invalid number of arguments for " + type); }
+        Point p1 = this->find_point(args[0]);
+        Point p2 = this->find_point(args[1]);
+        Point p3 = this->find_point(args[2]);
+        return make_unique<Acute>(p1, p2, p3);
+    }
     else if (type == "cong")
     {
         if (args.size() != 4)
@@ -530,6 +549,15 @@ unique_ptr<Statement> Problem::create_statement(const string &type, const vector
         Point c = this->find_point(args[2]);
         Point d = this->find_point(args[3]);
         return make_unique<NPara>(NPara(Slope(a, b), Slope(c, d)));
+    }
+    else if(type == "nperp")
+    {
+        if (args.size() != 4) { throw runtime_error("Invalid number of arguments for " + type); }
+        Point a = this->find_point(args[0]);
+        Point b = this->find_point(args[1]);
+        Point c = this->find_point(args[2]);
+        Point d = this->find_point(args[3]);
+        return make_unique<NPerp>(NPerp(Slope(a, b), Slope(c, d)));
     }
     else if (type == "sameside")
     {
