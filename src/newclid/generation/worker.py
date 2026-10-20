@@ -23,7 +23,84 @@ import numpy as np
 
 from newclid.generation.sampler import ProblemSampler
 
+import json
+import os
+
 logger = logging.getLogger(__name__)
+
+# --- 反向重构失败埋点（诊断用，默认关闭） ---
+# 设置环境变量 NEWCLID_RECON_FAIL_LOG=<目录> 后，每个 worker 进程会把
+# rejected/solved_without_aux/unsolved_with_aux 三种丢弃结果的结构化 key
+# 追加写入 <目录>/recon_fail_<pid>.jsonl（每个进程独立文件，避免多进程写
+# 同一文件的锁竞争）。只加一次字符串拼接 + 文件 append，不改变任何求解
+# 逻辑，对现有生产跑无影响（未设置该环境变量时是纯 no-op）。
+_RECON_FAIL_LOG_DIR = os.environ.get("NEWCLID_RECON_FAIL_LOG")
+_recon_fail_fp = None
+if _RECON_FAIL_LOG_DIR:
+    os.makedirs(_RECON_FAIL_LOG_DIR, exist_ok=True)
+    _recon_fail_fp = open(
+        os.path.join(_RECON_FAIL_LOG_DIR, f"recon_fail_{os.getpid()}.jsonl"),
+        "a",
+        buffering=1,
+    )
+
+
+def _log_recon_fail(outcome: str, construction_name: str, removed_pred: str,
+                     kept_pred: str, goal_pred: str) -> None:
+    """记录一次 reconstruction 失败/丢弃的结构化 key（不含具体点名/坐标）。"""
+    if _recon_fail_fp is None:
+        return
+    try:
+        _recon_fail_fp.write(json.dumps({
+            "outcome": outcome,
+            "construction": construction_name,
+            "removed_pred": removed_pred,
+            "kept_pred": kept_pred,
+            "goal_pred": goal_pred,
+        }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# eqangle 类型的可逆构造很多（angle_bisector/external_bisector/angle_mirror/
+# eqangle2/on_aline/eqangle3/iso_triangle_vertex_angle/on_aline0/...），其中
+# on_aline 派生的 eqangle 目标数量巨大，会让反向重构大部分时间都花在 eqangle
+# 上。只保留角平分线（含外角平分线）和角的 mirror 这两种，其余 eqangle 构造
+# 类型不再作为反向重构候选。
+EQANGLE_RECONSTRUCTIBLE_CONSTRUCTIONS = {
+    "angle_bisector",
+    "external_bisector",
+    "angle_mirror",
+}
+
+
+def _build_reversible_constructions(
+    defs: dict[str, DefinitionJGEX],
+) -> dict[str, tuple[str, tuple[str, ...]]]:
+    """
+    映射：构造名 -> (谓词名, 谓词参数模板)。
+
+    只保留恰好一个 basics Clause、Clause 里恰好一条句子、且句子参数正好等于
+    {cdef.args} | {cdef.points} 的构造类型——即"一点一谓词"类型（新点不带
+    premise-only / rely-only 参数）。谓词为 eqangle 的构造再按
+    EQANGLE_RECONSTRUCTIBLE_CONSTRUCTIONS 收窄。
+    """
+    result = {}
+    for name, cdef in defs.items():
+        if len(cdef.basics) != 1:
+            continue
+        basic_clause = cdef.basics[0]
+        if len(basic_clause.sentences) != 1:
+            continue
+        sentence = basic_clause.sentences[0]
+        sentence_args = set(sentence[1:])
+        declared = set(cdef.args) | set(cdef.points)
+        if sentence_args != declared:
+            continue
+        if sentence[0] == "eqangle" and name not in EQANGLE_RECONSTRUCTIBLE_CONSTRUCTIONS:
+            continue
+        result[name] = (sentence[0], sentence)
+    return result
 
 
 class TimeoutError(Exception):
@@ -51,6 +128,25 @@ class ProblemWorker:
 
     filter = GoalFilter()
     defs = DefinitionJGEX.to_dict(DefinitionJGEX.parse_txt_file(default_defs_path()))
+    REVERSIBLE_CONSTRUCTIONS: dict[str, tuple[str, tuple[str, ...]]] = (
+        _build_reversible_constructions(defs)
+    )
+
+    # --- 反向重构功能开关 ---
+    ENABLE_REVERSE_RECONSTRUCTION = True
+    # 不限制总次数/deadline：每个 possible_goal 都必须至少被尝试一次，不能
+    # 因为某种谓词类型（比如 on_aline 派生出的一大批 eqangle）数量多就把
+    # 后面的目标类型饿死。闭包截断已经让单次尝试足够轻量。
+    # 只考虑点数不超过这个值的目标作为重构候选（匹配"一点一谓词"构造的元数范围，
+    # 让匹配过程保持轻量）。
+    REVERSE_RECON_MAX_GOAL_POINTS = 8
+    # 候选题目没有坐标信息，数值坐标搜索可能需要重试；使用比默认 1 更宽松的
+    # max_attempts，但远小于 remove_coords 场景下的 10，因为这些候选题目
+    # 通常结构简单、约束不多。
+    REVERSE_RECON_BUILD_MAX_ATTEMPTS = 5
+    # 每题最多尝试的重构候选数：候选先打乱（按 seed），再取前 N 个，避免
+    # possible_goals 很大时（如 on_aline 派生出的大量 eqangle）尝试次数暴涨。
+    REVERSE_RECON_MAX_ATTEMPTS_PER_PROBLEM = 20
 
     @ray.remote(num_cpus=1, max_retries=0)
     def ray_process_single_problem(args):
@@ -82,10 +178,17 @@ class ProblemWorker:
                 remove_coords,
                 construction_config,
                 fl_statement,
+                *optional,
             ) = args
+            # Trailing fields are optional: `custom_rules` was added after the
+            # tuple was introduced and `triple_symmetry_enabled` after that, so
+            # older callers pass a shorter tuple. Triple symmetry is on by
+            # default, so a caller that omits the field still gets it.
+            custom_rules = optional[0] if len(optional) > 0 else None
+            triple_symmetry_enabled = bool(optional[1]) if len(optional) > 1 else True
             start_time = time.time()
 
-            TIMELIMIT = 30  # 30 seconds per problem
+            TIMELIMIT = 180  # 30 seconds per problem
             DEADLINE = start_time + TIMELIMIT
 
             # geneate fl_statement
@@ -105,6 +208,7 @@ class ProblemWorker:
                             prune=prune,
                             with_coords=not remove_coords,
                             return_timings=True,
+                            triple_symmetry_enabled=triple_symmetry_enabled,
                         )
                 except TimeoutError:
                     return [], {}
@@ -127,11 +231,19 @@ class ProblemWorker:
                 solver=solver,
                 using_log=using_log,
                 using_exp=using_exp,
+                # `light=True` makes CSolver ignore the solver we just built
+                # and re-derive its own numeric input via `build_ddar_input`,
+                # so DDAR's closure is never merged into
+                # `solver.proof.dep_graph.hyper_graph`. `_generate_possible_goals`
+                # reads possible goals off that graph, so with light mode this
+                # worker silently yields zero samples for every problem. Same
+                # requirement `full_closure_builder.run_full_closure` documents.
+                light=False,
             )
 
             # Run solver
             ddar_start = time.time()
-            csolver.run(max_level=max_level)
+            csolver.run(max_level=max_level, custom_rules=custom_rules)
             ddar_time = time.time() - ddar_start
 
             # Generate possible goals
@@ -201,8 +313,12 @@ class ProblemWorker:
             # then, process goal groups
             process_goal_time = time.time()
             generated_data = []
-            for _, goal_list in eq_predicates_goals.items():
+            # 超过 DEADLINE 时下面的 break 会把当前及之后所有 goal group 都丢掉，
+            # 记录一下，供上层统计「本来能出样本、却被时间截断」的任务数。
+            deadline_hit = False
+            for group_idx, (_, goal_list) in enumerate(eq_predicates_goals.items()):
                 if time.time() > DEADLINE:
+                    deadline_hit = True
                     break
                 goals = [data[0] for data in goal_list]
                 premises = goal_list[0][1]
@@ -223,13 +339,37 @@ class ProblemWorker:
                     seed,
                     using_log,
                     using_exp,
+                    custom_rules,
                 )
                 generated_data.extend(data)
             process_goal_time = time.time() - process_goal_time
 
+            reverse_recon_time = time.time()
+            recon_stats = {
+                "candidates": 0,
+                "solved_without_aux": 0,
+                "unsolved_with_aux": 0,
+                "kept": 0,
+            }
+            if ProblemWorker.ENABLE_REVERSE_RECONSTRUCTION:
+                recon_data, recon_stats = ProblemWorker._try_reverse_reconstruction(
+                    possible_goals,
+                    solver,
+                    solver_builder,
+                    seed,
+                    using_log,
+                    using_exp,
+                    custom_rules,
+                )
+                generated_data.extend(recon_data)
+            reverse_recon_time = time.time() - reverse_recon_time
+
             has_real_aux = any(
                 "<aux>" in d.get("llm_output_renamed", "") for d in generated_data
             )
+            # 时间截断且已经产出了带 aux 的样本：这道题确实有 aux，但剩下的
+            # goal group 全被 DEADLINE 砍掉了，aux 样本是损失掉的。
+            aux_truncated = deadline_hit and has_real_aux
 
             # Create summary
             summary = {
@@ -237,9 +377,19 @@ class ProblemWorker:
                 "generation_time": generation_time,
                 "build_solver_time": build_solver_time,
                 "ddar_time": ddar_time,
-                "runtime": solver.run_infos["runtime"],
+                # CSolver only fills run_infos when it owns a symbolic solver;
+                # in light mode it skips that path and run_infos stays empty.
+                # We pin light=False above, but keep the fallback so a config
+                # change can't turn a timing number into a KeyError crash.
+                # ddar_time measures the same span.
+                "runtime": solver.run_infos.get("runtime", ddar_time),
                 "checkgoals_runtime": checkgoals_runtime,
                 "process_goal_runtime": process_goal_time,
+                "reverse_recon_runtime": reverse_recon_time,
+                "recon_candidates": recon_stats["candidates"],
+                "recon_solved_without_aux": recon_stats["solved_without_aux"],
+                "recon_unsolved_with_aux": recon_stats["unsolved_with_aux"],
+                "recon_kept": recon_stats["kept"],
                 "group_runtime": group_runtime,
                 "n_samples_raw": len(generated_data),
                 "goals_raw": [
@@ -253,6 +403,8 @@ class ProblemWorker:
                 "n_proof_steps_raw": [d["n_proof_steps"] for d in generated_data],
                 "n_filtered_samples": 0,  # This value will be updated in generate.py
                 "has_real_aux": has_real_aux,
+                "deadline_hit": deadline_hit,
+                "aux_truncated": aux_truncated,
                 "fl_statement": fl_statement,
             }
 
@@ -371,6 +523,461 @@ class ProblemWorker:
         #         continue
 
     @staticmethod
+    def _try_reverse_reconstruction(
+        possible_goals: list,
+        solver: "GeometricSolver",
+        solver_builder: "GeometricSolverBuilder",
+        seed: int,
+        using_log: bool,
+        using_exp: bool,
+        custom_rules,
+    ) -> list:
+        """
+        对匹配到"一点一谓词"构造类型的已证目标，尝试反向重构。
+        采用随机采样策略：打乱所有候选(goal,point,split)组合，
+        然后只尝试前N个（REVERSE_RECON_MAX_ATTEMPTS_PER_PROBLEM）。
+        """
+        stats = {
+            "candidates": 0,
+            "solved_without_aux": 0,
+            "unsolved_with_aux": 0,
+            "kept": 0,
+        }
+        if not ProblemWorker.ENABLE_REVERSE_RECONSTRUCTION:
+            return [], stats
+
+        results: list = []
+        dep_graph = solver.proof.dep_graph
+        reversible = ProblemWorker.REVERSIBLE_CONSTRUCTIONS
+        rng = np.random.default_rng(seed)
+
+        # 预先收集所有候选，然后打乱并采样
+        candidates = []
+        for goal in possible_goals:
+            goal_points = [a for a in goal.args if isinstance(a, Point)]
+            if len(goal_points) > ProblemWorker.REVERSE_RECON_MAX_GOAL_POINTS:
+                continue
+
+            goal_closure_names = {
+                p.name for p in dep_graph.points_dependency_closure(goal_points)
+            }
+
+            for candidate_point in goal_points:
+                other_points = [p for p in goal_points if p is not candidate_point]
+                match = ProblemWorker._match_goal_to_construction(
+                    goal, candidate_point, reversible, dep_graph
+                )
+                if match is None:
+                    continue
+                construction_name, matched_sentence = match
+
+                if dep_graph.point_has_dependents_among(candidate_point, other_points):
+                    continue
+
+                orig_clause = candidate_point.clause
+                if len(orig_clause.sentences) != 2:
+                    continue
+                splits = ProblemWorker._split_defining_clause(
+                    orig_clause, candidate_point.name
+                )
+                if not splits:
+                    continue
+
+                for kept_sentence, removed_sentence in splits:
+                    candidates.append((
+                        goal, candidate_point, construction_name, matched_sentence,
+                        kept_sentence, removed_sentence, orig_clause, goal_closure_names
+                    ))
+
+        # 打乱并采样前N个
+        rng.shuffle(candidates)
+        sampled = candidates[:ProblemWorker.REVERSE_RECON_MAX_ATTEMPTS_PER_PROBLEM]
+
+        for (goal, candidate_point, construction_name, matched_sentence,
+             kept_sentence, removed_sentence, orig_clause, goal_closure_names) in sampled:
+            stats["candidates"] += 1
+            record, outcome = ProblemWorker._attempt_one_reconstruction(
+                goal=goal,
+                candidate_point=candidate_point,
+                construction_name=construction_name,
+                matched_sentence=matched_sentence,
+                kept_sentence=kept_sentence,
+                removed_sentence=removed_sentence,
+                orig_clause=orig_clause,
+                goal_closure_names=goal_closure_names,
+                solver=solver,
+                solver_builder=solver_builder,
+                seed=seed,
+                using_log=using_log,
+                using_exp=using_exp,
+                custom_rules=custom_rules,
+            )
+            if outcome in stats:
+                stats[outcome] += 1
+            if record is not None:
+                results.append(record)
+
+        return results, stats
+
+    @staticmethod
+    def _match_goal_to_construction(
+        goal: Statement,
+        candidate_point: Point,
+        reversible: dict,
+        dep_graph: DependencyGraph,
+    ):
+        """
+        检查 goal（把 candidate_point 当作"新点" x）是否匹配某个可逆构造类型的
+        谓词形式。匹配返回 (construction_name, sentence_template)，否则 None。
+
+        必须通过 Statement.from_tokens(...).to_str() 归一化后比较，不能用原始
+        位置比较（rconst 的 preparse 会反转比例，eqratio/eqangle 会重排参数等）。
+        """
+        goal_pred_name = goal.predicate.NAME
+        goal_str = goal.to_str()
+        for cname, (pred_name, sentence_template) in reversible.items():
+            if pred_name != goal_pred_name:
+                continue
+            template_args = sentence_template[1:]
+            cdef = ProblemWorker.defs[cname]
+            new_point_slots = [
+                i for i, v in enumerate(template_args) if v in cdef.points
+            ]
+            if len(new_point_slots) != 1:
+                continue  # 只考虑单新点构造
+            x_slot = new_point_slots[0]
+
+            goal_args = goal.args
+            if len(goal_args) != len(template_args):
+                continue
+            if (
+                not isinstance(goal_args[x_slot], Point)
+                or goal_args[x_slot] is not candidate_point
+            ):
+                continue
+            # candidate_point 必须只在这个谓词里出现一次（恰好是"新点"槽位）。
+            # 如果它在别的槽位也出现，"删掉 x、换成以 y 为新点的构造"这个替换
+            # 就不再是单点重命名能表达的，跳过以保持替换的正确性。
+            occurrences = sum(1 for a in goal_args if a is candidate_point)
+            if occurrences != 1:
+                continue
+
+            candidate_sentence_args = tuple(
+                (a.name if isinstance(a, Point) else str(a)) for a in goal_args
+            )
+            candidate_statement = Statement.from_tokens(
+                (pred_name,) + candidate_sentence_args, dep_graph
+            )
+            if candidate_statement is None:
+                continue
+            if candidate_statement.to_str() != goal_str:
+                continue
+
+            return cname, sentence_template
+        return None
+
+    @staticmethod
+    def _split_defining_clause(clause: Clause, point_name: str):
+        """
+        clause 是原题目里定义 point_name 的那条子句（可能还定义了其他点）。只接受
+        单点、恰好两条句子的子句。
+
+        x 原本两条句子中，究竟该删除哪一条并没有先验依据（新匹配到的构造类型
+        通常和两条原始句子都不同）——所以两种拆分都作为候选返回，分别尝试。
+
+        每种候选是 (kept_sentence, removed_sentence)：kept_sentence 会被重命名
+        x->y 并和新匹配到的构造合并进重构题目；removed_sentence 的谓词形式会
+        变成新目标。removed_sentence 必须本身是一个可逆构造类型，否则代表被
+        删除的构造无法转成单一谓词目标，这种拆分被跳过。
+        """
+        if len(clause.points) != 1 or clause.points[0].split("@")[0] != point_name:
+            return []
+        if len(clause.sentences) != 2:
+            return []
+        s0, s1 = clause.sentences
+        reversible = ProblemWorker.REVERSIBLE_CONSTRUCTIONS
+
+        splits = []
+        for removed, kept in ((s0, s1), (s1, s0)):
+            if removed[0] not in reversible:
+                continue
+            splits.append((kept, removed))
+        return splits
+
+    @staticmethod
+    def _fresh_point_name(x_name: str, solver: "GeometricSolver") -> str:
+        used = set(solver.proof.symbols_graph.name2node.keys())
+        idx = 0
+        while True:
+            candidate = f"y{idx}" if idx else "y"
+            if candidate not in used and candidate != x_name:
+                return candidate
+            idx += 1
+
+    @staticmethod
+    def _other_clauses_in_closure(
+        constructions, orig_clause: Clause, x_name: str, goal_closure_names: set
+    ):
+        """
+        返回除 orig_clause 之外、且声明的点落在目标依赖闭包 goal_closure_names
+        内的子句——把题目截断到目标证明实际用到的最大点集合。闭包之外的子句
+        （包括提到 x_name、但和这次重构无关的子句）直接丢弃，而不是因为
+        x_name 在别处出现就拒绝整次重构。
+        """
+        other_clauses = []
+        for clause in constructions:
+            clause_no_coords = Clause(
+                points=tuple(p.split("@")[0] for p in clause.points),
+                sentences=clause.sentences,
+            )
+            if clause_no_coords == orig_clause:
+                continue
+            if x_name in clause_no_coords.points:
+                # x 自己的其他定义子句（理论上不会出现，因为一个点只由一条
+                # 子句定义），保险起见仍然跳过。
+                continue
+            if not all(p in goal_closure_names for p in clause_no_coords.points):
+                continue
+            other_clauses.append(clause_no_coords)
+        return other_clauses
+
+    @staticmethod
+    def _removed_sentence_to_goal_tokens(
+        removed_sentence: tuple, rename_map: dict
+    ) -> tuple:
+        """
+        用 removed_sentence（构造的实际参数）代入该构造类型唯一 basics 句子模板，
+        得到谓词 token 元组，并应用 x->y 重命名。
+        """
+        cdef = ProblemWorker.defs[removed_sentence[0]]
+        mapping = dict(zip(cdef.declare[1:], removed_sentence[1:]))
+        points, bs = cdef.basics[0]
+        assert len(bs) == 1
+        b = bs[0]
+        tokens = translate_sentence(mapping, b)
+        return translate_sentence(rename_map, tokens)
+
+    @staticmethod
+    def _goal_solved(solver: "GeometricSolver", goal_tokens: tuple) -> bool:
+        stmt = Statement.from_tokens(goal_tokens, solver.proof.dep_graph)
+        return stmt is not None and stmt.check()
+
+    @staticmethod
+    def _attempt_one_reconstruction(
+        *,
+        goal: Statement,
+        candidate_point: Point,
+        construction_name: str,
+        matched_sentence: tuple,
+        kept_sentence: tuple,
+        removed_sentence: tuple,
+        orig_clause: Clause,
+        goal_closure_names: set,
+        solver: "GeometricSolver",
+        solver_builder: "GeometricSolverBuilder",
+        seed: int,
+        using_log: bool,
+        using_exp: bool,
+        custom_rules,
+    ):
+        """
+        构建更小的候选题目，跑第一阶段（不加辅助点）；不可证的话跑第二阶段
+        （加回辅助点）。只有"加辅助点才可证"这条路径返回输出字典，否则返回 None。
+        """
+        x_name = candidate_point.name
+        y_name = ProblemWorker._fresh_point_name(x_name, solver)
+
+        rename_map = {x_name: y_name}
+        kept_sentence_renamed = translate_sentence(rename_map, kept_sentence)
+        cdef = ProblemWorker.defs[construction_name]
+        goal_args_by_name = {
+            v: (
+                goal.args[i].name
+                if isinstance(goal.args[i], Point)
+                else str(goal.args[i])
+            )
+            for i, v in enumerate(matched_sentence[1:])
+        }
+        x_slot_name = [v for v in matched_sentence[1:] if v in cdef.points][0]
+        goal_args_by_name[x_slot_name] = y_name
+        matched_construction_tokens = (construction_name,) + tuple(
+            goal_args_by_name[v] for v in cdef.declare[1:] if v in goal_args_by_name
+        )
+
+        new_clause_str = (
+            y_name
+            + " = "
+            + " ".join(kept_sentence_renamed)
+            + ", "
+            + " ".join(matched_construction_tokens)
+        )
+
+        other_clauses = ProblemWorker._other_clauses_in_closure(
+            solver_builder.problemJGEX.constructions,
+            orig_clause,
+            x_name,
+            goal_closure_names,
+        )
+
+        new_goal_tokens = ProblemWorker._removed_sentence_to_goal_tokens(
+            removed_sentence, rename_map
+        )
+
+        candidate_fl = (
+            "; ".join(str(c) for c in other_clauses)
+            + "; "
+            + new_clause_str
+            + " ? "
+            + " ".join(new_goal_tokens)
+        )
+
+        # 第一阶段：不加辅助点直接求解。
+        solver_a, builder_a = ProblemWorker._build_solver(
+            candidate_fl, max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS
+        )
+        if solver_a is None:
+            _log_recon_fail("rejected", construction_name, removed_sentence[0],
+                             kept_sentence[0], goal.predicate.NAME)
+            return None, "rejected"
+        csolver_a = CSolver(
+            candidate_fl,
+            seed=seed,
+            solver=solver_a,
+            using_log=using_log,
+            using_exp=using_exp,
+            light=False,
+        )
+        csolver_a.run(custom_rules=custom_rules)
+        if ProblemWorker._goal_solved(solver_a, new_goal_tokens):
+            _log_recon_fail("solved_without_aux", construction_name, removed_sentence[0],
+                             kept_sentence[0], goal.predicate.NAME)
+            return None, "solved_without_aux"  # 直接可证 -> 按纠正后的范围丢弃
+
+        # 第二阶段：把 x 按其完整原始定义（kept + removed 两条句子）重新加回去
+        # 作为辅助点。只用 removed_sentence 一条无法唯一确定 x 的位置——它在
+        # 原题目里本来就是两条句子的交点，只加一条会让数值构造在自由度更高的
+        # 曲线/直线上任取一点，得到的不是原来那个精确的 x。
+        aux_clause_str = (
+            x_name
+            + " = "
+            + " ".join(kept_sentence)
+            + ", "
+            + " ".join(removed_sentence)
+        )
+        candidate_fl_with_aux = (
+            "; ".join(str(c) for c in other_clauses)
+            + "; "
+            + new_clause_str
+            + "; "
+            + aux_clause_str
+            + " ? "
+            + " ".join(new_goal_tokens)
+        )
+        solver_b, builder_b = ProblemWorker._build_solver(
+            candidate_fl_with_aux,
+            max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS,
+        )
+        if solver_b is None:
+            _log_recon_fail("rejected", construction_name, removed_sentence[0],
+                             kept_sentence[0], goal.predicate.NAME)
+            return None, "rejected"
+        csolver_b = CSolver(
+            candidate_fl_with_aux,
+            seed=seed,
+            solver=solver_b,
+            using_log=using_log,
+            using_exp=using_exp,
+            light=False,
+        )
+        csolver_b.run(custom_rules=custom_rules)
+        if not ProblemWorker._goal_solved(solver_b, new_goal_tokens):
+            _log_recon_fail("unsolved_with_aux", construction_name, removed_sentence[0],
+                             kept_sentence[0], goal.predicate.NAME)
+            return None, "unsolved_with_aux"  # 加了辅助点仍不可证 -> 丢弃
+
+        record = ProblemWorker._build_reconstruction_output_record(
+            solver_b,
+            builder_b,
+            new_goal_tokens,
+            seed,
+            using_log,
+            using_exp,
+            custom_rules,
+        )
+        return record, ("kept" if record is not None else "rejected")
+
+    @staticmethod
+    def _build_reconstruction_output_record(
+        solver_b: "GeometricSolver",
+        builder_b: "GeometricSolverBuilder",
+        new_goal_tokens: tuple,
+        seed: int,
+        using_log: bool,
+        using_exp: bool,
+        custom_rules,
+    ):
+        """
+        对第二阶段求解成功的题目，走现有、不做任何修改的 pipeline 阶段
+        （_get_all_premise -> get_premises_and_aux -> pointstr2basicstrs/
+        basicstr2pointstrs -> _process_goals_with_same_statement），产出和
+        主 pipeline 完全一致形状的输出记录。
+        """
+        clauses_b_no_coords = [
+            Clause(
+                points=tuple(p.split("@")[0] for p in c.points),
+                sentences=c.sentences,
+            )
+            for c in builder_b.problemJGEX.constructions
+        ]
+        clause2basics_b, clause2args_b = ProblemWorker._get_all_premise(
+            clauses_b_no_coords, solver_b.proof
+        )
+        goal_b = Statement.from_tokens(new_goal_tokens, solver_b.proof.dep_graph)
+        if goal_b is None:
+            return None
+        premises_b, aux_b = solver_b.proof.dep_graph.get_premises_and_aux([goal_b])
+        premises_b = [dep.statement for dep in premises_b]
+        aux_b = [dep.statement for dep in aux_b]
+
+        pointstr2basicstrs_b = defaultdict(set)
+        basicstr2pointstrs_b = defaultdict(set)
+        for clause in clauses_b_no_coords:
+            for points, basics in clause2basics_b[clause]:
+                for b in basics:
+                    b_str = b.to_str()
+                    for pname in points:
+                        pointstr2basicstrs_b[pname].add(b_str)
+                        basicstr2pointstrs_b[b_str].add(pname)
+
+        records = ProblemWorker._process_goals_with_same_statement(
+            clause2basics_b,
+            clause2args_b,
+            pointstr2basicstrs_b,
+            basicstr2pointstrs_b,
+            [goal_b],
+            solver_b,
+            builder_b,
+            premises_b,
+            aux_b,
+            n_clauses=len(clauses_b_no_coords),
+            img=None,
+            aux_only=0,
+            seed=seed,
+            using_log=using_log,
+            using_exp=using_exp,
+            custom_rules=custom_rules,
+        )
+        if not records:
+            return None
+        record = records[0]
+        if "<aux>" not in record.get("llm_output_renamed", ""):
+            # 兜底检查：第二阶段本来是靠加回去的 x 才成功的。如果
+            # _process_goals_with_same_statement 找到的最小证明根本没用到
+            # 辅助点，说明第一阶段本该已经成功了——保守地丢弃。
+            return None
+        return record
+
+    @staticmethod
     def _extract_proof_info(solver, goal):
         """Extract proof information from solver for a given goal"""
         (
@@ -466,6 +1073,7 @@ class ProblemWorker:
         rng,
         using_log=True,
         using_exp=False,
+        custom_rules=None,
     ):
         """Find minimal auxiliary clause set"""
         results = []
@@ -477,12 +1085,22 @@ class ProblemWorker:
 
         # Step 1: First try solving without aux
         t0 = time.time()
-        proof_state_no_aux = ProofState.build_predicates(
-            predicates=expanded_premises,
-            defsJGEX=solver_builder.defs,
-            goals_str=goals_str.copy(),
-            rng=np.random.default_rng(solver_builder.seed),
-        )
+        try:
+            proof_state_no_aux = ProofState.build_predicates(
+                predicates=expanded_premises,
+                defsJGEX=solver_builder.defs,
+                goals_str=goals_str.copy(),
+                rng=np.random.default_rng(solver_builder.seed),
+            )
+        except (IndexError, ValueError) as e:
+            logger.error(
+                f"Failed to build predicates!\n"
+                f"Error: {e}\n"
+                f"goals_str: {goals_str}\n"
+                f"expanded_premises ({len(expanded_premises)} items): "
+                f"{[p.to_str() for p in expanded_premises][:10]}"  # Show first 10
+            )
+            raise
         timings["build_predicates_time"] = time.time() - t0
 
         t0 = time.time()
@@ -498,7 +1116,7 @@ class ProblemWorker:
             using_log=using_log,
             using_exp=using_exp,
         )
-        csolver_no_aux.run()
+        csolver_no_aux.run(custom_rules=custom_rules)
         timings["run_solver_time"] = time.time() - t0
 
         for goal in solver_no_aux.goals:
@@ -542,7 +1160,7 @@ class ProblemWorker:
                 using_exp=using_exp,
             )
             t0 = time.time()
-            csolver_all_aux.run()
+            csolver_all_aux.run(custom_rules=custom_rules)
             timings["run_solver_time"] += time.time() - t0
 
             for goal in solver_all_aux.goals:
@@ -636,7 +1254,7 @@ class ProblemWorker:
                     using_log=using_log,
                     using_exp=using_exp,
                 )
-                csolver_test.run()
+                csolver_test.run(custom_rules=custom_rules)
                 timings["run_solver_time"] += time.time() - t0
 
                 # Check which goals are solved
@@ -721,7 +1339,7 @@ class ProblemWorker:
                 using_exp=using_exp,
             )
             t0 = time.time()
-            csolver_all_aux.run()
+            csolver_all_aux.run(custom_rules=custom_rules)
             timings["run_solver_time"] += time.time() - t0
 
             for goal in solver_all_aux.goals:
@@ -755,6 +1373,7 @@ class ProblemWorker:
         seed,
         using_log=True,
         using_exp=False,
+        custom_rules=None,
     ):
         """Process a single goal"""
 
@@ -799,19 +1418,55 @@ class ProblemWorker:
             )
         )
 
-        res_list, aux_timings = ProblemWorker._find_minimal_aux_clauses_new(
-            pointstr2basicstrs,
-            basicstr2pointstrs,
-            solver,
-            solver_builder,
-            [goal.to_str() for goal in goals],
-            expanded_premises,
-            expanded_aux_groups,
-            aux_only,
-            rng,
-            using_log=using_log,
-            using_exp=using_exp,
-        )
+        try:
+            res_list, aux_timings = ProblemWorker._find_minimal_aux_clauses_new(
+                pointstr2basicstrs,
+                basicstr2pointstrs,
+                solver,
+                solver_builder,
+                [goal.to_str() for goal in goals],
+                expanded_premises,
+                expanded_aux_groups,
+                aux_only,
+                rng,
+                using_log=using_log,
+                using_exp=using_exp,
+                custom_rules=custom_rules,
+            )
+        except Exception as e:
+            # Extract fl_statement from solver_builder
+            fl_statement_parts = []
+            try:
+                if hasattr(solver_builder, 'problemJGEX') and solver_builder.problemJGEX:
+                    fl_statement_parts.append(str(solver_builder.problemJGEX))
+            except:
+                pass
+
+            try:
+                # Try to reconstruct from solver's proof state
+                if hasattr(solver, 'proof') and hasattr(solver.proof, 'symbols_graph'):
+                    points = [p.name for p in solver.proof.symbols_graph.nodes_of_type(Point)]
+                    fl_statement_parts.append(f"Points: {', '.join(points)}")
+            except:
+                pass
+
+            fl_statement = '\n'.join(fl_statement_parts) if fl_statement_parts else "<unable to extract>"
+
+            logger.error(
+                f"\n{'='*60}\n"
+                f"ERROR in _find_minimal_aux_clauses_new!\n"
+                f"{'='*60}\n"
+                f"fl_statement:\n{fl_statement}\n"
+                f"{'-'*60}\n"
+                f"goals: {[goal.to_str() for goal in goals]}\n"
+                f"{'-'*60}\n"
+                f"n_premises (before expansion): {len(premises)}\n"
+                f"n_expanded_premises: {len(expanded_premises)}\n"
+                f"{'-'*60}\n"
+                f"Original error: {type(e).__name__}: {e}\n"
+                f"{'='*60}"
+            )
+            raise
 
         for res in res_list:
             goal_new = res["goal"]

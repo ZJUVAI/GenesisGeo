@@ -275,6 +275,12 @@ class ProofState:
         proof = ProofState(rng=rng, defs=defsJGEX)
         adds: list[Dependency] = []
 
+        if not predicates:
+            raise ValueError(
+                f"Empty predicates list! Cannot build proof state.\n"
+                f"goals_str: {goals_str}"
+            )
+
         old_points = predicates[0].dep_graph.symbols_graph.nodes_of_type(Point)
         for old_point in old_points:
             proof.symbols_graph.new_node(Point, old_point.name)

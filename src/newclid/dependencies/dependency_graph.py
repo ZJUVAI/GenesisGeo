@@ -297,6 +297,64 @@ class DependencyGraph:
 
         return premises, aux
 
+    def points_dependency_closure(self, points: Collection[Point]) -> Set[Point]:
+        """
+        从 points 出发，沿 clause.points / rely_on 正向扩展，返回这些点及其
+        全部（可传递）依赖所构成的闭包。和 get_proof_steps/get_premises_and_aux
+        里内联的 BFS 是同一套边，抽成公共方法以便复用。
+        """
+        closure: set[Point] = set()
+        queue = deque(points)
+        for p in points:
+            closure.add(p)
+        while queue:
+            q = queue.popleft()
+            for p in q.clause.points:
+                p_name = p.split("@")[0]
+                p_point = self.symbols_graph.names2points([p_name])[0]
+                if p_point not in closure:
+                    closure.add(p_point)
+                    queue.append(p_point)
+            for p in q.rely_on:
+                if p not in closure:
+                    closure.add(p)
+                    queue.append(p)
+        return closure
+
+    def point_has_dependents_among(
+        self, candidate: Point, others: Collection[Point]
+    ) -> bool:
+        """
+        如果 others 中任意一点（通过 clause.points 或 rely_on，可传递）依赖于
+        candidate，返回 True。用来判断 candidate 相对于 others 是否"下游/自由"——
+        即能否安全地把它当作可移除/可重构的点。
+
+        和 get_premises_and_aux/get_proof_steps 里的 BFS 用的是同一套边
+        （clause.points、rely_on），只是从 others 出发正向跑，看闭包是否会碰到
+        candidate。
+        """
+        for start in others:
+            if start is candidate:
+                continue
+            seen: set[Point] = set()
+            queue = deque([start])
+            while queue:
+                q = queue.popleft()
+                if q in seen:
+                    continue
+                seen.add(q)
+                if q is candidate:
+                    return True
+                for p in q.clause.points:
+                    p_name = p.split("@")[0]
+                    p_point = self.symbols_graph.names2points([p_name])[0]
+                    if p_point not in seen:
+                        queue.append(p_point)
+                for p in q.rely_on:
+                    if p not in seen:
+                        queue.append(p)
+        return False
+
     def save_pyvis(self, *, path: Path, stars: Collection[Statement] = []):
         if stars:
             deps = self.proof_deps(list(stars))
