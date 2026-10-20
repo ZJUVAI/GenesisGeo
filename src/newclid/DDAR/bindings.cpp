@@ -335,9 +335,10 @@ vector<CustomRule> parse_custom_theorems(const vector<string> &theorem_strings)
     {
         CustomRule rule;
 
-        // 按 | 分割: rule_name | premises | conclusions
+        // 按 | 分割: rule_name | premises | conclusions [| guards]
         size_t first_pipe = thm_str.find('|');
         size_t second_pipe = thm_str.find('|', first_pipe + 1);
+        size_t third_pipe = thm_str.find('|', second_pipe + 1);
 
         if (first_pipe == string::npos || second_pipe == string::npos)
             continue;
@@ -346,7 +347,13 @@ vector<CustomRule> parse_custom_theorems(const vector<string> &theorem_strings)
         rule.rule = rule.name;
 
         string premises_str = thm_str.substr(first_pipe + 1, second_pipe - first_pipe - 1);
-        string conclusions_str = thm_str.substr(second_pipe + 1);
+        string conclusions_str, guards_str;
+        if (third_pipe != string::npos) {
+            conclusions_str = thm_str.substr(second_pipe + 1, third_pipe - second_pipe - 1);
+            guards_str = thm_str.substr(third_pipe + 1);
+        } else {
+            conclusions_str = thm_str.substr(second_pipe + 1);
+        }
 
         // 解析前提（用逗号分隔）
         stringstream premises_ss(premises_str);
@@ -401,6 +408,28 @@ vector<CustomRule> parse_custom_theorems(const vector<string> &theorem_strings)
                 stmt.first = tokens[0];
                 stmt.second = vector<string>(tokens.begin() + 1, tokens.end());
                 rule.conclusions.push_back(stmt);
+            }
+        }
+
+        // 解析守卫谓词（可选第四段）：格式同前提，逗号分隔
+        if (!guards_str.empty()) {
+            stringstream guards_ss(guards_str);
+            string guard;
+            while (getline(guards_ss, guard, ',')) {
+                guard.erase(0, guard.find_first_not_of(" \t\n\r"));
+                guard.erase(guard.find_last_not_of(" \t\n\r") + 1);
+                if (guard.empty()) continue;
+                stringstream pred_ss(guard);
+                vector<string> tokens;
+                string token;
+                while (pred_ss >> token)
+                    tokens.push_back(token);
+                if (tokens.size() >= 2) {
+                    Stmt stmt;
+                    stmt.first = tokens[0];
+                    stmt.second = vector<string>(tokens.begin() + 1, tokens.end());
+                    rule.guards.push_back(stmt);
+                }
             }
         }
 

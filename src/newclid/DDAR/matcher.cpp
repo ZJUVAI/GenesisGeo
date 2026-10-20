@@ -9,6 +9,8 @@
 #include "predicate/eqpoint.hpp"
 #include "predicate/para.hpp"
 #include "predicate/perp.hpp"
+#include "predicate/eqangle.hpp"
+#include "predicate/eqratio.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -24,14 +26,21 @@
 using namespace std;
 
 Matcher::Matcher(Problem *prob, const std::map<std::string, bool> &config)
-    : _problem(prob), _config(config)
+    : _problem(prob), _config(config), _has_goal(!prob->goals().empty())
 {
     match_similar_triangles();
     match_between();
     match_equal_angles();
     match_circles();
     match_orthocenters();
-    match_perps_paras();
+    // 这两个只产出 _stmts（喂给 AR 的数值验证 para/perp/eqratio），没有任何
+    // insert_theorem 调用；有 goal 时对证明目标没有帮助，直接跳过整段匹配
+    // （不只是跳过收集结果）。
+    if (!_has_goal)
+    {
+        match_perps_paras();
+        match_dist_ratios();
+    }
 }
 
 vector<tuple<double, double, Triangle>> Matcher::all_triangles()
@@ -247,6 +256,7 @@ void Matcher::on_eqratio(const Coll &left, const Coll &right)
     insert_theorem(Theorem::eqratio_of_coll(l[0], r[0]));
     insert_theorem(Theorem::eqratio_of_coll(l[1], r[1]));
     insert_theorem(Theorem::eqratio_of_coll(l[2], r[2]));
+    insert_theorem(Theorem::ratio_segment_to_whole(left, right));
 
     if (left.a() == right.a())
     {
@@ -500,7 +510,11 @@ void Matcher::on_bisector(const Point &pt, const Angle &ang)
 
 void Matcher::on_eqangle(const Angle &left, const Angle &right)
 {
-    // _stmts.push_back(make_unique<EqAngle>(left, right));
+    // 有 goal 时不收集给 AR 用的 EqAngle _stmts，只做下面的定理匹配。
+    if (!_has_goal)
+    {
+        _stmts.push_back(make_unique<EqAngle>(left, right));
+    }
     // ∠ABD = ∠ACD
     if (left.left() == right.left() && left.right() == right.right() && left.left() < left.right())
     {
@@ -544,17 +558,17 @@ void Matcher::match_equal_angles()
     // }
     // cout << endl;
     // ----------------------------
-    
+
     size_t hi = 0;
     for (size_t i = 0; i < angles.size(); i++)
-                {
+    {
         if (hi < i + 1)
         {
             hi = i + 1;
         }
         while (hi < angles.size() &&
                Numerical::close_enough(get<0>(angles[i]), get<0>(angles[hi])))
-    {
+        {
             hi++;
         }
         for (size_t j = i + 1; j < hi; j++)
@@ -737,28 +751,95 @@ void Matcher::match_perps_paras()
 
             if (Numerical::close_enough(l.first, r.first))
             {
-                std::vector<Point> right_points = r.second.points();
-                std::vector<Point> points = l.second.points();
-                points.insert(points.end(), right_points.begin(), right_points.end());
-                std::set<Point> s_points(points.begin(), points.end());
-                if (s_points.size() == 3)
-                {
-                    auto it = s_points.begin();
-                    Point p1 = *it++;
-                    Point p2 = *it++;
-                    Point p3 = *it;
-                    _stmts.push_back(std::make_unique<Coll>(p1, p2, p3));
-                }
-                else
-                {
-                    _stmts.push_back(std::make_unique<Para>(l.second, r.second));
-                }
+                _stmts.push_back(std::make_unique<Para>(l.second, r.second));
             }
 
             if (Numerical::close_enough(r.first - l.first, M_PI / 2.0))
             {
                 _stmts.push_back(std::make_unique<Perp>(l.second, r.second));
             }
+        }
+    }
+}
+
+vector<tuple<double, Dist>> Matcher::all_dists()
+{
+    vector<tuple<double, Dist>> res;
+    const size_t num_pt = _problem->num_points();
+    res.reserve(num_pt * (num_pt - 1) / 2);
+    for (size_t pt_a = 0; pt_a < num_pt; pt_a++)
+    {
+        for (size_t pt_b = pt_a + 1; pt_b < num_pt; pt_b++)
+        {
+            Dist dist(_problem->point(pt_a), _problem->point(pt_b));
+            if (!dist.check_nondegen())
+            {
+                continue;
+            }
+            res.emplace_back(dist.to_double(), dist);
+        }
+    }
+    return res;
+}
+
+// 把"所有比值相等的线段对"作为已验证的 EqRatio 送进 _stmts，供 AR 直接使用。
+// 与 match_equal_angles 对角度做的事完全对称：按数值分桶，桶内两两配对。
+// 桶内组合数是 O(n^4)（n 为点数），比 all_triangles/all_angles 的 O(n^3) 更贵，
+// 但和 match_perps_paras 一样只在 Matcher 构造时算一次。
+void Matcher::match_dist_ratios()
+{
+    using item_type = tuple<double, Dist>;
+    vector<item_type> dists = all_dists();
+
+    if (dists.size() < 2)
+    {
+        return;
+    }
+
+    // 按 dist(a,b) / dist(c,d) 的比值分桶：先取所有二元组合 (i<j)，
+    // 用 dists[i]/dists[j] 作为比值 key。
+    vector<tuple<double, size_t, size_t>> ratios;
+    ratios.reserve(dists.size() * (dists.size() - 1) / 2);
+    for (size_t i = 0; i < dists.size(); i++)
+    {
+        for (size_t j = i + 1; j < dists.size(); j++)
+        {
+            double const a = get<0>(dists[i]);
+            double const b = get<0>(dists[j]);
+            if (a <= (1 + REL_TOL) * b)
+            {
+                ratios.emplace_back(a / b, i, j);
+            }
+            if (b <= (1 + REL_TOL) * a)
+            {
+                ratios.emplace_back(b / a, j, i);
+            }
+        }
+    }
+
+    sort(ratios.begin(), ratios.end(),
+         [](const auto &a, const auto &b)
+         { return get<0>(a) < get<0>(b); });
+
+    size_t hi = 0;
+    for (size_t i = 0; i < ratios.size(); i++)
+    {
+        if (hi < i + 1)
+        {
+            hi = i + 1;
+        }
+        while (hi < ratios.size() &&
+               Numerical::close_enough(get<0>(ratios[i]), get<0>(ratios[hi])))
+        {
+            hi++;
+        }
+        for (size_t j = i + 1; j < hi; j++)
+        {
+            const Dist &up1 = get<1>(dists[get<1>(ratios[i])]);
+            const Dist &down1 = get<1>(dists[get<2>(ratios[i])]);
+            const Dist &up2 = get<1>(dists[get<1>(ratios[j])]);
+            const Dist &down2 = get<1>(dists[get<2>(ratios[j])]);
+            _stmts.push_back(make_unique<EqRatio>(up1, down1, up2, down2));
         }
     }
 }
@@ -851,6 +932,7 @@ vector<string> CustomTheoremMatcher::collect_new_vars(const Stmt &stmt, const Ma
 bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping) const
 {
     vector<string> real_args;
+    vector<int> pt_indices;
     size_t n_point_args = GetPointArgsCount(stmt);
 
     for (size_t i = 0; i < stmt.second.size(); ++i)
@@ -861,6 +943,7 @@ bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping)
             int pt_idx = FindBinding(mapping, arg);
             if (pt_idx == -1)
                 return false;
+            pt_indices.push_back(pt_idx);
             real_args.push_back(_problem->point(pt_idx).name());
         }
         else
@@ -872,12 +955,78 @@ bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping)
     try
     {
         auto s = _problem->create_statement(stmt.first, real_args);
-        return s && s->check_numerically();
+        // 退化筛子只针对 para：其它 4 元谓词里出现重复变量是正常的
+        // （例如 cong A B B C），不能一起拦掉。
+        return s && s->check_numerically() &&
+               (stmt.first != "para" || para_instance_ok(pt_indices));
     }
     catch (...)
     {
         return false;
     }
+}
+
+bool CustomTheoremMatcher::para_instance_ok(const std::vector<int> &pts) const
+{
+    if (!get_config("custom_para_no_collinear", true))
+        return true;
+    if (pts.size() != 4)
+        return true;
+
+    // 情形 1：四点中存在重合点 —— 两条"直线"共享端点，此时平行成立 ⟺ 三点共线
+    for (size_t i = 0; i < 4; ++i)
+        for (size_t j = i + 1; j < 4; ++j)
+            if (pts[i] == pts[j])
+            {
+                if (get_config("debug_custom_match", false))
+                    cout << "[para-screen] 共享端点 " << _problem->point(pts[0]).name()
+                         << _problem->point(pts[1]).name() << _problem->point(pts[2]).name()
+                         << _problem->point(pts[3]).name() << endl;
+                return false;
+            }
+
+    // 情形 2：四点互异但共线。调用方已先做过数值平行判定，故只需查一个三点组：
+    // CD ∥ AB 且 A,B,C 共线 ⟹ C 在直线 AB 上，过 C 作 AB 的平行线即 AB 自身 ⟹ D 也在其上。
+    try
+    {
+        const Point &pa = _problem->point(pts[0]);
+        const Point &pb = _problem->point(pts[1]);
+        const Point &pc = _problem->point(pts[2]);
+        // 用 check_equations 而非 check_numerically：Coll::check_nondegen 对重合点返回 false，
+        // 这里只关心"是否共线"这一几何事实，重合点情形已在上面单独拦掉。
+        if (Coll(pa, pb, pc).check_equations())
+        {
+            if (get_config("debug_custom_match", false))
+                cout << "[para-screen] 四点共线 " << pa.name() << pb.name() << pc.name()
+                     << _problem->point(pts[3]).name() << endl;
+            return false;
+        }
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool CustomTheoremMatcher::stmt_instance_ok(const Stmt &stmt, const std::map<std::string, int> &m_map) const
+{
+    if (stmt.first != "para")
+        return true;
+
+    vector<int> pts;
+    size_t n_point_args = GetPointArgsCount(stmt);
+    if (stmt.second.size() < n_point_args)
+        return true;
+
+    for (size_t i = 0; i < n_point_args; ++i)
+    {
+        auto it = m_map.find(stmt.second[i]);
+        if (it == m_map.end())
+            return true; // 变量尚未绑定，交给原有流程处理
+        pts.push_back(it->second);
+    }
+    return para_instance_ok(pts);
 }
 
 // ----------------------------------------------------------------------------
@@ -978,6 +1127,202 @@ void CustomTheoremMatcher::build_triangle_indices(size_t n)
     }
 }
 
+void CustomTheoremMatcher::build_eqangle_indices(size_t n)
+{
+    struct AngleInfo
+    {
+        double value;       // 角度值（弧度）
+        int p1, p2, p3, p4; // 原始点索引，表示两条线段 (p1,p2) 和 (p3,p4)
+    };
+
+    vector<AngleInfo> angles;
+    const double eps = 1e-8;
+
+    // 1. 枚举所有合法的角（两条线段：p1≠p2, p3≠p4）
+    for (int p1 = 0; p1 < n; ++p1)
+    {
+        for (int p2 = p1 + 1; p2 < n; ++p2)
+        {
+            for (int p3 = 0; p3 < n; ++p3)
+            {
+                for (int p4 = p3 + 1; p4 < n; ++p4)
+                {
+                    try
+                    {
+                        // 计算线段 (p1,p2) 和 (p3,p4) 之间的角度
+                        const Point &pt1 = _problem->point(p1);
+                        const Point &pt2 = _problem->point(p2);
+                        const Point &pt3 = _problem->point(p3);
+                        const Point &pt4 = _problem->point(p4);
+
+                        // 线段 (p1,p2) 的方向向量
+                        double dx1 = pt2.x() - pt1.x();
+                        double dy1 = pt2.y() - pt1.y();
+
+                        // 线段 (p3,p4) 的方向向量
+                        double dx2 = pt4.x() - pt3.x();
+                        double dy2 = pt4.y() - pt3.y();
+
+                        // 检查是否退化（线段长度太小）
+                        double len1_sq = dx1 * dx1 + dy1 * dy1;
+                        double len2_sq = dx2 * dx2 + dy2 * dy2;
+                        if (len1_sq < 1e-14 || len2_sq < 1e-14)
+                            continue;
+
+                        // 计算 dot product 和 cross product
+                        double dot = dx1 * dx2 + dy1 * dy2;
+                        double cross = dx1 * dy2 - dy1 * dx2;
+
+                        // 使用 atan2 计算角度
+                        double val = std::atan2(cross, dot);
+                        if (val < 0.0)
+                        {
+                            val += M_PI;
+                        }
+
+                        if (val > 1e-7 && val < M_PI - 1e-7)
+                        {
+                            angles.push_back({val, p1, p2, p3, p4});
+                        }
+                    }
+                    catch (...)
+                    {
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 按角度值排序
+    std::sort(angles.begin(), angles.end(), [](const AngleInfo &a1, const AngleInfo &a2)
+              { return a1.value < a2.value; });
+
+    // 3. 桶内配对
+    auto &idx_eqangle = _index["eqangle"];
+
+    for (size_t i = 0; i < angles.size(); ++i)
+    {
+        for (size_t j = i + 1; j < angles.size(); ++j)
+        {
+            // 检查角度是否相同（是否在同一个桶）
+            if (std::abs(angles[i].value - angles[j].value) > eps)
+            {
+                break;
+            }
+
+            const auto &ang1 = angles[i];
+            const auto &ang2 = angles[j];
+
+            // eqangle p1 p2 p3 p4 p5 p6 p7 p8 表示 ∠(p1,p2,p3,p4) = ∠(p5,p6,p7,p8)
+            // 对称性：每条线段两端点可交换 (2^4 = 16)，两个角可整体交换 (×2)，共 32 种
+            int a1 = ang1.p1, a2 = ang1.p2, a3 = ang1.p3, a4 = ang1.p4;
+            int b1 = ang2.p1, b2 = ang2.p2, b3 = ang2.p3, b4 = ang2.p4;
+
+            for (int s1 = 0; s1 < 2; ++s1)
+                for (int s2 = 0; s2 < 2; ++s2)
+                    for (int s3 = 0; s3 < 2; ++s3)
+                        for (int s4 = 0; s4 < 2; ++s4)
+                        {
+                            int x1 = s1 ? a2 : a1, x2 = s1 ? a1 : a2;
+                            int x3 = s2 ? a4 : a3, x4 = s2 ? a3 : a4;
+                            int x5 = s3 ? b2 : b1, x6 = s3 ? b1 : b2;
+                            int x7 = s4 ? b4 : b3, x8 = s4 ? b3 : b4;
+                            idx_eqangle.push_back({x1, x2, x3, x4, x5, x6, x7, x8});
+                            idx_eqangle.push_back({x5, x6, x7, x8, x1, x2, x3, x4});
+                        }
+        }
+    }
+}
+
+void CustomTheoremMatcher::build_eqratio_indices(size_t n)
+{
+    struct RatioInfo
+    {
+        double value;   // 比值
+        int a, b, c, d; // 原始点索引，表示 AB/CD
+    };
+
+    vector<RatioInfo> ratios;
+    const double eps = 1e-8;
+
+    // 1. 遍历所有合法的距离对 (4个点，AB和CD可以共享点)
+    for (int a = 0; a < n; ++a)
+    {
+        for (int b = a + 1; b < n; ++b)
+        {
+            for (int c = 0; c < n; ++c)
+            {
+                for (int d = c + 1; d < n; ++d)
+                {
+
+                    try
+                    {
+                        Dist dist_ab(_problem->point(a), _problem->point(b));
+                        Dist dist_cd(_problem->point(c), _problem->point(d));
+
+                        if (!dist_ab.check_nondegen() || !dist_cd.check_nondegen())
+                            continue;
+
+                        double len_ab = dist_ab.to_double();
+                        double len_cd = dist_cd.to_double();
+
+                        if (std::abs(len_cd) < eps)
+                            continue;
+
+                        double ratio = len_ab / len_cd;
+
+                        ratios.push_back({ratio, a, b, c, d});
+                    }
+                    catch (...)
+                    {
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 按比值排序
+    std::sort(ratios.begin(), ratios.end(), [](const RatioInfo &r1, const RatioInfo &r2)
+              { return r1.value < r2.value; });
+
+    // 3. 桶内配对
+    auto &idx_eqratio = _index["eqratio"];
+
+    for (size_t i = 0; i < ratios.size(); ++i)
+    {
+        for (size_t j = i + 1; j < ratios.size(); ++j)
+        {
+            // 检查比值是否相同（是否在同一个桶）
+            if (std::abs(ratios[i].value - ratios[j].value) > eps)
+            {
+                break;
+            }
+
+            const auto &rat1 = ratios[i];
+            const auto &rat2 = ratios[j];
+
+            // eqratio a b c d e f g h 表示 AB/CD = EF/GH
+            int a1 = rat1.a, a2 = rat1.b, a3 = rat1.c, a4 = rat1.d;
+            int b1 = rat2.a, b2 = rat2.b, b3 = rat2.c, b4 = rat2.d;
+
+            for (int s1 = 0; s1 < 2; ++s1)
+                for (int s2 = 0; s2 < 2; ++s2)
+                    for (int s3 = 0; s3 < 2; ++s3)
+                        for (int s4 = 0; s4 < 2; ++s4)
+                        {
+                            int x1 = s1 ? a2 : a1, x2 = s1 ? a1 : a2;
+                            int x3 = s2 ? a4 : a3, x4 = s2 ? a3 : a4;
+                            int x5 = s3 ? b2 : b1, x6 = s3 ? b1 : b2;
+                            int x7 = s4 ? b4 : b3, x8 = s4 ? b3 : b4;
+                            idx_eqratio.push_back({x1, x2, x3, x4, x5, x6, x7, x8});
+                            idx_eqratio.push_back({x5, x6, x7, x8, x1, x2, x3, x4});
+                        }
+        }
+    }
+}
+
 void CustomTheoremMatcher::build_predicate_index()
 {
     auto t_total = chrono::steady_clock::now();
@@ -1033,7 +1378,9 @@ void CustomTheoremMatcher::build_predicate_index()
                         {
                             if (c == d)
                                 continue;
-                            if (quick_check(pred, {a, b, c, d}))
+                            // para 额外要求实例非退化（索引路径不走 verify_stmt，必须在此拦）
+                            if (quick_check(pred, {a, b, c, d}) &&
+                                (pred != "para" || para_instance_ok({a, b, c, d})))
                                 idx.push_back({a, b, c, d});
                         }
                 }
@@ -1048,8 +1395,71 @@ void CustomTheoremMatcher::build_predicate_index()
     // 2. 处理三角形相似 (simtri/simtrir) - 保持原有形状签名算法，但逻辑更紧凑
     build_triangle_indices(n);
 
+    // 3. 处理等角 (eqangle)
+    build_eqangle_indices(n);
+
+    // 4. 处理等比 (eqratio)
+    build_eqratio_indices(n);
+
     auto ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t_total).count();
-    DebugLog("Predicate cache built in " + to_string(ms) + "ms");
+    // DebugLog("Predicate cache built in " + to_string(ms) + "ms");
+
+    // // 输出所有谓词的缓存详细信息
+    // bool verbose = get_config("verbose_cache_output", false);
+    // if (verbose)
+    // {
+    //     DebugLog("=== Predicate Cache Details ===");
+    //     size_t total_cached = 0;
+
+    //     // 辅助函数：将点索引转换为点名
+    //     auto idx_to_name = [&](int idx) -> string {
+    //         return _problem->point(idx).name();
+    //     };
+
+    //     for (const auto &entry : _index)
+    //     {
+    //         const string &pred_name = entry.first;
+    //         const auto &instances = entry.second;
+    //         size_t count = instances.size();
+    //         total_cached += count;
+
+    //         DebugLog("\n[" + pred_name + "] " + to_string(count) + " instances:");
+
+    //         // 根据谓词类型输出不同格式
+    //         for (size_t i = 0; i < instances.size(); ++i)
+    //         {
+    //             const auto &inst = instances[i];
+    //             string output = "  " + to_string(i) + ": " + pred_name + " ";
+
+    //             for (size_t j = 0; j < inst.size(); ++j)
+    //             {
+    //                 output += idx_to_name(inst[j]);
+    //                 if (j < inst.size() - 1)
+    //                     output += " ";
+    //             }
+
+    //             DebugLog(output);
+    //         }
+    //     }
+
+    //     DebugLog("\n=== Summary ===");
+    //     DebugLog("Total cached instances: " + to_string(total_cached));
+    //     DebugLog("===============");
+    // }
+    // else
+    // {
+    //     // 简要统计信息
+    //     DebugLog("=== Predicate Cache Statistics ===");
+    //     size_t total_cached = 0;
+    //     for (const auto &entry : _index)
+    //     {
+    //         size_t count = entry.second.size();
+    //         total_cached += count;
+    //         DebugLog("  " + entry.first + ": " + to_string(count) + " cached instances");
+    //     }
+    //     DebugLog("Total cached instances: " + to_string(total_cached));
+    //     DebugLog("===================================");
+    // }
 }
 
 // ----------------------------------------------------------------------------
@@ -1066,6 +1476,7 @@ void CustomTheoremMatcher::enumerate_brute_force(
 {
     const size_t n_pts = _problem->num_points();
     const size_t n_vars = new_vars.size();
+    bool allow_duplicate = get_config("allow_duplicate_points", false);
 
     // 内部递归 Lambda 函数用于生成笛卡尔积
     std::function<void(size_t)> generate_combinations = [&](size_t v_idx)
@@ -1084,7 +1495,8 @@ void CustomTheoremMatcher::enumerate_brute_force(
         // 为第 v_idx 个新变量尝试绑定每一个点
         for (size_t p = 0; p < n_pts; ++p)
         {
-            if (used[p]) continue;
+            if (!allow_duplicate && used[p])
+                continue;
             current.push_back({new_vars[v_idx], (int)p});
             used[p] = true;
             generate_combinations(v_idx + 1);
@@ -1122,6 +1534,8 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
     // 情况 B：利用预计算索引快速匹配
     if (auto it = _index.find(stmt.first); it != _index.end())
     {
+        bool allow_duplicate = get_config("allow_duplicate_points", false);
+
         for (const auto &combo : it->second)
         {
             size_t added_count = 0;
@@ -1140,7 +1554,7 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
                 }
                 else
                 {
-                    if (used[combo[i]])
+                    if (!allow_duplicate && used[combo[i]])
                     {
                         conflict = true;
                         break;
@@ -1172,8 +1586,11 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
 void CustomTheoremMatcher::match_rule(const CustomRule &rule)
 {
     // 1. 准备并排序前提 (约束强的优先)
+    // 注意：只用前提参与 backtrack 匹配；结论不加入 sorted_stmts。
+    // 原来把结论也塞进来一起 sort+backtrack，会导致 backtrack 把结论当"已知事实"
+    // 去 index 里查，而未被证明的结论自然不在 index 中，mapping 找不到 → raw_results
+    // 为空 → 规则永远不会被应用。结论的验证在第 3 步逐条数值校验中完成。
     vector<Stmt> sorted_stmts = rule.premises;
-    sorted_stmts.insert(sorted_stmts.end(), rule.conclusions.begin(), rule.conclusions.end());
 
     std::sort(sorted_stmts.begin(), sorted_stmts.end(), [this](const Stmt &a, const Stmt &b)
               {
@@ -1182,7 +1599,7 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         size_t size_b = (it_b != _index.end()) ? it_b->second.size() : 999999;
         return size_a < size_b; });
 
-    // 2. 执行匹配
+    // 2. 执行匹配（仅前提）
     Mapping current;
     vector<bool> used(_problem->num_points(), false);
     vector<Mapping> raw_results;
@@ -1197,28 +1614,105 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
             continue;
 
         Theorem thm(rule.name, rule.rule);
-        auto fill_thm = [&](const vector<Stmt> &source, bool is_hypo)
+        auto build_stmt = [&](const Stmt &s_stmt) -> unique_ptr<Statement>
         {
-            for (const auto &s_stmt : source)
+            vector<string> args;
+            for (const auto &arg : s_stmt.second)
             {
-                vector<string> args;
-                for (const auto &arg : s_stmt.second)
+                auto it = m_map.find(arg);
+                if (it == m_map.end())
                 {
-                    auto it = m_map.find(arg);
-                    args.push_back(it != m_map.end() ? _problem->point(it->second).name() : arg);
+                    // Variable not mapped to any concrete point in this
+                    // problem — the rule does not apply.  Return nullptr
+                    // so the caller silently skips this match.
+                    return nullptr;
                 }
-                auto res_stmt = _problem->create_statement(s_stmt.first, args);
-                if (res_stmt)
-                {
-                    is_hypo ? thm.add_hypothesis(move(res_stmt)) : thm.add_conclusion(move(res_stmt));
-                }
+                args.push_back(_problem->point(it->second).name());
+            }
+            try
+            {
+                return _problem->create_statement(s_stmt.first, args);
+            }
+            catch (const exception &)
+            {
+                return nullptr; // silently skip invalid statements
             }
         };
 
-        fill_thm(rule.premises, true);
-        fill_thm(rule.conclusions, false);
+        bool premises_ok = true;
+        for (const auto &s_stmt : rule.premises)
+        {
+            if (auto res_stmt = build_stmt(s_stmt))
+            {
+                thm.add_hypothesis(move(res_stmt));
+            }
+            else
+            {
+                premises_ok = false;
+                break;
+            }
+        }
+        if (!premises_ok)
+            continue;
 
-        if (thm.check_numerically())
+        // 前提须整体通过数值校验，否则这组匹配本身不成立。
+        if (!thm.check_hypotheses_numerically())
+            continue;
+
+        // 守卫谓词：只做数值检查，不参与推理链。任一守卫不通过则跳过此匹配。
+        bool guards_ok = true;
+        for (const auto &g_stmt : rule.guards)
+        {
+            unique_ptr<Statement> g;
+            try
+            {
+                g = build_stmt(g_stmt);
+            }
+            catch (const exception &)
+            {
+                g = nullptr;
+            }
+            if (!g || !g->check_numerically() || !stmt_instance_ok(g_stmt, m_map))
+            {
+                guards_ok = false;
+                break;
+            }
+        }
+        if (!guards_ok)
+            continue;
+
+        // 结论逐条数值校验：merge_same_premise 合并出的多结论规则，某条结论
+        // 在具体坐标下可能因精度或退化而校验失败——只丢弃该结论，而非因为
+        // 一条结论没过就连带丢弃同一前提下已经验证通过的其它结论。
+        //
+        // 结论不参与 backtrack 匹配（见上），意味着结论里出现的点必须全部来自
+        // 前提绑定的 m_map；如果规则本身有问题、结论引用了前提里没出现的点
+        // （如 rule_text 写成 "... => eqangle A B C D X Y X Y" 但前提只有
+        // A B C D），build_stmt 会把未绑定的原始变量名当成点名传给
+        // create_statement，导致该点在当前 problem 中查找失败而崩溃。跳过
+        // 这类结论，而不是让整条匹配崩掉。
+        for (const auto &s_stmt : rule.conclusions)
+        {
+            bool all_bound = true;
+            for (const auto &arg : s_stmt.second)
+            {
+                if (m_map.find(arg) == m_map.end())
+                {
+                    all_bound = false;
+                    break;
+                }
+            }
+            if (!all_bound)
+                continue;
+
+            auto res_stmt = build_stmt(s_stmt);
+            if (res_stmt && res_stmt->check_numerically() && stmt_instance_ok(s_stmt, m_map))
+            {
+                thm.add_conclusion(move(res_stmt));
+            }
+        }
+
+        if (!thm.conclusions().empty())
         {
             _theorems.push_back(thm.normalize());
         }
@@ -1237,5 +1731,22 @@ CustomTheoremMatcher::CustomTheoremMatcher(Problem *prob, const vector<CustomRul
     for (const auto &rule : rules)
     {
         match_rule(rule);
+    }
+
+    // 调试用：打印每条 custom 规则实际匹配出的定理条数
+    // （config "debug_custom_match"，默认关闭）。para 退化筛子的效果可直接由条数差异看出。
+    if (get_config("debug_custom_match", false))
+    {
+        map<string, int> by_rule;
+        for (const auto &t : _theorems)
+            by_rule[t.rule()]++;
+        cout << "[CustomTheoremMatcher] points=" << _problem->num_points()
+             << " keys_rules=" << rules.size() << " theorems=" << _theorems.size()
+             << " custom_para_no_collinear="
+             << (get_config("custom_para_no_collinear", true) ? 1 : 0)
+             << " allow_duplicate_points="
+             << (get_config("allow_duplicate_points", false) ? 1 : 0) << endl;
+        for (const auto &kv : by_rule)
+            cout << "    " << kv.first << " x" << kv.second << endl;
     }
 }

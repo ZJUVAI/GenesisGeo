@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 #include "type/triangle.hpp"
+#include "type/dist.hpp"
 #include "theorem.hpp"
 #include "problem.hpp"
 
@@ -23,6 +24,12 @@ private:
     std::vector<Theorem> _theorems;
 
     std::vector<std::unique_ptr<Statement>> _stmts;
+
+    // 有 goal 时，_stmts（供 AR 直接复用的数值验证 para/perp/eqratio）对证明
+    // 目标没有帮助：match_perps_paras/match_dist_ratios 整段跳过，
+    // match_equal_angles 里的 on_eqangle 也不再把 EqAngle 塞进 _stmts
+    // （但仍照常做 on_cyclic/on_bisector 的定理匹配）。
+    bool _has_goal = false;
 
     bool get_config(const std::string &key, bool default_val = false) const
     {
@@ -42,6 +49,8 @@ private:
 
     void match_perps_paras();
 
+    void match_dist_ratios();
+
     std::vector<std::tuple<double, double, Triangle>> all_triangles();
 
     std::vector<std::tuple<double, Coll>> all_betweens();
@@ -49,6 +58,8 @@ private:
     std::vector<std::pair<Point, Point>> all_eqpoints();
 
     std::vector<std::tuple<double, Angle>> all_angles();
+
+    std::vector<std::tuple<double, Dist>> all_dists();
 
     void on_similar_triangles(const SimilarTriangles &simtri);
 
@@ -95,6 +106,7 @@ struct CustomRule
 {
     std::vector<Stmt> premises;
     std::vector<Stmt> conclusions;
+    std::vector<Stmt> guards; // 数值守卫谓词：只 check_numerically，不参与推理链
     std::string name;
     std::string rule;
 };
@@ -136,9 +148,24 @@ private:
 
     bool verify_stmt(const Stmt &stmt, const Mapping &mapping) const;
 
+    // custom 规则专用：para 实例的退化判据（由 config "custom_para_no_collinear" 控制，
+    // 默认开启）。返回 true 表示该实例可用。拒绝两种情形：
+    //   1) 四点中存在重合点 —— 两条"直线"共享端点，此时平行成立 ⟺ 三点共线；
+    //   2) 四点互异但全部共线 —— 两条"直线"实为同一条直线。
+    // 注意：只作用于 CustomTheoremMatcher，内置 Matcher 与 AR/简化路径不受影响
+    // （内置 r82 正是刻意从共线推出平行，阻断它会使 jgex_231 从 160/231 掉到 21/231）。
+    bool para_instance_ok(const std::vector<int> &pts) const;
+
+    // 把上面的判据应用到一条已绑定的语句上（m_map 与 match_rule 内部同构）。
+    bool stmt_instance_ok(const Stmt &stmt, const std::map<std::string, int> &m_map) const;
+
     void enumerate_brute_force(const std::vector<Stmt> &stmts, size_t stmt_idx, const std::vector<std::string> &new_vars, Mapping &current, std::vector<bool> &used, std::vector<Mapping> &results) const;
 
     void build_triangle_indices(size_t n);
+
+    void build_eqangle_indices(size_t n);
+
+    void build_eqratio_indices(size_t n);
 
 public:
     // rules: 每条规则包含前提、结论、名称、规则id
