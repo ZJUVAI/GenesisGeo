@@ -166,6 +166,20 @@ void DDARSolver::simplify_ar()
         }
     }
 
+    std::unordered_map<const Proof *, std::string> normalized_keys;
+    auto normalized_key = [&normalized_keys](const Proof *proof) -> const std::string &
+    {
+        auto [entry, inserted] = normalized_keys.try_emplace(proof);
+        if (inserted)
+        {
+            entry->second = proof->statement()->normalize()->to_string();
+        }
+        return entry->second;
+    };
+
+    std::unordered_map<const Proof *, size_t> closure_visits;
+    size_t closure_epoch = 0;
+
     for (Proof *target : candidates)
     {
         ARSimplifier simplifier(this, target);
@@ -200,17 +214,23 @@ void DDARSolver::simplify_ar()
         // 计算 target 原始依赖的传递依赖闭包。子图中凡是落在闭包内的结论，
         // 都是 target 所依赖的既有事实 —— 不得改写（改写会破坏原推导并可能成环）。
         // 仅更新「不被 D1-Dn (传递)依赖」的结论：即 target 本身及新引入的中间语句。
-        std::unordered_set<Proof *> closure;
+        ++closure_epoch;
         {
             std::vector<Proof *> stack = target->get_dependencies();
             while (!stack.empty())
             {
                 Proof *cur = stack.back();
                 stack.pop_back();
-                if (cur == nullptr || !closure.insert(cur).second)
+                if (cur == nullptr)
                 {
                     continue;
                 }
+                auto &visited_epoch = closure_visits[cur];
+                if (visited_epoch == closure_epoch)
+                {
+                    continue;
+                }
+                visited_epoch = closure_epoch;
                 for (Proof *dep : cur->get_dependencies())
                 {
                     stack.push_back(dep);
@@ -242,15 +262,14 @@ void DDARSolver::simplify_ar()
             Proof *concl = step.conclusion;
 
             // 闭包内的既有事实：保持不变，跳过。
-            if (concl != target && closure.find(concl) != closure.end())
+            const auto visited = closure_visits.find(concl);
+            if (concl != target && visited != closure_visits.end() && visited->second == closure_epoch)
             {
                 continue;
             }
 
             // 新引入的中间语句尚不在 _checked_statements 中，插到 target 之前。
-            if (concl != target &&
-                std::find(_checked_statements.begin(), _checked_statements.end(), concl) ==
-                    _checked_statements.end())
+            if (concl != target && !concl->is_proved())
             {
                 target_it = _checked_statements.insert(target_it, concl);
                 ++target_it; // 保持指向 target，后续中间语句继续插在其前
@@ -259,13 +278,13 @@ void DDARSolver::simplify_ar()
             // 诊断：检测这一步 update 是否会把 concl 直接指回自身（自环），
             // 或指向本步之外某条与 concl 同规范式的依赖。node 身份以
             // normalize()->to_string() 为准，与依赖图/环检测一致。
-            const std::string concl_key = concl->statement()->normalize()->to_string();
+            const auto &concl_key = normalized_key(concl);
             std::vector<Proof *> clean_deps;
             clean_deps.reserve(step.deps.size());
             for (Proof *dep : step.deps)
             {
                 if (dep != nullptr &&
-                    dep->statement()->normalize()->to_string() == concl_key)
+                    normalized_key(dep) == concl_key)
                 {
                     // cout << "[simplify_ar][SELF-DEP] target=" << target->statement()->to_string()
                     //      << "  concl=" << concl->statement()->to_string()
@@ -275,7 +294,7 @@ void DDARSolver::simplify_ar()
                 clean_deps.push_back(dep);
             }
 
-            concl->update(clean_deps);
+            concl->update(std::move(clean_deps));
         }
     }
 }
