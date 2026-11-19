@@ -32,22 +32,18 @@ public:
                           std::string &prefix,
                           int &index)
     {
-        size_t i = 0;
-        while (i < name.size() && std::isalpha(name[i]))
-            ++i;
-
-        prefix = name.substr(0, i);
-
-        if (i == name.size())
-            index = -1; // 没有数字
-        else
-            index = std::stoi(name.substr(i));
+        const size_t length = prefix_length(name);
+        prefix = name.substr(0, length);
+        index = parse_index(name, length);
     }
 
 private:
+    static size_t prefix_length(const std::string &name);
+    static int parse_index(const std::string &name, size_t prefix_length);
+
     PointNum _num;
     std::string _name;
-    std::string _prefix;
+    size_t _prefix_length;
     int _index;
 };
 

@@ -1,8 +1,33 @@
 #include "type/point.hpp"
 
-Point::Point(std::string name, double x, double y) : _num(PointNum(x, y)), _name(name) { parseName(_name, _prefix, _index); }
+#include <string_view>
+#include <utility>
 
-Point::Point(std::string name, PointNum num) : _num(num), _name(name) { parseName(_name, _prefix, _index); }
+size_t Point::prefix_length(const std::string &name)
+{
+    size_t length = 0;
+    while (length < name.size() && std::isalpha(static_cast<unsigned char>(name[length])))
+    {
+        ++length;
+    }
+    return length;
+}
+
+int Point::parse_index(const std::string &name, size_t length)
+{
+    return length == name.size() ? -1 : std::stoi(name.substr(length));
+}
+
+Point::Point(std::string name, double x, double y)
+    : Point(std::move(name), PointNum(x, y))
+{
+}
+
+Point::Point(std::string name, PointNum num)
+    : _num(num), _name(std::move(name)), _prefix_length(prefix_length(_name)),
+      _index(parse_index(_name, _prefix_length))
+{
+}
 
 std::string Point::name() const { return _name; }
 
@@ -38,7 +63,8 @@ bool Point::operator<(const Point &other) const
     {
         return _index < other._index;
     }
-    return _prefix < other._prefix;
+    return std::string_view(_name).substr(0, _prefix_length) <
+           std::string_view(other._name).substr(0, other._prefix_length);
 }
 
 bool Point::operator>(const Point &other) const
