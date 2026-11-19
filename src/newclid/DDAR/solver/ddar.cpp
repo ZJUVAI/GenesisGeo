@@ -436,10 +436,9 @@ vector<ReducedEquation *> DDARSolver::insert_equation(const unique_ptr<Statement
                 eqns_map_type *eqns = &_equations_dist;
                 if (!eqn_ptr->empty())
                 {
-                    Equation eqn = *eqn_ptr;
-                    eqn.make_monic();
-                    auto red_eq = ReducedEquation(eqn, sys);
-                    res.push_back(&(eqns->insert({eqn, red_eq}).first->second));
+                    eqn_ptr->make_monic();
+                    const auto entry = eqns->try_emplace(*eqn_ptr, *eqn_ptr, sys).first;
+                    res.push_back(&entry->second);
                 }
             }
         }
@@ -456,10 +455,9 @@ vector<ReducedEquation *> DDARSolver::insert_equation(const unique_ptr<Statement
                 eqns_map_type *eqns = &_equations_slope;
                 if (!eqn_ptr->empty())
                 {
-                    Equation eqn = *eqn_ptr;
-                    eqn.make_monic();
-                    auto red_eq = ReducedEquation(eqn, sys);
-                    res.push_back(&(eqns->insert({eqn, red_eq}).first->second));
+                    eqn_ptr->make_monic();
+                    const auto entry = eqns->try_emplace(*eqn_ptr, *eqn_ptr, sys).first;
+                    res.push_back(&entry->second);
                 }
             }
         }
@@ -476,10 +474,9 @@ vector<ReducedEquation *> DDARSolver::insert_equation(const unique_ptr<Statement
                 eqns_map_type *eqns = &_equations_distlog;
                 if (!eqn_ptr->empty())
                 {
-                    Equation eqn = *eqn_ptr;
-                    eqn.make_monic();
-                    auto red_eq = ReducedEquation(eqn, sys);
-                    res.push_back(&(eqns->insert({eqn, red_eq}).first->second));
+                    eqn_ptr->make_monic();
+                    const auto entry = eqns->try_emplace(*eqn_ptr, *eqn_ptr, sys).first;
+                    res.push_back(&entry->second);
                 }
             }
         }
