@@ -38,12 +38,24 @@ DDARSolver::DDARSolver(Problem *problem, const std::map<std::string, bool> &conf
     // matcher.stmts() 是纯数值匹配出的"已验证"语句（平行/垂直/比例相等等），
     // 送进 _ars 供 AR 直接复用。有 goal 时 Matcher 内部已经不做这部分匹配，
     // matcher.stmts() 天然为空，这里不用再额外判断 goal。
+    std::map<Point, std::vector<size_t>> by_max_point;
     for (const auto &stmt : matcher.stmts())
     {
         if (stmt->check_numerically())
         {
-            _ars.push_back(this->insert_statement(stmt->normalize()));
+            auto *proof = this->insert_statement(stmt->normalize());
+            by_max_point[proof->max_point()].push_back(_ars.size());
+            _ars.push_back({proof, 0});
         }
+    }
+    _ar_point_limits.reserve(by_max_point.size());
+    for (const auto &[point, candidates] : by_max_point)
+    {
+        for (const auto index : candidates)
+        {
+            _ars[index].rank = _ar_point_limits.size();
+        }
+        _ar_point_limits.push_back(point);
     }
 }
 
@@ -52,36 +64,30 @@ bool DDARSolver::run_level(const Point &max_pt)
     size_t num_stmts = _checked_statements.size();
     _level++;
 
-    bool changed = true;
-    while (changed)
+    if (!_ars.empty())
     {
-        changed = false;
-        for (auto it = _ars.begin(); it != _ars.end();)
+        const auto available = std::upper_bound(_ar_point_limits.begin(), _ar_point_limits.end(), max_pt)
+            - _ar_point_limits.begin();
+        const auto limit = static_cast<size_t>(available);
+        bool removed = true;
+        while (removed && !_ars.empty())
         {
-            auto &goal = *it;
-            if (goal->max_point() > max_pt)
+            removed = false;
+            size_t remaining = 0;
+            for (const auto candidate : _ars)
             {
-                ++it;
-                continue;
-            }
-            if (goal->is_proved())
-            {
-                it = _ars.erase(it);
-                changed = true;
-            }
-            else
-            {
-                goal->ar(_level);
-                if (goal->is_proved())
+                if (candidate.rank < limit)
                 {
-                    it = _ars.erase(it);
-                    changed = true;
+                    candidate.proof->ar(_level);
+                    if (candidate.proof->is_proved())
+                    {
+                        removed = true;
+                        continue;
+                    }
                 }
-                else
-                {
-                    ++it;
-                }
+                _ars[remaining++] = candidate;
             }
+            _ars.resize(remaining);
         }
     }
 

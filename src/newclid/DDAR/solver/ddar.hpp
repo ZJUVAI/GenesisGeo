@@ -29,7 +29,13 @@ private:
 
     std::vector<Proof *> _goals;
 
-    std::vector<Proof *> _ars;
+    struct ARCandidate
+    {
+        Proof *proof;
+        size_t rank;
+    };
+    std::vector<ARCandidate> _ars;
+    std::vector<Point> _ar_point_limits;
 
     std::vector<Proof *> _checked_statements;
 
