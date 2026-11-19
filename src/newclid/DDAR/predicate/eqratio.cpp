@@ -3,6 +3,7 @@
 #include "type/dist.hpp"
 #include "type/distlog.hpp"
 #include <algorithm>
+#include <array>
 #include <iostream>
 
 using namespace std;
@@ -75,27 +76,25 @@ unique_ptr<Statement> EqRatio::replace(Point p, Point q) const
 
 unique_ptr<Statement> EqRatio::normalize() const
 {
-    Dist a = left_up().normalize();
-    Dist b = left_down().normalize();
-    Dist c = right_up().normalize();
-    Dist d = right_down().normalize();
+    const array<Dist, 4> segments{left_up().normalize(), left_down().normalize(), right_up().normalize(), right_down().normalize()};
+    constexpr array<array<size_t, 4>, 8> permutations{{
+        {0, 1, 2, 3},
+        {0, 2, 1, 3},
+        {1, 0, 3, 2},
+        {1, 3, 0, 2},
+        {2, 0, 3, 1},
+        {2, 3, 0, 1},
+        {3, 1, 2, 0},
+        {3, 2, 1, 0},
+    }};
+    const auto &best = *min_element(permutations.begin(), permutations.end(),
+                                   [&segments](const auto &left, const auto &right)
+    {
+        return lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(),
+                                       [&segments](size_t a, size_t b) { return segments[a] < segments[b]; });
+    });
 
-    vector<array<Dist, 4>> candidates = {
-        {a, b, c, d},
-        {a, c, b, d},
-        {b, a, d, c},
-        {b, d, a, c},
-        {c, a, d, b},
-        {c, d, a, b},
-        {d, b, c, a},
-        {d, c, b, a},
-    };
-
-    auto best = *min_element(candidates.begin(), candidates.end());
-
-    return make_unique<EqRatio>(
-        best[0], best[1], best[2], best[3]
-    );
+    return make_unique<EqRatio>(segments[best[0]], segments[best[1]], segments[best[2]], segments[best[3]]);
 }
 
 ostream &EqRatio::print(ostream &os) const
