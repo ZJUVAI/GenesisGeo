@@ -51,7 +51,6 @@ private:
 
     void match_dist_ratios();
 
-    std::vector<std::tuple<double, double, Triangle>> all_triangles();
 
     std::vector<std::tuple<double, Coll>> all_betweens();
 

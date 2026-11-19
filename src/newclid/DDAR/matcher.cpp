@@ -1,3 +1,6 @@
+#include "predicate/cong.hpp"
+#include "predicate/sameclock.hpp"
+#include <array>
 #include "matcher.hpp"
 #include "numerical.hpp"
 #include "theorem.hpp"
@@ -43,69 +46,176 @@ Matcher::Matcher(Problem *prob, const std::map<std::string, bool> &config)
     }
 }
 
-vector<tuple<double, double, Triangle>> Matcher::all_triangles()
+namespace
 {
-    vector<tuple<double, double, Triangle>> res;
-    const size_t num_pts = _problem->num_points();
-    res.reserve(num_pts * (num_pts - 1) * (num_pts - 2) / 6);
-    for (const auto &pt_a : _problem->points())
+struct MatchPredicate
+{
+    const Statement &raw;
+    unique_ptr<Statement> canonical{};
+    optional<bool> valid{};
+
+    bool check()
     {
-        for (const auto &pt_b : _problem->points())
-        {
-            if (pt_a.is_close(pt_b))
-            {
-                continue;
-            }
-            for (const auto &pt_c : _problem->points())
-            {
-                if (pt_a.is_close(pt_b) || pt_a.is_close(pt_c) || Coll(pt_a, pt_b, pt_c).check_equations())
-                {
-                    continue;
-                }
-                double const ab = Dist(pt_a, pt_b).to_double();
-                double const ac = Dist(pt_a, pt_c).to_double();
-                double const bc = Dist(pt_b, pt_c).to_double();
-                if (ab > (1 + REL_TOL) * bc || bc > (1 + REL_TOL) * ac)
-                {
-                    continue;
-                }
-                res.emplace_back(ab / ac,
-                                 ab / bc,
-                                 Triangle(pt_a, pt_b, pt_c));
-            }
-        }
+        if (!valid)
+            valid = raw.check_numerically();
+        return *valid;
     }
-    return res;
+
+    const Statement &canonical_predicate()
+    {
+        if (!canonical)
+            canonical = raw.normalize();
+        return *canonical;
+    }
+};
 }
 
 void Matcher::on_similar_triangles(const SimilarTriangles &simtri)
 {
-    for (const auto &rotated : simtri.cyclic_rotations())
+    const auto ratio_abbc = simtri.eqratio_abbc();
+    const auto ratio_abac = simtri.eqratio_abac();
+    const auto ratio_bcac = simtri.eqratio_bcac();
+    const auto angle_abc = simtri.eqangle_abc();
+    const auto angle_bca = simtri.eqangle_bca();
+    const auto angle_cab = simtri.eqangle_cab();
+    const auto clock = simtri.to_sameclock();
+    MatchPredicate relation{simtri}, orientation{clock};
+    MatchPredicate abbc{ratio_abbc}, abac{ratio_abac}, bcac{ratio_bcac};
+    MatchPredicate abc{angle_abc}, bca{angle_bca}, cab{angle_cab};
+    const auto emit = [&](const char *name, const char *rule,
+                          initializer_list<MatchPredicate *> hypotheses,
+                          initializer_list<MatchPredicate *> conclusions)
     {
-        insert_theorem(Theorem::similar_triangles_of_sas(rotated));
-    }
+        if (!get_config(rule, false))
+            return;
+        for (auto *predicate : hypotheses)
+            if (!predicate->check())
+                return;
+        for (auto *predicate : conclusions)
+            if (!predicate->check())
+                return;
 
-    insert_theorem(Theorem::similar_triangles_properties(simtri));
-    insert_theorem(Theorem::similar_triangles_of_aa(simtri));
-    insert_theorem(Theorem::similar_triangles_of_sss(simtri));
+        Theorem theorem(name, rule);
+        for (auto *predicate : hypotheses)
+            theorem.add_hypothesis(predicate->canonical_predicate().clone());
+        for (auto *predicate : conclusions)
+            theorem.add_conclusion(predicate->canonical_predicate().clone());
+        _theorems.push_back(move(theorem));
+    };
 
-    CongruentTriangles const congtri(simtri.left(), simtri.right(), simtri.sameclock());
-    if (congtri.check_numerically())
+    const bool sameclock = simtri.sameclock();
+    const char *sas_rule = sameclock ? "r62" : "r63";
+    if (get_config(sas_rule, false))
     {
-        // Use SSS and SAS to derive congruent triangles
-        for (const auto &rotated : congtri.cyclic_rotations())
+        constexpr const char *sas_name = "SAS Similarity of triangles";
+        emit(sas_name, sas_rule, {&abbc, &abc, &orientation}, {&relation});
+        const auto &l = simtri.left();
+        const auto &r = simtri.right();
+        const auto emit_rotated = [&](const SimilarTriangles &rotated, MatchPredicate &angle)
         {
-            insert_theorem(Theorem::congruent_triangles_of_sas(rotated));
-        }
-        insert_theorem(Theorem::congruent_triangles_of_sss(congtri));
-        insert_theorem(Theorem::congruent_triangles_properties(congtri));
+            const auto ratio = rotated.eqratio_abbc();
+            const auto direction = rotated.to_sameclock();
+            MatchPredicate rotated_ratio{ratio}, rotated_direction{direction}, rotated_relation{rotated};
+            emit(sas_name, sas_rule, {&rotated_ratio, &angle, &rotated_direction}, {&rotated_relation});
+        };
+        emit_rotated({Triangle(l.c(), l.a(), l.b()), Triangle(r.c(), r.a(), r.b()), sameclock}, cab);
+        emit_rotated({Triangle(l.b(), l.c(), l.a()), Triangle(r.b(), r.c(), r.a()), sameclock}, bca);
     }
+
+    emit("Properties of similar triangles", sameclock ? "r52" : "r53",
+         {&orientation, &relation}, {&abbc, &abac, &bcac, &abc, &bca});
+    emit("AA Similarity of triangles", sameclock ? "r34" : "r35", {&abc, &bca, &orientation}, {&relation});
+    emit("SSS Similarity of triangles", sameclock ? "r60" : "r61", {&abbc, &abac, &orientation}, {&relation});
+
+    const CongruentTriangles congruent(simtri.left(), simtri.right(), sameclock);
+    if (!congruent.check_nondegen())
+        return;
+    const auto length_ab = congruent.cong_ab();
+    const auto length_bc = congruent.cong_bc();
+    const auto length_ac = congruent.cong_ac();
+    if (!length_ab.check_equations() || !length_bc.check_equations() || !length_ac.check_equations())
+        return;
+
+    MatchPredicate ab{length_ab}, bc{length_bc}, ac{length_ac};
+    ab.valid = length_ab.check_nondegen();
+    bc.valid = length_bc.check_nondegen();
+    ac.valid = length_ac.check_nondegen();
+    MatchPredicate congruence{congruent};
+    congruence.valid = true;
+
+    const char *congruent_sas = sameclock ? "r112" : "r113";
+    if (get_config(congruent_sas, false))
+    {
+        constexpr const char *sas_name = "SAS Congruence of triangles";
+        emit(sas_name, congruent_sas, {&ab, &bc, &abc, &orientation}, {&congruence});
+        const auto &l = congruent.left();
+        const auto &r = congruent.right();
+        const Cong length_ca(Dist(l.c(), l.a()), Dist(r.c(), r.a()));
+        MatchPredicate ca{length_ca};
+        const auto emit_rotated = [&](const CongruentTriangles &rotated, MatchPredicate &first,
+                                      MatchPredicate &second, MatchPredicate &angle)
+        {
+            const auto direction = rotated.to_sameclock();
+            MatchPredicate rotated_direction{direction}, rotated_relation{rotated};
+            emit(sas_name, congruent_sas, {&first, &second, &angle, &rotated_direction}, {&rotated_relation});
+        };
+        emit_rotated({Triangle(l.c(), l.a(), l.b()), Triangle(r.c(), r.a(), r.b()), sameclock},
+                     ca, ab, cab);
+        emit_rotated({Triangle(l.b(), l.c(), l.a()), Triangle(r.b(), r.c(), r.a()), sameclock},
+                     bc, ca, bca);
+    }
+    emit("SSS Congruence of triangles", sameclock ? "r110" : "r111",
+         {&ab, &ac, &bc, &orientation}, {&congruence});
+    emit("Properties of congruent triangles", sameclock ? "r103" : "r104",
+         {&congruence}, {&ab, &ac, &bc, &abc, &bca, &cab});
 }
 
 void Matcher::match_similar_triangles()
 {
-    using item_type = tuple<double, double, Triangle>;
-    vector<item_type> triangles = all_triangles();
+    using item_type = tuple<double, double, array<size_t, 3>>;
+    vector<item_type> triangles;
+    const auto &points = _problem->points();
+    const size_t num_pts = points.size();
+    triangles.reserve(num_pts * (num_pts - 1) * (num_pts - 2) / 6);
+
+    vector<double> distances(num_pts * num_pts);
+    for (size_t a = 0; a < num_pts; ++a)
+    {
+        for (size_t b = 0; b < num_pts; ++b)
+        {
+            distances[a * num_pts + b] = Dist(points[a], points[b]).to_double();
+        }
+    }
+    for (size_t a = 0; a < num_pts; ++a)
+    {
+        const auto &pt_a = points[a];
+        for (size_t b = 0; b < num_pts; ++b)
+        {
+            const auto &pt_b = points[b];
+            if (pt_a.is_close(pt_b))
+            {
+                continue;
+            }
+            const double ab = distances[a * num_pts + b];
+            for (size_t c = 0; c < num_pts; ++c)
+            {
+                const auto &pt_c = points[c];
+                if (pt_a.is_close(pt_c) || Coll(pt_a, pt_b, pt_c).check_equations())
+                {
+                    continue;
+                }
+                const double ac = distances[a * num_pts + c];
+                const double bc = distances[b * num_pts + c];
+                if (ab > (1 + REL_TOL) * bc || bc > (1 + REL_TOL) * ac)
+                {
+                    continue;
+                }
+                triangles.emplace_back(ab / ac,
+                                 ab / bc,
+                                 array<size_t, 3>{a, b, c});
+            }
+        }
+    }
 
     if (triangles.empty())
     {
@@ -127,53 +237,40 @@ void Matcher::match_similar_triangles()
              }
          });
 
-    vector<item_type> bucket;
-    bucket.push_back(triangles[0]);
-
-    for (size_t i = 1; i < triangles.size(); i++)
+    const auto triangle_at = [&points](const item_type &item)
     {
-        const auto &prev = bucket.back();
-        const auto &curr = triangles[i];
-        if (Numerical::close_enough(get<0>(prev), get<0>(curr)) &&
-            Numerical::close_enough(get<1>(prev), get<1>(curr)))
-        {
-            bucket.push_back(curr);
-        }
-        else
-        {
-            if (bucket.size() > 1)
-            {
-                size_t n = bucket.size();
-                for (size_t left = 0; left < n; left++)
-                {
-                    double area_left = get<2>(bucket[left]).area();
-                    for (size_t right = left + 1; right < n; right++)
-                    {
-                        double area_right = get<2>(bucket[right]).area();
-                        bool sameclock = (area_left > 0) == (area_right > 0);
-                        on_similar_triangles({get<2>(bucket[left]), get<2>(bucket[right]), sameclock});
-                    }
-                }
-            }
-            bucket.clear();
-            bucket.push_back(curr);
-        }
-    }
+        const auto &idx = get<2>(item);
+        return Triangle(points[idx[0]], points[idx[1]], points[idx[2]]);
+    };
 
-    if (bucket.size() > 1)
+    const auto match_bucket = [&](size_t begin, size_t end)
     {
-        size_t n = bucket.size();
-        for (size_t left = 0; left < n; left++)
+        for (size_t left = begin; left + 1 < end; ++left)
         {
-            double area_left = get<2>(bucket[left]).area();
-            for (size_t right = left + 1; right < n; right++)
+            const auto left_triangle = triangle_at(triangles[left]);
+            const double area_left = left_triangle.area();
+            for (size_t right = left + 1; right < end; ++right)
             {
-                double area_right = get<2>(bucket[right]).area();
-                bool sameclock = (area_left > 0) == (area_right > 0);
-                on_similar_triangles({get<2>(bucket[left]), get<2>(bucket[right]), sameclock});
+                const auto right_triangle = triangle_at(triangles[right]);
+                const bool sameclock = (area_left > 0) == (right_triangle.area() > 0);
+                on_similar_triangles({left_triangle, right_triangle, sameclock});
             }
         }
+    };
+
+    size_t begin = 0;
+    for (size_t i = 1; i < triangles.size(); ++i)
+    {
+        const auto &previous = triangles[i - 1];
+        const auto &current = triangles[i];
+        if (!Numerical::close_enough(get<0>(previous), get<0>(current)) ||
+            !Numerical::close_enough(get<1>(previous), get<1>(current)))
+        {
+            match_bucket(begin, i);
+            begin = i;
+        }
     }
+    match_bucket(begin, triangles.size());
 }
 
 vector<tuple<double, Coll>> Matcher::all_betweens()
