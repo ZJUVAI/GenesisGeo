@@ -1,7 +1,7 @@
 #ifndef POLYNOMIAL_HPP
 #define POLYNOMIAL_HPP
 
-#include <map>
+#include <utility>
 #include <vector>
 #include <functional>
 #include <cstddef>
@@ -11,10 +11,10 @@
 class Polynomial final
 {
 public:
-    using TermMap = std::map<Monomial, Rational, std::greater<Monomial>>;
+    using Terms = std::vector<std::pair<Monomial, Rational>>;
 
 private:
-    TermMap _terms; // 单项式 -> 系数（不变量：系数 != 0）
+    Terms _terms; // Sorted by descending monomial order.
 
     void prune_zero_coeffs();
 
@@ -48,9 +48,9 @@ public:
     const Monomial &leading_monomial() const; // 前提：!empty()
     Rational leading_coeff() const;            // 前提：!empty()
 
-    const TermMap &terms() const { return _terms; }
-    TermMap::const_iterator begin() const { return _terms.begin(); }
-    TermMap::const_iterator end() const { return _terms.end(); }
+    const Terms &terms() const { return _terms; }
+    Terms::const_iterator begin() const { return _terms.begin(); }
+    Terms::const_iterator end() const { return _terms.end(); }
 
     // 原地变换
     void make_monic();     // 整体除以首项系数（空时为空操作）

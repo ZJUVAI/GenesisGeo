@@ -1,7 +1,7 @@
 #ifndef MONOMIAL_HPP
 #define MONOMIAL_HPP
 
-#include <map>
+#include <utility>
 #include <vector>
 #include <string>
 #include <cstddef>
@@ -13,9 +13,11 @@
 class Monomial final
 {
 private:
-    std::map<TermArg, int> _vars; // 变量 -> 指数（不变量：指数 != 0）
+    using Variables = std::vector<std::pair<TermArg, int>>;
+    Variables _vars; // Sorted by variable, with no zero exponents.
 
-    void prune_zero_exponents();
+    Variables::const_iterator find_variable(const TermArg &var) const;
+    void add_exponent(const TermArg &var, int exp, bool subtract = false);
 
 public:
     Monomial() = default; // 常数单项式（次数为 0）
@@ -36,8 +38,8 @@ public:
     // 查询
     int degree() const;
     bool is_constant() const { return _vars.empty(); }
-    bool contains(const TermArg &var) const { return _vars.count(var) != 0; }
-    const std::map<TermArg, int> &vars() const { return _vars; }
+    bool contains(const TermArg &var) const { return find_variable(var) != _vars.end(); }
+    const Variables &vars() const { return _vars; }
 
     double to_double() const;
     std::string to_string() const;

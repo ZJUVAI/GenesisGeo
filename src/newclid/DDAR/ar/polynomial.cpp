@@ -1,15 +1,31 @@
 #include "ar/polynomial.hpp"
 #include "numerical.hpp"
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 
 using namespace std;
 
+namespace
+{
+    template <typename Key>
+    Rational &coefficient(Polynomial::Terms &terms, Key &&monomial)
+    {
+        auto position = lower_bound(terms.begin(), terms.end(), monomial,
+            [](const auto &term, const Monomial &key) { return key < term.first; });
+        if (position == terms.end() || position->first < monomial)
+        {
+            position = terms.emplace(position, std::forward<Key>(monomial), Rational());
+        }
+        return position->second;
+    }
+}
+
 Polynomial::Polynomial(initializer_list<pair<Monomial, Rational>> terms)
 {
     for (const auto &[m, c] : terms)
     {
-        _terms[m] += c;
+        coefficient(_terms, m) += c;
     }
     prune_zero_coeffs();
 }
@@ -18,7 +34,7 @@ Polynomial::Polynomial(vector<pair<Monomial, Rational>> terms)
 {
     for (const auto &[m, c] : terms)
     {
-        _terms[m] += c;
+        coefficient(_terms, m) += c;
     }
     prune_zero_coeffs();
 }
@@ -27,30 +43,21 @@ Polynomial::Polynomial(const Rational &c)
 {
     if (c != Rational(0))
     {
-        _terms[Monomial()] = c;
+        _terms.emplace_back(Monomial(), c);
     }
 }
 
 void Polynomial::prune_zero_coeffs()
 {
-    for (auto it = _terms.begin(); it != _terms.end();)
-    {
-        if (it->second == Rational(0))
-        {
-            it = _terms.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
+    _terms.erase(remove_if(_terms.begin(), _terms.end(),
+        [](const auto &term) { return term.second == Rational(0); }), _terms.end());
 }
 
 Polynomial &Polynomial::operator+=(const Polynomial &other)
 {
     for (const auto &[m, c] : other._terms)
     {
-        _terms[m] += c;
+        coefficient(_terms, m) += c;
     }
     prune_zero_coeffs();
     return *this;
@@ -60,7 +67,7 @@ Polynomial &Polynomial::operator-=(const Polynomial &other)
 {
     for (const auto &[m, c] : other._terms)
     {
-        _terms[m] -= c;
+        coefficient(_terms, m) -= c;
     }
     prune_zero_coeffs();
     return *this;
@@ -86,10 +93,11 @@ Polynomial &Polynomial::operator*=(const Monomial &m)
     {
         return *this;
     }
-    TermMap shifted;
+    Terms shifted;
+    shifted.reserve(_terms.size());
     for (const auto &[mono, c] : _terms)
     {
-        shifted[mono * m] += c;
+        coefficient(shifted, mono * m) += c;
     }
     _terms = std::move(shifted);
     prune_zero_coeffs();
@@ -208,10 +216,11 @@ void Polynomial::content_reduce()
     {
         return;
     }
-    TermMap shifted;
+    Terms shifted;
+    shifted.reserve(_terms.size());
     for (const auto &[mono, c] : _terms)
     {
-        shifted[mono / safe] += c;
+        coefficient(shifted, mono / safe) += c;
     }
     _terms = std::move(shifted);
     prune_zero_coeffs();

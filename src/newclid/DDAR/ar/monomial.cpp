@@ -7,35 +7,54 @@
 
 using namespace std;
 
+namespace
+{
+    template <typename Variables>
+    auto lower_bound_variable(Variables &vars, const TermArg &var)
+    {
+        return std::lower_bound(vars.begin(), vars.end(), var,
+            [](const auto &entry, const TermArg &key) { return entry.first < key; });
+    }
+}
+
 Monomial::Monomial(const TermArg &var, int exp)
 {
     if (exp != 0)
     {
-        _vars[var] = exp;
+        _vars.emplace_back(var, exp);
     }
 }
 
 Monomial::Monomial(const vector<TermArg> &vars)
 {
-    for (const auto &v : vars)
+    for (const auto &var : vars)
     {
-        _vars[v] += 1;
+        add_exponent(var, 1);
     }
-    prune_zero_exponents();
 }
 
-void Monomial::prune_zero_exponents()
+Monomial::Variables::const_iterator Monomial::find_variable(const TermArg &var) const
 {
-    for (auto it = _vars.begin(); it != _vars.end();)
+    auto it = lower_bound_variable(_vars, var);
+    if (it != _vars.end() && !(var < it->first))
     {
-        if (it->second == 0)
-        {
-            it = _vars.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
+        return it;
+    }
+    return _vars.end();
+}
+
+void Monomial::add_exponent(const TermArg &var, int exp, bool subtract)
+{
+    auto it = lower_bound_variable(_vars, var);
+    if (it == _vars.end() || var < it->first)
+    {
+        _vars.emplace(it, var, subtract ? -exp : exp);
+        return;
+    }
+    it->second = subtract ? it->second - exp : it->second + exp;
+    if (it->second == 0)
+    {
+        _vars.erase(it);
     }
 }
 
@@ -48,13 +67,18 @@ Monomial Monomial::operator*(const Monomial &other) const
 
 Monomial &Monomial::operator*=(const Monomial &other)
 {
+    if (this == &other)
+    {
+        for (auto &[var, exp] : _vars)
+        {
+            exp += exp;
+        }
+        return *this;
+    }
+
     for (const auto &[var, exp] : other._vars)
     {
-        _vars[var] += exp;
-        if (_vars[var] == 0)
-        {
-            _vars.erase(var);
-        }
+        add_exponent(var, exp);
     }
     return *this;
 }
@@ -68,24 +92,24 @@ Monomial Monomial::operator/(const Monomial &other) const
 
 Monomial &Monomial::operator/=(const Monomial &other)
 {
+    if (this == &other)
+    {
+        _vars.clear();
+        return *this;
+    }
+
     for (const auto &[var, exp] : other._vars)
     {
-        _vars[var] -= exp;
-        if (_vars[var] == 0)
-        {
-            _vars.erase(var);
-        }
+        add_exponent(var, exp, true);
     }
     return *this;
 }
 
 bool Monomial::divides(const Monomial &other) const
 {
-    // *this 整除 other，当且仅当 *this 的每个变量都在 other 中出现，
-    // 且指数不小于 *this 中的指数。
     for (const auto &[var, exp] : _vars)
     {
-        auto it = other._vars.find(var);
+        const auto it = other.find_variable(var);
         if (it == other._vars.end() || it->second < exp)
         {
             return false;
@@ -99,14 +123,10 @@ Monomial Monomial::gcd(const Monomial &other) const
     Monomial res;
     for (const auto &[var, exp] : _vars)
     {
-        auto it = other._vars.find(var);
+        const auto it = other.find_variable(var);
         if (it != other._vars.end())
         {
-            int m = std::min(exp, it->second);
-            if (m != 0)
-            {
-                res._vars[var] = m;
-            }
+            res._vars.emplace_back(var, std::min(exp, it->second));
         }
     }
     return res;
@@ -117,10 +137,10 @@ Monomial Monomial::lcm(const Monomial &other) const
     Monomial res = *this;
     for (const auto &[var, exp] : other._vars)
     {
-        auto it = res._vars.find(var);
-        if (it == res._vars.end())
+        auto it = lower_bound_variable(res._vars, var);
+        if (it == res._vars.end() || var < it->first)
         {
-            res._vars[var] = exp;
+            res._vars.emplace(it, var, exp);
         }
         else
         {
@@ -133,9 +153,10 @@ Monomial Monomial::lcm(const Monomial &other) const
 Monomial Monomial::inverse() const
 {
     Monomial res;
+    res._vars.reserve(_vars.size());
     for (const auto &[var, exp] : _vars)
     {
-        res._vars[var] = -exp;
+        res._vars.emplace_back(var, -exp);
     }
     return res;
 }
