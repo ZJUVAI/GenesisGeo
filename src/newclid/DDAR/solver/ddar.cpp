@@ -328,12 +328,17 @@ void DDARSolver::add_custom_theorems(const vector<CustomRule> &rules)
 Proof *DDARSolver::insert_statement(const unique_ptr<Statement> &p)
 {
     auto key = p->to_string();
-    auto [it, success] = _statement_proofs.insert({key, std::make_unique<Proof>(this, p->clone())});
-    if (success)
+    const auto existing = _statement_proofs.find(key);
+    if (existing != _statement_proofs.end())
     {
-        it->second->initial();
+        return existing->second.get();
     }
-    return it->second.get();
+
+    auto proof = std::make_unique<Proof>(this, p->clone());
+    Proof *result = proof.get();
+    _statement_proofs.emplace(std::move(key), std::move(proof));
+    result->initial();
+    return result;
 }
 
 vector<tuple<vector<string>, vector<vector<string>>, string>> DDARSolver::dependency_graph() const
