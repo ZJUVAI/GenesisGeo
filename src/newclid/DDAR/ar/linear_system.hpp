@@ -19,6 +19,12 @@ class LinearSystem final
 {
 private:
     size_t _rule_version = 0;
+    // Ordered keys also cover comparison-equivalent variables in exact head lookups.
+    struct HeadEntry
+    {
+        const Equation *linear_rule = nullptr;
+    };
+    std::map<TermArg, HeadEntry> _head_revisions;
     // 已归档的原始方程,append-only;archive index 即下标。
     std::vector<std::pair<Equation, Proof *>> _equations;
 
@@ -41,6 +47,10 @@ private:
 
 public:
     LinearSystem() = default;
+    LinearSystem(const LinearSystem &other);
+    LinearSystem &operator=(const LinearSystem &other);
+    LinearSystem(LinearSystem &&) = default;
+    LinearSystem &operator=(LinearSystem &&) = default;
 
     // 把 pf 的某一类方程加入系统(dist / slope / distlog),并立刻 reduce。
     // 名称、签名与原版保持一致。
@@ -54,7 +64,8 @@ public:
     // 给 ReducedEquation 调用。
     Equation normal_form(const Equation &eq) const;
     // Leave the caller's equation untouched when normalization makes no changes.
-    std::optional<Equation> normal_form_if_changed(const Equation &eq) const;
+    std::optional<Equation> normal_form_if_changed(
+        const Equation &eq) const;
 
     // archive 访问,签名与原版一致。
     const Equation &at(size_t index) const;

@@ -2,6 +2,7 @@
 #include "ar/reduced_equation.hpp"
 #include "numerical.hpp"
 #include "solver/proof.hpp"
+#include <algorithm>
 #include <iostream>
 #include <deque>
 #include <stdexcept>
@@ -10,11 +11,41 @@
 
 using namespace std;
 
+LinearSystem::LinearSystem(const LinearSystem &other)
+    : _rule_version(other._rule_version), _head_revisions(other._head_revisions),
+      _equations(other._equations), _rules(other._rules),
+      _head_var_index(other._head_var_index), _body_var_index(other._body_var_index)
+{
+    // The copied index must point to equations owned by the copied rule map.
+    for (auto &[variable, entry] : _head_revisions)
+    {
+        if (entry.linear_rule)
+        {
+            entry.linear_rule = &_rules.at(entry.linear_rule->leading_monomial());
+        }
+    }
+}
+
+LinearSystem &LinearSystem::operator=(const LinearSystem &other)
+{
+    if (this != &other)
+    {
+        LinearSystem copy(other);
+        *this = std::move(copy);
+    }
+    return *this;
+}
+
 void LinearSystem::index_rule(const Monomial &head, const Equation &body)
 {
     for (const auto &[var, exp] : head.vars())
     {
         _head_var_index[var].insert(head);
+        auto &entry = _head_revisions[var];
+        if (head.vars().size() == 1 && exp == 1)
+        {
+            entry.linear_rule = &body;
+        }
     }
     for (const auto &[mono, c] : body.body().terms())
     {
@@ -29,6 +60,10 @@ void LinearSystem::deindex_rule(const Monomial &head, const Equation &body)
 {
     for (const auto &[var, exp] : head.vars())
     {
+        if (head.vars().size() == 1 && exp == 1)
+        {
+            _head_revisions.at(var).linear_rule = nullptr;
+        }
         auto it = _head_var_index.find(var);
         if (it != _head_var_index.end())
         {
@@ -61,6 +96,18 @@ const Equation *LinearSystem::find_divisor_rule(const Monomial &m) const
     if (m.is_constant())
     {
         return nullptr;
+    }
+    if (m.vars().size() == 1 && m.vars().begin()->second == 1)
+    {
+        const auto entry = _head_revisions.find(m.vars().begin()->first);
+        if (entry == _head_revisions.end())
+        {
+            return nullptr;
+        }
+        if (entry->second.linear_rule)
+        {
+            return entry->second.linear_rule;
+        }
     }
     // 优先精确命中(常见的线性变量代入)。
     auto exact = _rules.find(m);
@@ -99,7 +146,8 @@ Equation LinearSystem::normal_form(const Equation &eq) const
     return reduced ? std::move(*reduced) : eq;
 }
 
-optional<Equation> LinearSystem::normal_form_if_changed(const Equation &original) const
+optional<Equation> LinearSystem::normal_form_if_changed(
+    const Equation &original) const
 {
     if (original.empty())
     {
@@ -134,7 +182,7 @@ optional<Equation> LinearSystem::normal_form_if_changed(const Equation &original
             {
                 reduced.emplace(original);
             }
-            *reduced -= scaled_rule;
+                *reduced -= scaled_rule;
             reduced->content_reduce();
             reduced->make_monic();
             changed = true;
@@ -191,8 +239,8 @@ void LinearSystem::install_rule(Equation eq)
         }
 
         // 装入新规则。
-        index_rule(head, cur);
-        _rules.emplace(head, std::move(cur));
+        const auto installed = _rules.emplace(head, std::move(cur)).first;
+        index_rule(installed->first, installed->second);
 
         for (const auto &old_head : affected)
         {
@@ -212,8 +260,8 @@ void LinearSystem::install_rule(Equation eq)
             }
             if (new_eq == old_eq)
             {
-                index_rule(old_head, new_eq);
-                _rules.emplace(old_head, std::move(new_eq));
+                const auto restored = _rules.emplace(old_head, std::move(new_eq)).first;
+                index_rule(restored->first, restored->second);
                 continue;
             }
             work.push_back(std::move(new_eq));
