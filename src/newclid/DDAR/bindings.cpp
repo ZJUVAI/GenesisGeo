@@ -440,9 +440,46 @@ vector<CustomRule> parse_custom_theorems(const vector<string> &theorem_strings)
     return rules;
 }
 
+static py::list export_dependency_graph(const DDARSolver &solver)
+{
+    unordered_map<const Proof *, py::tuple> tokens;
+    auto token_list = [&tokens](const Proof *proof)
+    {
+        auto it = tokens.find(proof);
+        if (it == tokens.end())
+        {
+            const auto normalized = proof->statement()->normalize()->to_tokens();
+            py::tuple immutable_tokens(normalized.size());
+            for (size_t i = 0; i < normalized.size(); ++i)
+            {
+                immutable_tokens[i] = py::str(normalized[i]);
+            }
+            it = tokens.emplace(proof, std::move(immutable_tokens)).first;
+        }
+        return py::list(it->second);
+    };
+
+    py::list graph;
+    for (const Proof *proof : solver.checked_statements())
+    {
+        if (!proof->is_proved())
+        {
+            cout << "?????" << endl;
+            continue;
+        }
+        py::list dependencies;
+        for (const Proof *premise : proof->get_dependencies())
+        {
+            dependencies.append(token_list(premise));
+        }
+        graph.append(py::make_tuple(token_list(proof), std::move(dependencies), proof->reason()));
+    }
+    return graph;
+}
+
 extern "C"
 {
-    pair<bool, DepGraph> run_ddar(
+    pair<bool, py::list> run_ddar(
         string name,
         vector<tuple<string, double, double>> points,
         vector<pair<string, vector<string>>> premises,
@@ -476,7 +513,7 @@ extern "C"
         // 求解结束后，对前提过多的 AR 推导尝试简化
         solver.simplify_ar();
 
-        DepGraph dep_graph = solver.dependency_graph();
+        py::list dep_graph = export_dependency_graph(solver);
 
         // if (do_analyze)
         // {
@@ -489,7 +526,7 @@ extern "C"
         return make_pair(solver.is_solved(), dep_graph);
     }
 
-    pair<bool, DepGraph> run_ddar_with_custom_theorems(
+    pair<bool, py::list> run_ddar_with_custom_theorems(
         string name,
         vector<tuple<string, double, double>> points,
         vector<pair<string, vector<string>>> premises,
@@ -532,7 +569,7 @@ extern "C"
         // 求解结束后，对前提过多的 AR 推导尝试简化
         solver.simplify_ar();
 
-        DepGraph dep_graph = solver.dependency_graph();
+        py::list dep_graph = export_dependency_graph(solver);
 
         // if (do_analyze)
         // {
