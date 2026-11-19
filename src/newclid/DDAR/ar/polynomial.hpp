@@ -31,6 +31,7 @@ public:
     // 算术运算。
     Polynomial &operator+=(const Polynomial &other);
     Polynomial &operator-=(const Polynomial &other);
+    void subtract_scaled(const Polynomial &other, Rational scale);
     Polynomial &operator*=(const Rational &r);
     Polynomial &operator*=(const Monomial &m);
 

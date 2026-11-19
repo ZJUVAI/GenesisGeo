@@ -175,14 +175,22 @@ optional<Equation> LinearSystem::normal_form_if_changed(
             {
                 continue;
             }
-            Equation scaled_rule = *rule;
-            scaled_rule *= mono / rule->leading_monomial();
-            scaled_rule *= coeff;
+            const auto &head = rule->leading_monomial();
             if (!reduced)
             {
                 reduced.emplace(original);
             }
+            if (mono == head)
+            {
+                reduced->subtract_scaled(*rule, coeff);
+            }
+            else
+            {
+                Equation scaled_rule = *rule;
+                scaled_rule *= mono / head;
+                scaled_rule *= coeff;
                 *reduced -= scaled_rule;
+            }
             reduced->content_reduce();
             reduced->make_monic();
             changed = true;

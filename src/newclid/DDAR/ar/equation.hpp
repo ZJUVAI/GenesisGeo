@@ -59,6 +59,7 @@ public:
     // 算术运算：body 与证明信息同步更新。
     Equation &operator+=(const Equation &other);
     Equation &operator-=(const Equation &other);
+    void subtract_scaled(const Equation &other, Rational scale);
     Equation &operator*=(const Rational &r);
     Equation &operator*=(const Monomial &m);
 

@@ -73,6 +73,18 @@ Polynomial &Polynomial::operator-=(const Polynomial &other)
     return *this;
 }
 
+void Polynomial::subtract_scaled(const Polynomial &other, Rational scale)
+{
+    if (scale != Rational(0))
+    {
+        for (const auto &[monomial, value] : other._terms)
+        {
+            coefficient(_terms, monomial) -= value * scale;
+        }
+    }
+    prune_zero_coeffs();
+}
+
 Polynomial &Polynomial::operator*=(const Rational &r)
 {
     if (r == Rational(0))

@@ -63,6 +63,19 @@ Equation &Equation::operator-=(const Equation &other)
     return *this;
 }
 
+void Equation::subtract_scaled(const Equation &other, Rational scale)
+{
+    _body.subtract_scaled(other._body, scale);
+    if (scale != Rational(0))
+    {
+        for (const auto &[index, coefficient] : other._deps)
+        {
+            _deps[index].subtract_scaled(coefficient, scale);
+        }
+    }
+    prune_zero_deps();
+}
+
 Equation &Equation::operator*=(const Rational &r)
 {
     _body *= r;
