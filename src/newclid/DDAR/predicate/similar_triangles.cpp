@@ -8,6 +8,7 @@
 #include <vector>
 #include <iostream>
 #include <algorithm>
+#include <array>
 
 using namespace std;
 
@@ -55,9 +56,39 @@ unique_ptr<Statement> SimilarTriangles::clone() const
 
 unique_ptr<Statement> SimilarTriangles::normalize() const
 {
-    auto base = permutations();
-    auto itr = min_element(base.begin(), base.end());
-    return make_unique<SimilarTriangles>(*itr);
+    // Match the order in Triangle::permutations(), then try the swapped pair.
+    constexpr array<array<size_t, 3>, 6> orders{{
+        {0, 1, 2}, {1, 2, 0}, {2, 0, 1},
+        {0, 2, 1}, {2, 1, 0}, {1, 0, 2},
+    }};
+    const array<const Point *, 6> points{
+        &_left.a(), &_left.b(), &_left.c(),
+        &_right.a(), &_right.b(), &_right.c(),
+    };
+
+    array<const Point *, 6> best = points;
+    for (size_t offset : {size_t{0}, size_t{3}})
+    {
+        const size_t other = 3 - offset;
+        for (const auto &order : orders)
+        {
+            const array<const Point *, 6> candidate{
+                points[offset + order[0]], points[offset + order[1]], points[offset + order[2]],
+                points[other + order[0]], points[other + order[1]], points[other + order[2]],
+            };
+            // Triangle ordering advances only when point names are equal.
+            const auto [candidate_point, best_point] = mismatch(
+                candidate.begin(), candidate.end(), best.begin(),
+                [](const Point *a, const Point *b) { return *a == *b; });
+            if (candidate_point != candidate.end() && **candidate_point < **best_point)
+            {
+                best = candidate;
+            }
+        }
+    }
+    return make_unique<SimilarTriangles>(
+        Triangle(*best[0], *best[1], *best[2]),
+        Triangle(*best[3], *best[4], *best[5]), _sameclock);
 }
 
 bool SimilarTriangles::check_nondegen() const
