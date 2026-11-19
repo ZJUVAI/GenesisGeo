@@ -6,13 +6,20 @@
 
 using namespace std;
 
-void TermArg::sort_points()
+namespace
 {
-    sort(_points.begin(), _points.end());
+    shared_ptr<const vector<Point>> sorted_points(vector<Point> points)
+    {
+        if (points.empty())
+        {
+            return {};
+        }
+        sort(points.begin(), points.end());
+        return make_shared<const vector<Point>>(move(points));
+    }
 }
 
 TermArg::TermArg(string t, vector<Point> pts)
-    : _points(move(pts))
 {
     if (t == "Dist")
         _type = ArgType::Dist;
@@ -26,28 +33,24 @@ TermArg::TermArg(string t, vector<Point> pts)
     {
         throw invalid_argument("Invalid term_arg type: " + t);
     }
-    sort_points();
+    _points = sorted_points(move(pts));
 }
 
 TermArg::TermArg(ArgType t, vector<Point> pts)
-    : _type(t), _points(move(pts))
+    : _type(t), _points(sorted_points(move(pts)))
 {
-    sort_points();
 }
 
-TermArg::TermArg(Slope s) : _type(ArgType::Slope), _points(move(s.points()))
-{
-    sort_points();
-}
+TermArg::TermArg(Slope s) : TermArg(ArgType::Slope, s.points()) {}
 
-TermArg::TermArg(Dist d) : _type(ArgType::Dist), _points(move(d.points()))
-{
-    sort_points();
-}
+TermArg::TermArg(Dist d) : TermArg(ArgType::Dist, d.points()) {}
 
-TermArg::TermArg(DistLog d) : _type(ArgType::DistLog), _points(move(d.points()))
+TermArg::TermArg(DistLog d) : TermArg(ArgType::DistLog, d.points()) {}
+
+const vector<Point> &TermArg::points() const
 {
-    sort_points();
+    static const vector<Point> empty;
+    return _points ? *_points : empty;
 }
 
 string TermArg::to_string() const
@@ -59,11 +62,11 @@ string TermArg::to_string() const
     case ArgType::Slope:
     {
         string inner;
-        for (size_t i = 0; i < _points.size(); ++i)
+        for (size_t i = 0; i < points().size(); ++i)
         {
             if (i > 0)
                 inner += "-";
-            inner += _points[i].name();
+            inner += points()[i].name();
         }
 
         if (_type == ArgType::Dist)
@@ -93,13 +96,13 @@ double TermArg::to_double() const
     case ArgType::Dist:
     case ArgType::DistLog:
     {
-        if (_points.size() != 2)
+        if (points().size() != 2)
         {
             throw runtime_error("Dist/DistLog requires exactly 2 points");
         }
 
-        const Point &p1 = _points[0];
-        const Point &p2 = _points[1];
+        const Point &p1 = points()[0];
+        const Point &p2 = points()[1];
 
         double dx = p2.x() - p1.x();
         double dy = p2.y() - p1.y();
@@ -121,13 +124,13 @@ double TermArg::to_double() const
 
     case ArgType::Slope:
     {
-        if (_points.size() != 2)
+        if (points().size() != 2)
         {
             throw runtime_error("Slope requires exactly 2 points");
         }
 
-        const Point &left = _points[0];
-        const Point &right = _points[1];
+        const Point &left = points()[0];
+        const Point &right = points()[1];
 
         double dx = right.x() - left.x();
         double dy = right.y() - left.y();
@@ -158,7 +161,7 @@ double TermArg::to_double() const
 
 bool TermArg::operator==(const TermArg &other) const
 {
-    return _type == other._type && _points == other._points;
+    return _type == other._type && points() == other.points();
 }
 
 bool TermArg::operator!=(const TermArg &other) const
@@ -172,5 +175,5 @@ bool TermArg::operator<(const TermArg &other) const
     {
         return _type < other._type;
     }
-    return _points < other._points; 
+    return points() < other.points();
 }

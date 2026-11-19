@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <memory>
 #include <algorithm>
 #include "type/point.hpp"
 
@@ -23,9 +24,7 @@ public:
 
 private:
     ArgType _type;
-    std::vector<Point> _points;
-
-    void sort_points();
+    std::shared_ptr<const std::vector<Point>> _points;
 
 public:
     TermArg() = default;
@@ -39,7 +38,7 @@ public:
     TermArg(DistLog d);
 
     ArgType type() const { return _type; }
-    const std::vector<Point> &points() const { return _points; }
+    const std::vector<Point> &points() const;
 
     std::string to_string() const;
     double to_double() const;
