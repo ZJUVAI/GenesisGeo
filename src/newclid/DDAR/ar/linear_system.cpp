@@ -93,37 +93,55 @@ const Equation *LinearSystem::find_divisor_rule(const Monomial &m) const
     return best;
 }
 
-Equation LinearSystem::normal_form(Equation eq) const
+Equation LinearSystem::normal_form(const Equation &eq) const
 {
-    // 入口先做 content_reduce: a*b - a*c == 0 折叠成 b - c == 0。
-    // 接下游 fixpoint:每次代入后再 content_reduce + make_monic 重扫,
-    // 这样"代入非线性规则后冒出可代入线性变量"的场景被自然覆盖。
-    eq.content_reduce();
-    eq.make_monic();
-    bool changed = true;
-    size_t iter = 0;
-    while (changed && !eq.empty())
+    auto reduced = normal_form_if_changed(eq);
+    return reduced ? std::move(*reduced) : eq;
+}
+
+optional<Equation> LinearSystem::normal_form_if_changed(const Equation &original) const
+{
+    if (original.empty())
     {
-        ++iter;
+        return nullopt;
+    }
+
+    optional<Equation> reduced;
+    const Monomial multiplier = original.content_multiplier();
+    if (!multiplier.is_constant() || original.leading_coeff() != Rational(1))
+    {
+        reduced.emplace(original);
+        *reduced *= multiplier;
+        reduced->make_monic();
+    }
+
+    bool changed = true;
+    while (changed)
+    {
         changed = false;
-        for (const auto &[mono, coeff] : eq.body().terms())
+        const Equation &current = reduced ? *reduced : original;
+        for (const auto &[mono, coeff] : current.body().terms())
         {
             const Equation *rule = find_divisor_rule(mono);
             if (rule == nullptr)
             {
                 continue;
             }
-            Monomial factor = mono / rule->leading_monomial();
-            // rule 已 monic;减去 coeff*factor*rule 恰好抵消 (mono, coeff) 项,
-            // 证书也通过 *= / -= 同步更新。
-            eq -= (*rule) * factor * coeff;
-            eq.content_reduce();
-            eq.make_monic();
+            Equation scaled_rule = *rule;
+            scaled_rule *= mono / rule->leading_monomial();
+            scaled_rule *= coeff;
+            if (!reduced)
+            {
+                reduced.emplace(original);
+            }
+            *reduced -= scaled_rule;
+            reduced->content_reduce();
+            reduced->make_monic();
             changed = true;
-            break; // 项集已变,从新首项重新扫描
+            break;
         }
     }
-    return eq;
+    return reduced;
 }
 
 void LinearSystem::install_rule(Equation eq)

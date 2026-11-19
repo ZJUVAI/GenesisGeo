@@ -75,11 +75,9 @@ public:
     const Monomial &leading_monomial() const { return _body.leading_monomial(); }
     Rational leading_coeff() const { return _body.leading_coeff(); }
 
-    // body 变换：保持证明信息一致。
-    //  - make_monic 将 body 与证明同时乘以 1/leading_coeff。
-    //  - content_reduce 只把 body 除以公共单项式；证明是*原始*方程的
-    //    组合，不能被平移，因此保持不变（原因见 equation.cpp）。
+    // Body and certificate are scaled together.
     void make_monic();
+    Monomial content_multiplier() const;
     void content_reduce();
 
     // 来源信息管理。set_index 把 self-coefficient 1 累加到归档索引 idx 上;

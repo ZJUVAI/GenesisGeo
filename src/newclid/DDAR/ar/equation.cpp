@@ -144,11 +144,11 @@ void Equation::make_monic()
 // 因为 f 是非零单项式，这不会改变任何系数是零还是非零——
 // 所以依赖*集合*不受影响——但能让 body 与证明保持一致的缩放，
 // 从而后续 +=/-= 的相消判定仍然正确。
-void Equation::content_reduce()
+Monomial Equation::content_multiplier() const
 {
     if (_body.empty())
     {
-        return;
+        return {};
     }
     auto it = _body.begin();
     Monomial common = it->first;
@@ -158,7 +158,7 @@ void Equation::content_reduce()
         common = common.gcd(it->first);
         if (common.is_constant())
         {
-            return;
+            return {};
         }
     }
     // 滤掉数值近零的变量（不要用数值为零的量去除）。
@@ -170,17 +170,15 @@ void Equation::content_reduce()
             safe *= Monomial(var, exp);
         }
     }
-    if (safe.is_constant())
+    return safe.inverse();
+}
+
+void Equation::content_reduce()
+{
+    const Monomial multiplier = content_multiplier();
+    if (!multiplier.is_constant())
     {
-        return;
-    }
-    // 把 body 除以 `safe`，并将证明系数乘以 safe^{-1}，
-    // 以保持不变量 body == sum_j _deps[j] * Eq_j。
-    Monomial inv = safe.inverse();
-    _body *= inv;
-    for (auto &[idx, coeff] : _deps)
-    {
-        coeff *= inv;
+        *this *= multiplier;
     }
 }
 

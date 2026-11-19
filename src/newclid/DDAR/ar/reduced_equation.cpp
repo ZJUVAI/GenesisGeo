@@ -18,7 +18,10 @@ void ReducedEquation::reduce()
     {
         return;
     }
-    _remainder = _system->normal_form(_remainder);
+    if (auto reduced = _system->normal_form_if_changed(_remainder))
+    {
+        _remainder = std::move(*reduced);
+    }
     _last_reduced_rule_version = _system->rule_version();
 }
 

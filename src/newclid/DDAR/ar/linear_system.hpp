@@ -7,6 +7,7 @@
 #include <functional>
 #include <unordered_map>
 #include <cstddef>
+#include <optional>
 #include "ar/monomial.hpp"
 #include "ar/polynomial.hpp"
 #include "ar/equation.hpp"
@@ -51,7 +52,9 @@ public:
 
     // 把任意方程约简到当前规则集下的范式(body 与证书同步更新)。
     // 给 ReducedEquation 调用。
-    Equation normal_form(Equation eq) const;
+    Equation normal_form(const Equation &eq) const;
+    // Leave the caller's equation untouched when normalization makes no changes.
+    std::optional<Equation> normal_form_if_changed(const Equation &eq) const;
 
     // archive 访问,签名与原版一致。
     const Equation &at(size_t index) const;
