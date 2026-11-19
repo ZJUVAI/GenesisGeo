@@ -130,25 +130,25 @@ unique_ptr<Statement> EqAngle::normalize() const
 {
     // The slope equation is s1 + s4 = s2 + s3, which shares the same
     // symmetry group as eqratio's a*d = b*c with (a,b,c,d) = (s1,s2,s3,s4).
-    Slope a = _s1.normalize();
-    Slope b = _s2.normalize();
-    Slope c = _s3.normalize();
-    Slope d = _s4.normalize();
+    const array<Slope, 4> slopes{_s1.normalize(), _s2.normalize(), _s3.normalize(), _s4.normalize()};
+    constexpr array<array<size_t, 4>, 8> permutations{{
+        {0, 1, 2, 3},
+        {0, 2, 1, 3},
+        {1, 0, 3, 2},
+        {1, 3, 0, 2},
+        {2, 0, 3, 1},
+        {2, 3, 0, 1},
+        {3, 1, 2, 0},
+        {3, 2, 1, 0},
+    }};
+    const auto &best = *min_element(permutations.begin(), permutations.end(),
+                                   [&slopes](const auto &left, const auto &right)
+    {
+        return lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(),
+                                       [&slopes](size_t a, size_t b) { return slopes[a] < slopes[b]; });
+    });
 
-    vector<array<Slope, 4>> candidates = {
-        {a, b, c, d},
-        {a, c, b, d},
-        {b, a, d, c},
-        {b, d, a, c},
-        {c, a, d, b},
-        {c, d, a, b},
-        {d, b, c, a},
-        {d, c, b, a},
-    };
-
-    auto best = *min_element(candidates.begin(), candidates.end());
-
-    return make_unique<EqAngle>(best[0], best[1], best[2], best[3]);
+    return make_unique<EqAngle>(slopes[best[0]], slopes[best[1]], slopes[best[2]], slopes[best[3]]);
 }
 
 ostream &EqAngle::print(ostream &os) const
