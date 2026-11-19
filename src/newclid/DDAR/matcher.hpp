@@ -88,7 +88,7 @@ private:
 public:
     Matcher(Problem *prob, const std::map<std::string, bool> &config = {});
 
-    const std::vector<Theorem> &theorems() const { return _theorems; }
+    std::vector<Theorem> take_theorems() && { return std::move(_theorems); }
 
     const std::vector<std::unique_ptr<Statement>> &stmts() const { return _stmts; }
 };

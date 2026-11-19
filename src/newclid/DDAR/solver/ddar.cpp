@@ -23,9 +23,9 @@ DDARSolver::DDARSolver(Problem *problem, const std::map<std::string, bool> &conf
 {
     Matcher matcher(problem, config);
 
-    for (const auto &thm : matcher.theorems())
+    for (auto &thm : std::move(matcher).take_theorems())
     {
-        insert_application(thm.clone());
+        insert_application(std::move(thm));
     }
     for (const auto &hyp : problem->hypotheses())
     {
