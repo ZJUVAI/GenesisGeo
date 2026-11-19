@@ -13,7 +13,8 @@ public:
     Point(std::string name, double x, double y); // 构造函数
     Point(std::string name, PointNum num);       // 构造函数
 
-    std::string name() const;
+    const std::string &name() const &;
+    std::string name() const &&;
     double x() const;
     double y() const;
     PointNum num() const;

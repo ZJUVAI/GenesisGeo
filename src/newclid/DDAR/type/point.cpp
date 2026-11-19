@@ -29,7 +29,8 @@ Point::Point(std::string name, PointNum num)
 {
 }
 
-std::string Point::name() const { return _name; }
+const std::string &Point::name() const & { return _name; }
+std::string Point::name() const && { return _name; }
 
 double Point::x() const { return _num.x(); }
 
