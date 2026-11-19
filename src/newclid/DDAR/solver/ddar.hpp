@@ -94,6 +94,11 @@ public:
 
     void add_established_equations(Proof *pf);
 
+    size_t ar_revision() const
+    {
+        return _system_dist.rule_version() + _system_slope.rule_version() + _system_distlog.rule_version();
+    }
+
     void print_equations() const;
 
     std::vector<std::tuple<std::vector<std::string>, std::vector<std::vector<std::string>>, std::string>> dependency_graph() const;

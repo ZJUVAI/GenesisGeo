@@ -97,6 +97,7 @@ private:
     std::vector<Proof *> _deps;
     long long _depth{-1};
     bool _equations_initialized{false};
+    std::optional<size_t> _last_ar_revision;
 };
 
 #endif // PROOF_HPP

@@ -79,6 +79,12 @@ void Proof::ar(long long depth)
         return;
     }
 
+    const size_t revision = _solver->ar_revision();
+    if (_last_ar_revision == revision)
+    {
+        return;
+    }
+
     if (_statement->name() == "secant")
     {
         return;
@@ -118,7 +124,7 @@ void Proof::ar(long long depth)
             return;
         }
     }
-    return;
+    _last_ar_revision = revision;
 }
 
 void Proof::set_theorem(size_t index, long long depth)
