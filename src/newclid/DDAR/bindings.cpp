@@ -696,6 +696,11 @@ extern "C"
 
 PYBIND11_MODULE(DDAR, m)
 {
+#ifdef DDAR_PGO_BUILD
+    m.attr("build_variant") = "pgo";
+#else
+    m.attr("build_variant") = "release";
+#endif
     py::class_<ApplicationInfo>(m, "ApplicationInfo")
         .def(py::init<>())
         .def_readwrite("premises", &ApplicationInfo::premises)

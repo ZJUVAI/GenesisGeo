@@ -55,3 +55,25 @@ endif()
 
 # 可选：添加本地 include 路径
 target_include_directories(${PROJECT_NAME} PRIVATE .)
+
+
+set(DDAR_PGO "OFF" CACHE STRING "DDAR PGO mode: OFF, GENERATE, or USE")
+if(NOT DDAR_PGO STREQUAL "OFF")
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "DDAR PGO requires GCC")
+    endif()
+    set(profile_dir "${CMAKE_BINARY_DIR}/profile")
+    if(DDAR_PGO STREQUAL "GENERATE")
+        set(profile_flag "-fprofile-generate=${profile_dir}")
+    elseif(DDAR_PGO STREQUAL "USE")
+        set(profile_flag "-fprofile-use=${profile_dir}")
+        target_compile_options(DDAR PRIVATE -fprofile-correction
+            -Werror=missing-profile -Werror=coverage-mismatch)
+        target_link_options(DDAR PRIVATE -fprofile-correction)
+    else()
+        message(FATAL_ERROR "Unknown DDAR_PGO mode: ${DDAR_PGO}")
+    endif()
+    target_compile_options(DDAR PRIVATE "${profile_flag}")
+    target_link_options(DDAR PRIVATE "${profile_flag}")
+    target_compile_definitions(DDAR PRIVATE DDAR_PGO_BUILD)
+endif()

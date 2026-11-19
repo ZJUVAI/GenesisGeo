@@ -38,6 +38,13 @@ source .venv/bin/activate
 uv sync --extra full
 ```
 
+With Python 3.10 and a C++ compiler, `pip install .` builds DDAR into the
+wheel. GCC builds try profile-guided optimization (PGO) using a fixed workload
+derived from JGEX, IMO30, and HAGeo409. If profile collection or the optimized
+build fails, installation builds ordinary Release instead. To skip profiling,
+run `PGO=0 pip install .`. The installed
+`newclid.DDAR.build.DDAR.build_variant` reports `pgo` or `release`.
+
 ## Data Generation
 
 Generate synthetic geometry problems with proof traces and diagrams:

@@ -1,107 +1,124 @@
+import gzip
+import json
 import os
+import shutil
 import subprocess
 import sys
-import sysconfig
-import shutil
 from pathlib import Path
-from setuptools import setup, Extension
-from setuptools.command.build_ext import build_ext
-from setuptools.command.build import build
-from pybind11.setup_helpers import Pybind11Extension, build_ext as pybind11_build_ext
+from tempfile import TemporaryDirectory
+
+from pybind11.setup_helpers import Pybind11Extension, build_ext
+from setuptools import Extension, setup
+
+
+ROOT = Path(__file__).resolve().parent
+DDAR = "newclid.DDAR.build.DDAR"
+TRAINING_INPUTS = ROOT / "benchmarks" / "ddar-pgo-inputs.jsonl.gz"
 
 
 class DDARBuildCommand(build_ext):
-    """Custom build command to compile DDAR C++ module"""
+    def build_extension(self, ext):
+        if ext.name != DDAR:
+            return super().build_extension(ext)
 
-    def build_extensions(self):
-        """Compile DDAR before building Python extensions"""
-        try:
-            self._build_ddar()
-        except Exception as e:
-            print(f"⚠️  DDAR build failed (continuing): {e}")
-        super().build_extensions()
-
-    def _build_ddar(self):
-        """Build DDAR using CMake"""
-        ddar_dir = Path("src/newclid/DDAR")
-        build_dir = ddar_dir / "build"
-
-        if not ddar_dir.exists():
-            print(f"⚠️  DDAR directory not found: {ddar_dir}")
-            return
-
-        print(f"🔨 Building DDAR C++ module...")
-
-        # 1. Create build directory
-        build_dir.mkdir(exist_ok=True)
-
-        # 2. Get pybind11 CMake directory path
-        try:
-            pybind11_cmake = subprocess.check_output(
-                [sys.executable, "-m", "pybind11", "--cmakedir"],
-                text=True
-            ).strip()
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Failed to get pybind11 CMake path: {e}")
-            raise
-
-        # 3. Run CMake configuration
-        # Resolve the real Python prefix (handles venv -> base Python)
-        python_prefix = subprocess.check_output(
-            [sys.executable, "-c",
-             "import sys; print(getattr(sys, 'real_prefix', sys.base_prefix))"],
-            text=True
+        output = Path(self.get_ext_fullpath(ext.name)).resolve()
+        pybind11_cmake = subprocess.check_output(
+            [sys.executable, "-m", "pybind11", "--cmakedir"], text=True
         ).strip()
+        build_temp = Path(self.build_temp).resolve()
+        build_temp.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix="ddar-", dir=build_temp) as tmp:
+            root = Path(tmp)
+            if os.environ.get("PGO") != "0":
+                try:
+                    artifact = self._build_pgo(
+                        root / "pgo", pybind11_cmake, output.name
+                    )
+                except (
+                    EOFError,
+                    OSError,
+                    RuntimeError,
+                    subprocess.CalledProcessError,
+                    ValueError,
+                ) as error:
+                    print(
+                        f"DDAR PGO failed, building ordinary Release: {error}",
+                        flush=True,
+                    )
+                else:
+                    self._install_ddar(artifact, output)
+                    return
+            artifact = self._build_ddar(root / "release", pybind11_cmake, output.name)
+            self._install_ddar(artifact, output)
 
-        python_include = subprocess.check_output(
-            [sys.executable, "-c",
-             "import sysconfig; print(sysconfig.get_path('include'))"],
-            text=True, env={**os.environ, "PYTHONPATH": ""}
-        ).strip()
-        # If the include dir points inside a venv (no Python.h), resolve to base
-        if not Path(python_include, "Python.h").exists():
-            python_include = str(Path(python_prefix) / "include" / f"python{sys.version_info.major}.{sys.version_info.minor}")
+    @staticmethod
+    def _install_ddar(artifact, output):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(artifact, output)
 
-        cmake_args = [
-            f"-DCMAKE_BUILD_TYPE=Release",
-            f"-Dpybind11_DIR={pybind11_cmake}",
-            "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-            f"-DPython_EXECUTABLE={sys.executable}",
-            f"-DPython_ROOT_DIR={python_prefix}",
-            f"-DPython_INCLUDE_DIR={python_include}",
-            "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler",
-        ]
+    def _build_ddar(self, build, pybind11_cmake, filename, mode="OFF"):
+        library = build / "module"
+        subprocess.run(
+            [
+                "cmake",
+                "-S",
+                str(ROOT / "src/newclid/DDAR"),
+                "-B",
+                str(build),
+                "-DCMAKE_BUILD_TYPE=Release",
+                f"-Dpybind11_DIR={pybind11_cmake}",
+                f"-DPYTHON_EXECUTABLE={sys.executable}",
+                f"-DPython_EXECUTABLE={sys.executable}",
+                f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={library}",
+                f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={library}",
+                f"-DDDAR_PGO={mode}",
+            ],
+            check=True,
+        )
+        command = ["cmake", "--build", str(build), "--config", "Release"]
+        if not os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL"):
+            command += ["--parallel", str(min(8, os.cpu_count() or 1))]
+        subprocess.run(command, check=True)
+        artifact = library / filename
+        if not artifact.is_file():
+            raise RuntimeError(f"CMake did not produce {artifact}")
+        return artifact
 
-        try:
-            subprocess.run(
-                ["cmake", ".."] + cmake_args,
-                cwd=str(build_dir),
-                check=True,
-                capture_output=False,
-            )
-            print("✅ CMake configuration succeeded")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ CMake configuration failed: {e}")
-            raise
-        except FileNotFoundError:
-            print("❌ CMake not found. Please ensure CMake is installed")
-            raise
+    def _build_pgo(self, build, pybind11_cmake, filename):
+        with gzip.open(TRAINING_INPUTS, "rt", encoding="utf-8") as stream:
+            inputs = [json.loads(line) for line in stream if line.strip()]
+        if not inputs:
+            raise RuntimeError("DDAR profiling workload is empty")
+        artifact = self._build_ddar(build, pybind11_cmake, filename, "GENERATE")
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """
+import importlib.util
+import json
+import sys
 
-        # 4. Build the project
-        try:
-            subprocess.run(
-                ["cmake", "--build", "."],
-                cwd=str(build_dir),
-                check=True,
-                capture_output=False,
-            )
-            print("✅ DDAR compilation succeeded")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ DDAR compilation failed: {e}")
-            raise
+spec = importlib.util.spec_from_file_location("DDAR", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for args in json.load(sys.stdin):
+    module.run_ddar(*args)
+""",
+                str(artifact),
+            ],
+            input=json.dumps(inputs),
+            text=True,
+            check=True,
+        )
+        if not any((build / "profile").rglob("*.gcda")):
+            raise RuntimeError("DDAR profiling produced no counters")
+        artifact.unlink()
+        return self._build_ddar(build, pybind11_cmake, filename, "USE")
 
 
 ext_modules = [
+    Extension(DDAR, sources=[]),
     Pybind11Extension(
         "newclid.dependencies.geometry",
         ["src/newclid/dependencies/geometry.cpp"],

@@ -1,0 +1,2 @@
+include benchmarks/ddar-pgo-inputs.jsonl.gz
+recursive-include src/newclid/DDAR CMakeLists.txt *.cpp *.hpp *.h
