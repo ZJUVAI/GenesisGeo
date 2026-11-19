@@ -494,10 +494,31 @@ vector<tuple<double, Angle>> Matcher::all_angles()
 
 void Matcher::on_cyclic(const Cyclic &cyclic)
 {
-    for (const auto &rotated : cyclic.permutation())
+    const auto permutations = cyclic.permutation();
+    std::optional<Theorem> properties;
+    for (size_t i = 0; i < permutations.size(); ++i)
     {
-        insert_theorem(Theorem::cyclic_of_equal_angles(rotated));
-        insert_theorem(Theorem::cyclic_properties(cyclic));
+        insert_theorem(Theorem::cyclic_of_equal_angles(permutations[i]));
+        if (i == 0)
+        {
+            auto candidate = Theorem::cyclic_properties(cyclic);
+            if (candidate.check_numerically() && get_config(candidate.rule(), false))
+            {
+                properties.emplace(std::move(candidate).normalize());
+            }
+        }
+        // Keep applications in their original order, including repeated instances.
+        if (properties)
+        {
+            if (i + 1 == permutations.size())
+            {
+                _theorems.push_back(std::move(*properties));
+            }
+            else
+            {
+                _theorems.push_back(properties->clone());
+            }
+        }
     }
 }
 
