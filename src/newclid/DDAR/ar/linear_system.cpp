@@ -231,6 +231,7 @@ bool LinearSystem::add_equation(const Equation &eq, Proof *proof)
     remainder.set_index(idx);
     remainder.make_monic();
     install_rule(std::move(remainder));
+    ++_rule_version;
     return true;
 }
 

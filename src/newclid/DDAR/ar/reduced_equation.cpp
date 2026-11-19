@@ -14,11 +14,12 @@ ReducedEquation::ReducedEquation(Equation &equation, LinearSystem *system)
 
 void ReducedEquation::reduce()
 {
-    if (_system == nullptr)
+    if (_system == nullptr || _last_reduced_rule_version == _system->rule_version())
     {
         return;
     }
     _remainder = _system->normal_form(_remainder);
+    _last_reduced_rule_version = _system->rule_version();
 }
 
 bool ReducedEquation::is_solved() const

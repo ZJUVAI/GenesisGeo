@@ -17,6 +17,7 @@ class Proof;
 class LinearSystem final
 {
 private:
+    size_t _rule_version = 0;
     // 已归档的原始方程,append-only;archive index 即下标。
     std::vector<std::pair<Equation, Proof *>> _equations;
 
@@ -55,6 +56,7 @@ public:
     // archive 访问,签名与原版一致。
     const Equation &at(size_t index) const;
     const std::pair<Equation, Proof *> &pair_at(size_t index) const;
+    size_t rule_version() const { return _rule_version; }
     size_t size() const { return _equations.size(); }
 
     // 调试打印,签名与原版一致。

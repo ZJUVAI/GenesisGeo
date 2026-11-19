@@ -2,6 +2,7 @@
 #define REDUCED_EQUATION_HPP
 
 #include <vector>
+#include <optional>
 #include "ar/equation.hpp"
 
 class LinearSystem;
@@ -13,6 +14,7 @@ private:
     Equation _original_equation;
     LinearSystem *_system;
     Equation _remainder;
+    std::optional<size_t> _last_reduced_rule_version;
 
 public:
     explicit ReducedEquation(Equation &equation, LinearSystem *system);
