@@ -102,10 +102,16 @@ class GeometricSolver:
 
 
 class GeometricSolverBuilder:
-    def __init__(self, seed: int = None) -> None:
+    def __init__(
+        self,
+        seed: Optional[int] = None,
+        *,
+        defs: Optional[dict[str, DefinitionJGEX]] = None,
+        rules: Optional[list[Rule]] = None,
+    ) -> None:
         self.problemJGEX: Optional[ProblemJGEX] = None
-        self._defs: Optional[dict[str, DefinitionJGEX]] = None
-        self._rules: Optional[list[Rule]] = None
+        self._defs = defs
+        self._rules = rules
         self.goals: list[Statement] = []
         self.dep_graph = DependencyGraph(AlgebraicManipulator())
         self.deductive_agent: Optional[DeductiveAgent] = None

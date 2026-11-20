@@ -18,6 +18,7 @@ import time
 import signal
 from contextlib import contextmanager
 from collections import defaultdict
+from functools import cache
 import ray
 import numpy as np
 
@@ -479,9 +480,13 @@ class ProblemWorker:
             return [], {}
 
     @staticmethod
-    def _build_solver(fl_statement, max_attempts=1):
-        """Build geometric solver"""
-        solver_builder = GeometricSolverBuilder(seed=998244353)
+    def _build_solver(fl_statement, max_attempts=1, *, definitions_from=None):
+        """Build a geometric solver, reusing parsed definitions and rules when supplied."""
+        solver_builder = GeometricSolverBuilder(
+            seed=998244353,
+            defs=definitions_from.defs if definitions_from is not None else None,
+            rules=definitions_from.rules if definitions_from is not None else None,
+        )
         solver_builder.with_deductive_agent(DDARN())
         solver_builder.load_problem_from_txt(fl_statement)
         try:
@@ -608,19 +613,28 @@ class ProblemWorker:
         reversible = ProblemWorker.REVERSIBLE_CONSTRUCTIONS
         rng = np.random.default_rng(seed)
 
-        # 预先收集所有候选，然后打乱并采样
+        @cache
+        def point_closure(point: Point) -> set[Point]:
+            return dep_graph.points_dependency_closure((point,))
+
+        # Each point has the same defining-clause splits across all goals.
+        splits_by_point = {
+            point: ProblemWorker._split_defining_clause(point.clause, point.name)
+            for point in solver.proof.symbols_graph.nodes_of_type(Point)
+            if getattr(point, "clause", None) is not None
+        }
         candidates = []
         for goal in possible_goals:
             goal_points = [a for a in goal.args if isinstance(a, Point)]
             if len(goal_points) > ProblemWorker.REVERSE_RECON_MAX_GOAL_POINTS:
                 continue
 
-            goal_closure_names = {
-                p.name for p in dep_graph.points_dependency_closure(goal_points)
-            }
-
+            goal_closure_names = None
             for candidate_point in goal_points:
-                other_points = [p for p in goal_points if p is not candidate_point]
+                splits = splits_by_point.get(candidate_point)
+                if not splits:
+                    continue
+
                 match = ProblemWorker._match_goal_to_construction(
                     goal, candidate_point, reversible, dep_graph
                 )
@@ -628,17 +642,20 @@ class ProblemWorker:
                     continue
                 construction_name, matched_sentence = match
 
-                if dep_graph.point_has_dependents_among(candidate_point, other_points):
+                if any(
+                    candidate_point in point_closure(point)
+                    for point in goal_points
+                    if point is not candidate_point
+                ):
                     continue
 
                 orig_clause = candidate_point.clause
-                if len(orig_clause.sentences) != 2:
-                    continue
-                splits = ProblemWorker._split_defining_clause(
-                    orig_clause, candidate_point.name
-                )
-                if not splits:
-                    continue
+                if goal_closure_names is None:
+                    goal_closure_names = {
+                        point.name
+                        for goal_point in goal_points
+                        for point in point_closure(goal_point)
+                    }
 
                 for kept_sentence, removed_sentence in splits:
                     candidates.append(
@@ -831,9 +848,11 @@ class ProblemWorker:
         return translate_sentence(rename_map, tokens)
 
     @staticmethod
-    def _goal_solved(solver: "GeometricSolver", goal_tokens: tuple) -> bool:
+    def _goal_solved(
+        solver: "GeometricSolver", goal_tokens: tuple, *, explain: bool = True
+    ) -> bool:
         stmt = Statement.from_tokens(goal_tokens, solver.proof.dep_graph)
-        return stmt is not None and stmt.check()
+        return stmt is not None and stmt.check(explain=explain)
 
     @staticmethod
     def _attempt_one_reconstruction(
@@ -905,8 +924,10 @@ class ProblemWorker:
         )
 
         # 第一阶段：不加辅助点直接求解。
-        solver_a, builder_a = ProblemWorker._build_solver(
-            candidate_fl, max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS
+        solver_a, _ = ProblemWorker._build_solver(
+            candidate_fl,
+            max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS,
+            definitions_from=solver_builder,
         )
         if solver_a is None:
             _log_recon_fail(
@@ -925,8 +946,8 @@ class ProblemWorker:
             using_exp=using_exp,
             light=False,
         )
-        csolver_a.run(custom_rules=custom_rules)
-        if ProblemWorker._goal_solved(solver_a, new_goal_tokens):
+        csolver_a.run(custom_rules=custom_rules, goal_checks_only=True)
+        if ProblemWorker._goal_solved(solver_a, new_goal_tokens, explain=False):
             _log_recon_fail(
                 "solved_without_aux",
                 construction_name,
@@ -955,6 +976,7 @@ class ProblemWorker:
         solver_b, builder_b = ProblemWorker._build_solver(
             candidate_fl_with_aux,
             max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS,
+            definitions_from=solver_builder,
         )
         if solver_b is None:
             _log_recon_fail(
@@ -973,7 +995,7 @@ class ProblemWorker:
             using_exp=using_exp,
             light=False,
         )
-        csolver_b.run(custom_rules=custom_rules)
+        csolver_b.run(custom_rules=custom_rules, goal_proofs_only=True)
         if not ProblemWorker._goal_solved(solver_b, new_goal_tokens):
             _log_recon_fail(
                 "unsolved_with_aux",
