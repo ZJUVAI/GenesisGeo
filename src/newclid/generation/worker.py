@@ -1650,15 +1650,20 @@ class ProblemWorker:
         return results
 
     @staticmethod
-    def _rediger_new_format(dep, mp, dep_idx, dep_graph: DependencyGraph) -> str:
+    def _rediger_new_format(dep, rename_statement, dep_idx) -> str:
         """Generate proof step in new format: statement [id] rule_id [required_statement_ids]"""
-        for statement in (dep.statement,) + dep.why:
-            statement_str = Statement.from_tokens(
-                translate_sentence(mp, statement.to_str().split(" ")),
-                dep_graph,
-            ).to_str()
-            if statement_str not in dep_idx:
-                dep_idx[statement_str] = f"{len(dep_idx):03d}"
+        conclusion = rename_statement(dep.statement)
+        conclusion_id = dep_idx.get(conclusion)
+        if conclusion_id is None:
+            conclusion_id = dep_idx[conclusion] = f"{len(dep_idx):03d}"
+
+        premise_ids = []
+        for statement in dep.why:
+            premise = rename_statement(statement)
+            premise_id = dep_idx.get(premise)
+            if premise_id is None:
+                premise_id = dep_idx[premise] = f"{len(dep_idx):03d}"
+            premise_ids.append(f"[{premise_id}]")
 
         # Extract rule ID from reason string and handle special cases
         reason = dep.reason
@@ -1677,20 +1682,9 @@ class ProblemWorker:
         else:
             rule_id = reason if reason else "unknown"
 
-        # Generate new format: statement [statement_id] rule_id [premise_ids]
-        premise_id_items = []
-        for premise in dep.why:
-            premise_str = Statement.from_tokens(
-                translate_sentence(mp, premise.to_str().split(" ")),
-                dep_graph,
-            ).to_str()
-            premise_id_items.append(f"[{dep_idx[premise_str]}]")
-        premise_ids = " ".join(premise_id_items)
-        conclusion_str = Statement.from_tokens(
-            translate_sentence(mp, dep.statement.to_str().split(" ")),
-            dep_graph,
-        ).to_str()
-        return f"{conclusion_str} [{dep_idx[conclusion_str]}] {rule_id} {premise_ids}".strip()
+        return (
+            f"{conclusion} [{conclusion_id}] {rule_id} {' '.join(premise_ids)}".strip()
+        )
 
     @staticmethod
     def llm_solution_renamed(
@@ -2177,12 +2171,44 @@ class ProblemWorker:
     @staticmethod
     def _generate_proof_section(mp, dep_idx, proof_steps, dep_graph: DependencyGraph):
         """Generate proof section"""
+        renamed_statements: dict[Statement, str] = {}
+
+        def rename_statement(statement: Statement) -> str:
+            if statement not in renamed_statements:
+                predicate = statement.predicate
+                if predicate.NAME in (
+                    "eqangle",
+                    "eqratio",
+                    "sameclock",
+                    "coll",
+                    "cong",
+                    "para",
+                    "perp",
+                    "cyclic",
+                    "midp",
+                ):
+                    # These predicates contain only point names. Their
+                    # canonical tokens are already the serialized statement.
+                    names = tuple(
+                        mp.get(point.name, point.name) for point in statement.args
+                    )
+                    args = predicate.preparse(names)
+                    if args:
+                        renamed_statements[statement] = " ".join(
+                            (predicate.NAME, *args)
+                        )
+                        return renamed_statements[statement]
+                renamed_statements[statement] = Statement.from_tokens(
+                    translate_sentence(mp, statement.to_str().split(" ")), dep_graph
+                ).to_str()
+            return renamed_statements[statement]
+
         proof = "<proof> "
         proof_steps_formatted = []
         for k, line in enumerate(proof_steps):
             if NUMERICAL_CHECK not in line.reason and IN_PREMISES not in line:
                 proof_steps_formatted.append(
-                    ProblemWorker._rediger_new_format(line, mp, dep_idx, dep_graph)
+                    ProblemWorker._rediger_new_format(line, rename_statement, dep_idx)
                 )
         proof += " ; ".join(proof_steps_formatted) + " ; </proof>"
         return proof
