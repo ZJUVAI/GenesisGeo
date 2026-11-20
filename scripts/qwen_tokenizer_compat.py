@@ -1,46 +1,63 @@
 from __future__ import annotations
 
-import builtins
-from typing import Any
+from importlib.machinery import PathFinder
+import sys
 
-_orig_import = builtins.__import__
-_installed = False
+
+_QWEN2_MODULE = "transformers.models.qwen2.tokenization_qwen2"
+
+
+def _patch_loaded_module(module) -> None:
+    tokenizer = getattr(module, "Qwen2Tokenizer", None)
+    if tokenizer is not None and not hasattr(tokenizer, "all_special_tokens_extended"):
+        tokenizer.all_special_tokens_extended = property(
+            lambda self: list(self.all_special_tokens)
+        )
 
 
 def patch_qwen2_tokenizer() -> None:
     try:
-        from transformers.models.qwen2.tokenization_qwen2 import Qwen2Tokenizer
+        from transformers.models.qwen2 import tokenization_qwen2
     except Exception:
         return
-    if hasattr(Qwen2Tokenizer, "all_special_tokens_extended"):
-        return
-    Qwen2Tokenizer.all_special_tokens_extended = property(  # type: ignore[attr-defined]
-        lambda self: list(self.all_special_tokens)
-    )
+    _patch_loaded_module(tokenization_qwen2)
 
 
-def _patched_import(
-    name: str,
-    globals: dict[str, Any] | None = None,
-    locals: dict[str, Any] | None = None,
-    fromlist: tuple[str, ...] | None = (),
-    level: int = 0,
-):
-    module = _orig_import(name, globals, locals, fromlist, level)
-    if name.startswith("transformers") or (
-        fromlist is not None and "transformers" in fromlist
-    ):
-        patch_qwen2_tokenizer()
-    return module
+class _Qwen2Loader:
+    def __init__(self, loader):
+        self._loader = loader
+
+    def create_module(self, spec):
+        return self._loader.create_module(spec)
+
+    def exec_module(self, module):
+        self._loader.exec_module(module)
+        _patch_loaded_module(module)
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
+
+
+class _Qwen2Finder:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != _QWEN2_MODULE:
+            return None
+        spec = PathFinder.find_spec(fullname, path, target)
+        if spec is not None and spec.loader is not None:
+            spec.loader = _Qwen2Loader(spec.loader)
+        return spec
+
+
+_finder = _Qwen2Finder()
 
 
 def install_qwen2_tokenizer_compat() -> None:
-    global _installed
-    if _installed:
-        return
-    builtins.__import__ = _patched_import
-    _installed = True
-    patch_qwen2_tokenizer()
+    # The startup .pth also runs in geometry-only processes.
+    module = sys.modules.get(_QWEN2_MODULE)
+    if module is not None:
+        _patch_loaded_module(module)
+    if _finder not in sys.meta_path:
+        sys.meta_path.insert(sys.meta_path.index(PathFinder), _finder)
 
 
 install_qwen2_tokenizer_compat()
