@@ -25,8 +25,10 @@ class Dependency(NamedTuple):
     why: tuple[Statement, ...]
 
     def add(self):
-        if self.reason == IN_PREMISES:
-            logging.debug(f"Adding premise: {self.statement.pretty()}")
+        if self.reason == IN_PREMISES and logging.getLogger().isEnabledFor(
+            logging.DEBUG
+        ):
+            logging.debug("Adding premise: %s", self.statement.pretty())
         if not self.statement.check_numerical():
             raise Exception(
                 f"Adding a dependency {self.pretty()} the conclusion of which is numerically false"
@@ -44,7 +46,8 @@ class Dependency(NamedTuple):
     def mk(
         cls, statement: Statement, reason: str, why: tuple[Statement, ...]
     ) -> Dependency:
-        why = tuple(sorted(set(why), key=lambda x: repr(x)))
+        if len(why) > 1:
+            why = tuple(sorted(set(why), key=repr))
         return Dependency(statement, reason, why)
 
     def pretty(self):

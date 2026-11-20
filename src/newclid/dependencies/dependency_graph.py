@@ -125,31 +125,22 @@ class DependencyGraph:
                 res.append(statement)
         return res
 
-    def _proof_text(
-        self,
-        statement: Statement,
-        sub_proof: dict[Statement, tuple[Dependency, ...]],
-    ) -> tuple[Dependency, ...]:
-        if statement in sub_proof:
-            return sub_proof[statement]
-        dep = self.hyper_graph[statement]
-        cur_proof: tuple[Dependency, ...] = ()
-        for premise in dep.why:
-            cur_proof += self._proof_text(premise, sub_proof)
-        sub_proof[statement] = cur_proof
-        return cur_proof + (dep,)
-
     def proof_deps(self, goals: list[Statement]) -> tuple[Dependency, ...]:
-        sub_proof: dict[Statement, tuple[Dependency, ...]] = {}
-        seen: set[Dependency] = set()
-        res: list[Dependency] = []
+        seen: set[Statement] = set()
+        ordered: list[Dependency] = []
+
+        def visit(statement: Statement):
+            if statement in seen:
+                return
+            dependency = self.hyper_graph[statement]
+            for premise in dependency.why:
+                visit(premise)
+            seen.add(statement)
+            ordered.append(dependency)
+
         for goal in goals:
-            proof_of_goal = self._proof_text(goal, sub_proof)
-            for s in proof_of_goal:
-                if s not in seen:
-                    seen.add(s)
-                    res.append(s)
-        return tuple(res)
+            visit(goal)
+        return tuple(ordered)
 
     def get_proof_steps(
         self, goals: list[Statement]
