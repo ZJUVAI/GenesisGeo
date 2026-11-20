@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Collection, Optional, Set
 from newclid.dependencies.dependency import IN_PREMISES, NUMERICAL_CHECK, TRIVIAL
 from newclid.dependencies.symbols import Point
 from newclid.dependencies.symbols_graph import SymbolsGraph
-from pyvis.network import Network  # type: ignore
 from newclid.statement import Statement
 from . import geometry
 from collections import deque
@@ -383,6 +382,8 @@ class DependencyGraph:
         return False
 
     def save_pyvis(self, *, path: Path, stars: Collection[Statement] = []):
+        from pyvis.network import Network  # type: ignore
+
         if stars:
             deps = self.proof_deps(list(stars))
         else:

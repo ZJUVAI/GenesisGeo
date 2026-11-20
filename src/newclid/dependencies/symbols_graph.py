@@ -6,7 +6,6 @@ from newclid.algebraic_reasoning.tables import Table
 import newclid.numerical.geometries as num_geo
 from newclid.dependencies.symbols import Circle, Line, Point, Symbol
 from newclid.tools import add_edge
-from pyvis.network import Network  # type: ignore
 
 if TYPE_CHECKING:
     from newclid.dependencies.dependency import Dependency
@@ -35,14 +34,15 @@ class SymbolsGraph:
     ) -> list[Point]:
         """Return Point objects given names."""
         result: list[Point] = []
+        lookup = self.name2node.get
         for name in pnames:
-            if name not in self.name2node and not create_new_point:
-                raise ValueError(f"Cannot find point {name} in graph")
-            elif name in self.name2node:
-                obj = self.name2node[name]
-                assert isinstance(obj, Point)
-            else:
+            obj = lookup(name)
+            if obj is None:
+                if not create_new_point:
+                    raise ValueError(f"Cannot find point {name} in graph")
                 obj = self.new_node(Point, name, None)
+            else:
+                assert isinstance(obj, Point)
             result.append(obj)
 
         return result
@@ -87,6 +87,8 @@ class SymbolsGraph:
         return self._get_new_line_thru_pair(p1, p2)
 
     def save_pyvis(self, path: Path):
+        from pyvis.network import Network  # type: ignore
+
         net = Network("1080px", directed=True)
         linecolor = "red"
         circlecolor = "green"

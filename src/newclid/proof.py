@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -69,8 +70,11 @@ class ProofState:
         self.runtime_cache = runtime_cache_path(self.problem_path)
         self.matcher = Matcher(self.dep_graph, self.runtime_cache, self.rng)
 
-        self.fig = init_figure()
         self.defs = defs
+
+    @cached_property
+    def fig(self):
+        return init_figure()
 
     def add_construction(self, construction: Clause):
         """Add a new clause of construction, e.g. a new excenter."""

@@ -1,11 +1,11 @@
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Generator, Optional, Sequence, TypeVar
-from pyvis.network import Network  # type: ignore
 
 from newclid.numerical import close_enough
 
 if TYPE_CHECKING:
+    from pyvis.network import Network  # type: ignore
     from newclid.statement import Statement
 
 
@@ -85,7 +85,7 @@ def reshape(to_reshape: Sequence[T], n: int) -> Generator[tuple[T, ...], None, N
         yield tuple(to_reshape[i + k] for k in range(n))
 
 
-def add_edge(net: Network, u: Any, v: Any):
+def add_edge(net: "Network", u: Any, v: Any):
     net.add_node(u)  # type: ignore
     net.add_node(v)  # type: ignore
     net.add_edge(u, v)  # type: ignore
