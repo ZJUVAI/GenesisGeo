@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 class Statement:
     """One predicate applied to a set of points and values. Comes with a proof that args are well ordered"""
 
+    _fields = ("predicate", "args", "dep_graph", "_hash", "_representation", "_text")
+    __slots__ = (*_fields, "__dict__", "__weakref__")
+
     def __init__(
         self,
         predicate: type[Predicate],
@@ -25,15 +28,18 @@ class Statement:
         self.args: tuple[Any, ...] = args
         self.dep_graph = dep_graph
         self._hash = None
+        self._representation: Optional[str] = None
+        self._text: Optional[str] = None
 
     def __getstate__(self):
         state = self.__dict__.copy()
+        state.update((field, getattr(self, field)) for field in self._fields)
         return state
 
     def __setstate__(self, state):
-        self.__dict__.update(state)
-        if "_hash" not in self.__dict__:
-            self._hash = None
+        self._hash = self._representation = self._text = None
+        for field, value in state.items():
+            setattr(self, field, value)
 
     def check(self, *, explain: bool = True) -> bool:
         """Symbolically check if the statement is currently considered True."""
@@ -49,10 +55,11 @@ class Statement:
 
     def check_numerical(self) -> bool:
         """Check if the statement is numerically sound."""
-        if self in self.dep_graph.check_numerical:
-            return self.dep_graph.check_numerical[self]
-        res = self.predicate.check_numerical(self)
-        self.dep_graph.check_numerical[self] = res
+        checked = self.dep_graph.check_numerical
+        res = checked.get(self)
+        if res is None:
+            res = self.predicate.check_numerical(self)
+            checked[self] = res
         return res
 
     def why(self) -> Optional[Dependency]:
@@ -65,18 +72,26 @@ class Statement:
         return res
 
     def to_str(self) -> str:
-        return self.predicate.to_str(self)
+        text = self._text
+        if text is None:
+            text = self.predicate.to_str(self)
+            self._text = text
+        return text
 
     def __repr__(self) -> str:
-        return self.predicate.to_repr(self)
+        representation = self._representation
+        if representation is None:
+            representation = self.predicate.to_repr(self)
+            self._representation = representation
+        return representation
 
     def __hash__(self) -> int:
-        if not hasattr(self, "_hash") or self._hash is None:
+        if self._hash is None:
             self._hash = hash(repr(self))
         return self._hash
 
     def __eq__(self, obj: object) -> bool:
-        return isinstance(obj, Statement) and hash(self) == hash(obj)
+        return self is obj or (isinstance(obj, Statement) and hash(self) == hash(obj))
 
     @classmethod
     def from_tokens(
@@ -92,8 +107,7 @@ class Statement:
         if tokens in dep_graph.token_statement:
             return dep_graph.token_statement[tokens]
 
-        # pred = NAME_TO_PREDICATE[tokens[0]]
-        parsed = pred.parse(tokens[1:], dep_graph)
+        parsed = pred.parse_preparsed(preparsed, dep_graph)
         if not parsed:
             dep_graph.token_statement[tokens] = None
             return None

@@ -31,6 +31,13 @@ class Predicate(ABC):
         raise NotImplementedError(f"{cls.NAME} parse not implemented")
 
     @classmethod
+    def parse_preparsed(
+        cls, args: tuple[str, ...], dep_graph: DependencyGraph
+    ) -> Optional[tuple[Any, ...]]:
+        """Parse arguments that have already passed preparse."""
+        return cls.parse(args, dep_graph)
+
+    @classmethod
     def check_numerical(cls, statement: Statement) -> bool:
         raise NotImplementedError(f"{cls.NAME} check_numerical not implemented")
 
