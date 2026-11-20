@@ -323,8 +323,7 @@ class ProblemWorker:
             # then, process goal groups
             process_goal_time = time.time()
             generated_data = []
-            # 超过 DEADLINE 时下面的 break 会把当前及之后所有 goal group 都丢掉，
-            # 记录一下，供上层统计「本来能出样本、却被时间截断」的任务数。
+            # 超过 DEADLINE 时跳过剩余目标组。
             deadline_hit = False
             groups = [
                 ([data[0] for data in group], group[0][1], group[0][2])
@@ -424,9 +423,6 @@ class ProblemWorker:
             has_real_aux = any(
                 "<aux>" in d.get("llm_output_renamed", "") for d in generated_data
             )
-            # 时间截断且已经产出了带 aux 的样本：这道题确实有 aux，但剩下的
-            # goal group 全被 DEADLINE 砍掉了，aux 样本是损失掉的。
-            aux_truncated = deadline_hit and has_real_aux
 
             # Create summary
             summary = {
@@ -461,7 +457,6 @@ class ProblemWorker:
                 "n_filtered_samples": 0,  # This value will be updated in generate.py
                 "has_real_aux": has_real_aux,
                 "deadline_hit": deadline_hit,
-                "aux_truncated": aux_truncated,
                 "fl_statement": fl_statement,
             }
 

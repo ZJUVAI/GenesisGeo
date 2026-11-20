@@ -223,15 +223,8 @@ class ProblemPipeline:
         smoothed_speed = None
         tasks_since_log = 0
         failed_tasks_since_log = 0
-        # 被 DEADLINE 截断、且已经产出过 aux 样本的任务数（见 worker.py）。
-        aux_truncated_since_log = 0
-        aux_truncated_total = 0
-        # 反向重构统计（见 worker.py::_try_reverse_reconstruction）：候选数、
-        # stage-a 直接可证被丢弃数、stage-b 加了辅助点仍证不出被丢弃数、
-        # 最终保留数——全部累计到当前进程存活期间。
+        # 反向重构累计产出和尝试数。
         recon_candidates_total = 0
-        recon_solved_without_aux_total = 0
-        recon_unsolved_with_aux_total = 0
         recon_kept_total = 0
 
         while self.writer.written_count < self.n_samples:
@@ -254,16 +247,7 @@ class ProblemPipeline:
                 if not task_success:
                     failed_tasks_since_log += 1
                 else:
-                    if summary.get("aux_truncated", False):
-                        aux_truncated_since_log += 1
-                        aux_truncated_total += 1
                     recon_candidates_total += summary.get("recon_candidates", 0)
-                    recon_solved_without_aux_total += summary.get(
-                        "recon_solved_without_aux", 0
-                    )
-                    recon_unsolved_with_aux_total += summary.get(
-                        "recon_unsolved_with_aux", 0
-                    )
                     recon_kept_total += summary.get("recon_kept", 0)
 
                 if task_success:
@@ -336,18 +320,13 @@ class ProblemPipeline:
                                 f"Proc: {summary['process_goal_runtime']:3.0f} | "
                                 f"Speed: {smoothed_speed:3.0f} samp/s | "
                                 f"ETA: {timedelta(seconds=int(eta_seconds))} | "
-                                f"AuxTrunc: {aux_truncated_total} | "
-                                f"Recon: cand={recon_candidates_total} "
-                                f"noAux={recon_solved_without_aux_total} "
-                                f"aux_fail={recon_unsolved_with_aux_total} "
-                                f"kept={recon_kept_total}"
+                                f"Recon: {recon_kept_total}/{recon_candidates_total} kept"
                             )
                             last_logged_written = self.writer.written_count
                             last_logged_time = now
                             last_heartbeat_time = now
                             tasks_since_log = 0
                             failed_tasks_since_log = 0
-                            aux_truncated_since_log = 0
             # Heartbeat: print progress periodically even when no new samples
             # were written, so a stalled run is distinguishable from a slow one.
             now = time.time()
@@ -358,20 +337,14 @@ class ProblemPipeline:
                     f"{millify(self.writer.written_count)}/{millify(self.n_samples)} "
                     f"(+0, {tasks_since_log} tasks done in last {now - last_heartbeat_time:.0f}s, "
                     f"{failed_tasks_since_log} failed, "
-                    f"{aux_truncated_since_log} aux-truncated "
-                    f"({aux_truncated_total} total), "
                     f"pending: {len(pending_tasks)} running "
                     f"+ {pending_draw}+{pending_write} draw/write) "
                     f"in {now - start_time:5.0f}s | "
-                    f"Recon: cand={recon_candidates_total} "
-                    f"noAux={recon_solved_without_aux_total} "
-                    f"aux_fail={recon_unsolved_with_aux_total} "
-                    f"kept={recon_kept_total}"
+                    f"Recon: {recon_kept_total}/{recon_candidates_total} kept"
                 )
                 last_heartbeat_time = now
                 tasks_since_log = 0
                 failed_tasks_since_log = 0
-                aux_truncated_since_log = 0
 
             for task, (s_time, _) in list(pending_tasks.items()):
                 if time.time() - s_time > self.timeout:
