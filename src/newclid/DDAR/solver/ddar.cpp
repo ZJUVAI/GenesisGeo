@@ -307,7 +307,8 @@ void DDARSolver::advance_theorem(size_t index)
         return;
     }
 
-    app.advance_proof(_level);
+    // With explicit goals, AR checks only rule premises and the goals.
+    app.advance_proof(_level, _goals.empty());
     if (app.state() == ApplicationState::PROVED)
     {
         for (auto *p : app.conclusions())
