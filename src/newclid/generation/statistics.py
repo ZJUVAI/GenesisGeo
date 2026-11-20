@@ -3,7 +3,6 @@ import logging
 import os
 
 import numpy as np
-import pandas as pd
 
 
 def get_first_predicate(fl_problem: str):
@@ -42,7 +41,9 @@ class Statistics:
 
     def load_summaries(self, summaries: list[dict[str, any]]):
         self.summaries.extend(summaries)
-        self.df = pd.DataFrame(self.summaries)
+        from pandas import DataFrame
+
+        self.df = DataFrame(self.summaries)
         logging.info(self.df.describe())
 
     def add(self, summary: dict[str, any]):
@@ -77,7 +78,9 @@ class Statistics:
             if not self.summaries:
                 logging.warning("No data loaded, cannot generate report.")
                 return
-            self.df = pd.DataFrame(self.summaries)
+            from pandas import DataFrame
+
+            self.df = DataFrame(self.summaries)
 
         # Unified command-line output
         print("\n--- Generation Summary ---")
