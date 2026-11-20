@@ -29,21 +29,16 @@
 using namespace std;
 
 Matcher::Matcher(Problem *prob, const std::map<std::string, bool> &config)
-    : _problem(prob), _config(config), _has_goal(!prob->goals().empty())
+    : _problem(prob), _config(config)
 {
     match_similar_triangles();
     match_between();
     match_equal_angles();
     match_circles();
     match_orthocenters();
-    // 这两个只产出 _stmts（喂给 AR 的数值验证 para/perp/eqratio），没有任何
-    // insert_theorem 调用；有 goal 时对证明目标没有帮助，直接跳过整段匹配
-    // （不只是跳过收集结果）。
-    if (!_has_goal)
-    {
-        match_perps_paras();
-        match_dist_ratios();
-    }
+    // 全题 AR 候选枚举停用，定理匹配照常进行。
+    // match_perps_paras();
+    // match_dist_ratios();
 }
 
 namespace
@@ -628,11 +623,7 @@ void Matcher::on_bisector(const Point &pt, const Angle &ang)
 
 void Matcher::on_eqangle(const Angle &left, const Angle &right)
 {
-    // 有 goal 时不收集给 AR 用的 EqAngle _stmts，只做下面的定理匹配。
-    if (!_has_goal)
-    {
-        _stmts.push_back(make_unique<EqAngle>(left, right));
-    }
+    // _stmts.push_back(make_unique<EqAngle>(left, right));
     // ∠ABD = ∠ACD
     if (left.left() == right.left() && left.right() == right.right() && left.left() < left.right())
     {

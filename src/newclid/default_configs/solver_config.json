@@ -2,6 +2,7 @@
   "using_log": true,
   "using_exp": false,
   "using_ar": true,
+  "targeted_ar": true,
   "allow_duplicate_points": true,
   "light": false,
   "use_predicate_cache": true,

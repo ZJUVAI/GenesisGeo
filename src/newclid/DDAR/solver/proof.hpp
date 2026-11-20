@@ -8,6 +8,7 @@
 
 #include <set>
 #include <optional>
+#include <set>
 #include <type_traits>
 
 enum class ProofState : uint8_t
@@ -36,6 +37,8 @@ public:
     ProofState state() const { return _state; }
 
     void ar(long long depth = -1);
+    void collect_residual_distances(std::set<TermArg> &distances);
+    void collect_product_distances(std::set<TermArg> &distances);
 
     long long depth() const { return _depth; }
 

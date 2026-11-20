@@ -35,28 +35,26 @@ DDARSolver::DDARSolver(Problem *problem, const std::map<std::string, bool> &conf
     {
         _goals.push_back(this->insert_statement(goal->normalize()));
     }
-    // matcher.stmts() 是纯数值匹配出的"已验证"语句（平行/垂直/比例相等等），
-    // 送进 _ars 供 AR 直接复用。有 goal 时 Matcher 内部已经不做这部分匹配，
-    // matcher.stmts() 天然为空，这里不用再额外判断 goal。
-    std::map<Point, std::vector<size_t>> by_max_point;
-    for (const auto &stmt : matcher.stmts())
-    {
-        if (stmt->check_numerically())
-        {
-            auto *proof = this->insert_statement(stmt->normalize());
-            by_max_point[proof->max_point()].push_back(_ars.size());
-            _ars.push_back({proof, 0});
-        }
-    }
-    _ar_point_limits.reserve(by_max_point.size());
-    for (const auto &[point, candidates] : by_max_point)
-    {
-        for (const auto index : candidates)
-        {
-            _ars[index].rank = _ar_point_limits.size();
-        }
-        _ar_point_limits.push_back(point);
-    }
+    // 旧 AR 候选队列填充。
+    // std::map<Point, std::vector<size_t>> by_max_point;
+    // for (const auto &stmt : matcher.stmts())
+    // {
+    //     if (stmt->check_numerically())
+    //     {
+    //         auto *proof = this->insert_statement(stmt->normalize());
+    //         by_max_point[proof->max_point()].push_back(_ars.size());
+    //         _ars.push_back({proof, 0});
+    //     }
+    // }
+    // _ar_point_limits.reserve(by_max_point.size());
+    // for (const auto &[point, candidates] : by_max_point)
+    // {
+    //     for (const auto index : candidates)
+    //     {
+    //         _ars[index].rank = _ar_point_limits.size();
+    //     }
+    //     _ar_point_limits.push_back(point);
+    // }
 }
 
 bool DDARSolver::run_level(const Point &max_pt)
@@ -64,32 +62,33 @@ bool DDARSolver::run_level(const Point &max_pt)
     size_t num_stmts = _checked_statements.size();
     _level++;
 
-    if (!_ars.empty())
-    {
-        const auto available = std::upper_bound(_ar_point_limits.begin(), _ar_point_limits.end(), max_pt)
-            - _ar_point_limits.begin();
-        const auto limit = static_cast<size_t>(available);
-        bool removed = true;
-        while (removed && !_ars.empty())
-        {
-            removed = false;
-            size_t remaining = 0;
-            for (const auto candidate : _ars)
-            {
-                if (candidate.rank < limit)
-                {
-                    candidate.proof->ar(_level);
-                    if (candidate.proof->is_proved())
-                    {
-                        removed = true;
-                        continue;
-                    }
-                }
-                _ars[remaining++] = candidate;
-            }
-            _ars.resize(remaining);
-        }
-    }
+    // 旧 AR 候选队列遍历。
+    // if (!_ars.empty())
+    // {
+    //     const auto available = std::upper_bound(_ar_point_limits.begin(), _ar_point_limits.end(), max_pt)
+    //         - _ar_point_limits.begin();
+    //     const auto limit = static_cast<size_t>(available);
+    //     bool removed = true;
+    //     while (removed && !_ars.empty())
+    //     {
+    //         removed = false;
+    //         size_t remaining = 0;
+    //         for (const auto candidate : _ars)
+    //         {
+    //             if (candidate.rank < limit)
+    //             {
+    //                 candidate.proof->ar(_level);
+    //                 if (candidate.proof->is_proved())
+    //                 {
+    //                     removed = true;
+    //                     continue;
+    //                 }
+    //             }
+    //             _ars[remaining++] = candidate;
+    //         }
+    //         _ars.resize(remaining);
+    //     }
+    // }
 
     size_t const n = _applications.size();
     for (size_t i = 0; i < n; i++)
@@ -141,6 +140,10 @@ bool DDARSolver::run(size_t max_levels)
     if (!has_goal)
     {
         _solved = true;
+    }
+    else if (max_levels > 0 && get_config("targeted_ar", true))
+    {
+        run_targeted_ar(max_levels);
     }
     return _solved;
 }

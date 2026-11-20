@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include "problem.hpp"
 #include "matcher.hpp"
 #include "ar/linear_system.hpp"
@@ -29,13 +30,19 @@ private:
 
     std::vector<Proof *> _goals;
 
-    struct ARCandidate
-    {
-        Proof *proof;
-        size_t rank;
-    };
-    std::vector<ARCandidate> _ars;
-    std::vector<Point> _ar_point_limits;
+    // 旧 AR 候选队列。
+    // struct ARCandidate
+    // {
+    //     Proof *proof;
+    //     size_t rank;
+    // };
+    // std::vector<ARCandidate> _ars;
+    // std::vector<Point> _ar_point_limits;
+
+    void run_targeted_ar(size_t max_levels);
+    void advance_targeted_ar(const Point &last_point, size_t max_levels);
+    bool transfer_perpendicular_equations(const std::unordered_set<Proof *> &requested);
+    bool transfer_equal_distance_products(const std::unordered_set<Proof *> &requested);
 
     std::vector<Proof *> _checked_statements;
 

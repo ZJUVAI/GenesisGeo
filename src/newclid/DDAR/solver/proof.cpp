@@ -279,3 +279,34 @@ void Proof::set_proved(ProofState state)
 
     _solver->add_established_equations(this);
 }
+
+void Proof::collect_product_distances(std::set<TermArg> &distances)
+{
+    ensure_equations_initialized();
+    for (const auto *equation : _eqn_dist)
+        for (const auto &[monomial, coefficient] : equation->original_equation().body().terms())
+            if (monomial.degree() == 2)
+                for (const auto &[variable, exponent] : monomial.vars())
+                    if (variable.type() == TermArg::ArgType::Dist)
+                        distances.insert(variable);
+}
+
+void Proof::collect_residual_distances(std::set<TermArg> &distances)
+{
+    ensure_equations_initialized();
+    auto collect = [&](const auto &equations) {
+        for (auto *equation : equations)
+        {
+            equation->reduce();
+            for (const auto &[term, coefficient] : equation->remainder().body().terms())
+                for (const auto &[variable, exponent] : term.vars())
+                {
+                    const auto &points = variable.points();
+                    if (points.size() == 2)
+                        distances.emplace(Dist(points[0], points[1]));
+                }
+        }
+    };
+    collect(_eqn_dist);
+    collect(_eqn_distlog);
+}

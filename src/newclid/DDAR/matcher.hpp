@@ -25,12 +25,6 @@ private:
 
     std::vector<std::unique_ptr<Statement>> _stmts;
 
-    // 有 goal 时，_stmts（供 AR 直接复用的数值验证 para/perp/eqratio）对证明
-    // 目标没有帮助：match_perps_paras/match_dist_ratios 整段跳过，
-    // match_equal_angles 里的 on_eqangle 也不再把 EqAngle 塞进 _stmts
-    // （但仍照常做 on_cyclic/on_bisector 的定理匹配）。
-    bool _has_goal = false;
-
     bool get_config(const std::string &key, bool default_val = false) const
     {
         auto it = _config.find(key);
@@ -89,7 +83,8 @@ public:
 
     std::vector<Theorem> take_theorems() && { return std::move(_theorems); }
 
-    const std::vector<std::unique_ptr<Statement>> &stmts() const { return _stmts; }
+    // 旧 AR 候选访问接口。
+    // const std::vector<std::unique_ptr<Statement>> &stmts() const { return _stmts; }
 };
 
 // 自定义定理匹配器 - 独立功能，不影响原有Matcher

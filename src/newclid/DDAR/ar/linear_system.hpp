@@ -63,6 +63,8 @@ public:
     // 把任意方程约简到当前规则集下的范式(body 与证书同步更新)。
     // 给 ReducedEquation 调用。
     Equation normal_form(const Equation &eq) const;
+    // Reduce an individual product without changing its scale.
+    std::optional<Polynomial> product_normal_form(const Monomial &product) const;
     // Leave the caller's equation untouched when normalization makes no changes.
     std::optional<Equation> normal_form_if_changed(
         const Equation &eq) const;

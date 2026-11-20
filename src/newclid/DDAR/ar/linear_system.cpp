@@ -381,3 +381,32 @@ void LinearSystem::verify_equations() const
         }
     }
 }
+
+std::optional<Polynomial> LinearSystem::product_normal_form(const Monomial &product) const
+{
+    Polynomial residual({{product, Rational(1)}});
+    try
+    {
+        for (size_t steps = 0; steps < 16; ++steps)
+        {
+            bool substituted = false;
+            for (const auto &[term, coefficient] : residual.terms())
+            {
+                const auto *rule = find_divisor_rule(term);
+                if (rule == nullptr)
+                    continue;
+                const auto scale = coefficient;
+                const auto factor = term / rule->leading_monomial();
+                Polynomial replacement = rule->body();
+                replacement *= factor;
+                residual.subtract_scaled(replacement, scale);
+                substituted = true;
+                break;
+            }
+            if (!substituted)
+                return residual;
+        }
+    }
+    catch (const std::runtime_error &) {}
+    return std::nullopt;
+}
