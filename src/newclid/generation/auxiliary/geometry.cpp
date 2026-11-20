@@ -3,10 +3,15 @@
 #include "circle.h"
 #include "utils.h"
 #include <algorithm>
+#include <cstdio>
+#include <charconv>
+#include <cfenv>
+#include <clocale>
 #include <cmath>
 #include <iomanip>
 #include <random>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -265,6 +270,23 @@ PotentialPoints intersection_between_lines(
     return result;
 }
 
+// For already rounded coordinates below one million, scaling back to
+// the nine-digit integer grid is exact after rounding to the nearest integer.
+static char* write_rounded_coordinate(char* out, char* end, double value) {
+    constexpr long long scale = 1000000000;
+    static_assert(ROUND_DECIMALS == 9);
+    if (value < 0) *out++ = '-';
+    const auto scaled = std::llround(std::abs(value) * scale);
+    out = std::to_chars(out, end, scaled / scale).ptr;
+    *out++ = '.';
+    auto fraction = scaled % scale;
+    for (int i = ROUND_DECIMALS - 1; i >= 0; --i) {
+        out[i] = '0' + fraction % 10;
+        fraction /= 10;
+    }
+    return out + ROUND_DECIMALS;
+}
+
 PotentialPoints intersection_between_circles(
     const std::vector<std::string>& point_names,
     const std::unordered_map<std::string, Point>& coords,
@@ -274,9 +296,66 @@ PotentialPoints intersection_between_circles(
     PotentialPoints result;
     if (!circles_data || circles_data->size() < 2) return result;
 
-    // Map: rounded intersection point -> set of circles passing through it
-    std::unordered_map<std::string, std::set<std::vector<std::string>>> point_to_circles;
-    std::unordered_map<std::string, Point> point_coords_map;
+    using Membership = std::vector<std::string>;
+    std::set<Membership> memberships;
+    struct CircleMembers {
+        const Membership* original;
+        std::vector<std::pair<Point, const Membership*>> without_intersection;
+    };
+    std::vector<CircleMembers> circle_members;
+    circle_members.reserve(circles_data->size());
+    for (const auto& circle : *circles_data) {
+        auto names = std::get<3>(circle);
+        std::sort(names.begin(), names.end());
+        const auto* original = &*memberships.insert(std::move(names)).first;
+        CircleMembers members{original, {}};
+        for (const auto& name : *original) {
+            const Point& coord = rounded_coords->at(name);
+            const auto duplicate = std::find_if(
+                members.without_intersection.begin(), members.without_intersection.end(),
+                [&](const auto& entry) { return entry.first == coord; });
+            if (duplicate != members.without_intersection.end()) continue;
+            Membership remaining;
+            for (const auto& point : *original) {
+                if (rounded_coords->at(point) != coord) remaining.push_back(point);
+            }
+            const auto* usable = remaining.size() > 2
+                ? &*memberships.insert(std::move(remaining)).first
+                : nullptr;
+            members.without_intersection.emplace_back(coord, usable);
+        }
+        circle_members.push_back(std::move(members));
+    }
+
+    auto retained_members = [](const CircleMembers& circle, const Point& intersection) {
+        const auto entry = std::find_if(
+            circle.without_intersection.begin(), circle.without_intersection.end(),
+            [&](const auto& member) { return member.first == intersection; });
+        if (entry != circle.without_intersection.end()) return entry->second;
+        return circle.original->size() > 2 ? circle.original : nullptr;
+    };
+
+    struct Intersection {
+        Point coord;
+        std::array<const Membership*, 2> first{};
+        std::vector<const Membership*> additional;
+
+        void add(const Membership* members) {
+            for (auto& entry : first) {
+                if (entry == members) return;
+                if (!entry) {
+                    entry = members;
+                    return;
+                }
+            }
+            if (std::find(additional.begin(), additional.end(), members) == additional.end()) {
+                additional.push_back(members);
+            }
+        }
+    };
+    std::unordered_map<std::string, Intersection> intersections_by_key;
+    const bool use_fixed_key = std::fegetround() == FE_TONEAREST &&
+        std::string_view(std::localeconv()->decimal_point) == ".";
 
     for (size_t i = 0; i < circles_data->size(); ++i) {
         for (size_t j = i + 1; j < circles_data->size(); ++j) {
@@ -286,59 +365,60 @@ PotentialPoints intersection_between_circles(
             Circle c1 = {center1, radius1};
             Circle c2 = {center2, radius2};
 
-            auto intersections = intersect_two_circles(c1, c2);
+            for (const auto& pt : deduplicate_candidates(intersect_two_circles(c1, c2))) {
+                const auto* left = retained_members(circle_members[i], pt);
+                const auto* right = retained_members(circle_members[j], pt);
+                if (!left && !right) continue;
 
-            // Deduplicate candidates
-            auto unique = deduplicate_candidates(intersections);
-
-            for (const auto& pt : unique) {
-                // Remove points that coincide with intersection
-                std::vector<std::string> cleaned_c1, cleaned_c2;
-                for (const auto& name : points1) {
-                    if ((*rounded_coords).at(name) != pt) {
-                        cleaned_c1.push_back(name);
+                std::string point_key;
+                // Keep the old key bytes, since hash iteration affects sampling order.
+                if (use_fixed_key && std::abs(pt[0]) < 1e6 && std::abs(pt[1]) < 1e6) {
+                    char key[40];
+                    auto* end = write_rounded_coordinate(key, key + sizeof(key), pt[0]);
+                    *end++ = ',';
+                    end = write_rounded_coordinate(end, key + sizeof(key), pt[1]);
+                    point_key.assign(key, end);
+                } else {
+                    // A finite double needs at most 309 integral digits in fixed format.
+                    char key[2 * (309 + ROUND_DECIMALS + 2) + 1];
+                    const auto size = std::snprintf(
+                        key, sizeof(key), "%.*f,%.*f", ROUND_DECIMALS, pt[0], ROUND_DECIMALS, pt[1]);
+                    if (size >= 0 && static_cast<size_t>(size) < sizeof(key)) {
+                        point_key.assign(key, size);
+                    } else {
+                        std::ostringstream stream;
+                        stream << std::fixed << std::setprecision(ROUND_DECIMALS) << pt[0] << "," << pt[1];
+                        point_key = stream.str();
                     }
                 }
-                for (const auto& name : points2) {
-                    if ((*rounded_coords).at(name) != pt) {
-                        cleaned_c2.push_back(name);
-                    }
-                }
-
-                if (cleaned_c1.size() <= 2 && cleaned_c2.size() <= 2) continue;
-
-                std::vector<std::string> use1 = (cleaned_c1.size() > 2) ? cleaned_c1 : points1;
-                std::vector<std::string> use2 = (cleaned_c2.size() > 2) ? cleaned_c2 : points2;
-
-                std::sort(use1.begin(), use1.end());
-                std::sort(use2.begin(), use2.end());
-
-                std::ostringstream oss2;
-                oss2 << std::fixed << std::setprecision(9) << pt[0] << "," << pt[1];
-                std::string key = oss2.str();
-                point_coords_map[key] = pt;
-                point_to_circles[key].insert(use1);
-                point_to_circles[key].insert(use2);
+                auto& intersection = intersections_by_key[std::move(point_key)];
+                intersection.coord = pt;
+                intersection.add(left ? left : circle_members[i].original);
+                intersection.add(right ? right : circle_members[j].original);
             }
         }
     }
 
     // Only keep points where at least 3 circles meet
-    for (const auto& [key, circle_set] : point_to_circles) {
-        if (circle_set.size() < 3) continue;
+    for (const auto& entry : intersections_by_key) {
+        const auto& [coord, first, additional] = entry.second;
+        if (additional.empty()) continue;
 
-        std::vector<std::vector<std::string>> circle_list(circle_set.begin(), circle_set.end());
+        std::vector<const Membership*> circle_list(first.begin(), first.end());
+        circle_list.insert(circle_list.end(), additional.begin(), additional.end());
         std::sort(circle_list.begin(), circle_list.end(),
-                  [](const auto& a, const auto& b) { return a[0] < b[0]; });
+                  [](const auto* a, const auto* b) { return *a < *b; });
+        std::sort(circle_list.begin(), circle_list.end(),
+                  [](const auto* a, const auto* b) { return (*a)[0] < (*b)[0]; });
 
-        const auto& c1 = circle_list[0];
-        const auto& c2 = circle_list[1];
+        const auto& c1 = *circle_list[0];
+        const auto& c2 = *circle_list[1];
 
         std::vector<std::string> constructions = {
             "on_circum " + c1[0] + " " + c1[1] + " " + c1[2],
             "on_circum " + c2[0] + " " + c2[1] + " " + c2[2]
         };
-        result.push_back({point_coords_map[key], constructions});
+        result.push_back({coord, constructions});
     }
 
     return result;
