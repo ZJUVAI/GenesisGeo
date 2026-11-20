@@ -53,7 +53,7 @@ private:
     LinearSystem _system_dist;
     LinearSystem _system_distlog;
 
-    using eqns_map_type = std::unordered_map<Equation, ReducedEquation>;
+    using eqns_map_type = std::unordered_multimap<size_t, ReducedEquation>;
 
     eqns_map_type _equations_slope;
     eqns_map_type _equations_dist;

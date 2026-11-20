@@ -17,7 +17,7 @@ private:
     std::optional<size_t> _last_reduced_rule_version;
 
 public:
-    explicit ReducedEquation(Equation &equation, LinearSystem *system);
+    explicit ReducedEquation(Equation equation, LinearSystem *system);
 
     const Equation &original_equation() const { return _original_equation; }
 

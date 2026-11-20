@@ -408,23 +408,23 @@ size_t DDARSolver::push_established_statement(Proof *pf)
 void DDARSolver::print_equations() const
 {
     cout << "Slope Equations:" << endl;
-    for (const auto &[eqn, red_eqn] : _equations_slope)
+    for (const auto &[hash, red_eqn] : _equations_slope)
     {
-        cout << "Equation: " << eqn << endl;
+        cout << "Equation: " << red_eqn.original_equation() << endl;
         cout << "Reduced Equation: " << red_eqn.remainder() << endl;
         cout << endl;
     }
     cout << "Dist Equations:" << endl;
-    for (const auto &[eqn, red_eqn] : _equations_dist)
+    for (const auto &[hash, red_eqn] : _equations_dist)
     {
-        cout << "Equation: " << eqn << endl;
+        cout << "Equation: " << red_eqn.original_equation() << endl;
         cout << "Reduced Equation: " << red_eqn.remainder() << endl;
         cout << endl;
     }
     cout << "DistLog Equations:" << endl;
-    for (const auto &[eqn, red_eqn] : _equations_distlog)
+    for (const auto &[hash, red_eqn] : _equations_distlog)
     {
-        cout << "Equation: " << eqn << endl;
+        cout << "Equation: " << red_eqn.original_equation() << endl;
         cout << "Reduced Equation: " << red_eqn.remainder() << endl;
         cout << endl;
     }
@@ -448,66 +448,45 @@ bool DDARSolver::establish_statement(Proof *pf, size_t thm_id)
 
 vector<ReducedEquation *> DDARSolver::insert_equation(const unique_ptr<Statement> &pf, string type)
 {
-    vector<ReducedEquation *> res;
+    const bool using_exp = get_config("using_exp");
+    auto store = [](auto equations, LinearSystem &system, eqns_map_type &cache) {
+        vector<ReducedEquation *> result;
+        result.reserve(equations.size());
+        for (const auto &equation : equations)
+        {
+            if (equation->empty())
+            {
+                continue;
+            }
+            equation->make_monic();
+            const size_t hash = std::hash<Equation>{}(*equation);
+            const auto [first, last] = cache.equal_range(hash);
+            auto entry = find_if(first, last, [&](const auto &pair) {
+                return pair.second.original_equation() == *equation;
+            });
+            if (entry == last)
+            {
+                entry = cache.emplace(piecewise_construct,
+                    forward_as_tuple(hash), forward_as_tuple(std::move(*equation), &system));
+            }
+            result.push_back(&entry->second);
+        }
+        return result;
+    };
 
     if (type == "dist")
     {
-        auto eqn_ptrs = pf->as_equation_dist(get_config("using_exp"));
-        if (!eqn_ptrs.empty())
-        {
-            for (const auto &eqn_ptr : eqn_ptrs)
-            {
-                LinearSystem *sys = &_system_dist;
-                eqns_map_type *eqns = &_equations_dist;
-                if (!eqn_ptr->empty())
-                {
-                    eqn_ptr->make_monic();
-                    const auto entry = eqns->try_emplace(*eqn_ptr, *eqn_ptr, sys).first;
-                    res.push_back(&entry->second);
-                }
-            }
-        }
-        return res;
+        return store(pf->as_equation_dist(using_exp), _system_dist, _equations_dist);
     }
     if (type == "slope")
     {
-        auto eqn_ptrs = pf->as_equation_slope(get_config("using_exp"));
-        if (!eqn_ptrs.empty())
-        {
-            for (const auto &eqn_ptr : eqn_ptrs)
-            {
-                LinearSystem *sys = &_system_slope;
-                eqns_map_type *eqns = &_equations_slope;
-                if (!eqn_ptr->empty())
-                {
-                    eqn_ptr->make_monic();
-                    const auto entry = eqns->try_emplace(*eqn_ptr, *eqn_ptr, sys).first;
-                    res.push_back(&entry->second);
-                }
-            }
-        }
-        return res;
+        return store(pf->as_equation_slope(using_exp), _system_slope, _equations_slope);
     }
     if (type == "distlog")
     {
-        auto eqn_ptrs = pf->as_equation_distlog(get_config("using_exp"));
-        if (!eqn_ptrs.empty())
-        {
-            for (const auto &eqn_ptr : eqn_ptrs)
-            {
-                LinearSystem *sys = &_system_distlog;
-                eqns_map_type *eqns = &_equations_distlog;
-                if (!eqn_ptr->empty())
-                {
-                    eqn_ptr->make_monic();
-                    const auto entry = eqns->try_emplace(*eqn_ptr, *eqn_ptr, sys).first;
-                    res.push_back(&entry->second);
-                }
-            }
-        }
-        return res;
+        return store(pf->as_equation_distlog(using_exp), _system_distlog, _equations_distlog);
     }
-    return res;
+    return {};
 }
 
 void DDARSolver::add_established_equations(Proof *pf)

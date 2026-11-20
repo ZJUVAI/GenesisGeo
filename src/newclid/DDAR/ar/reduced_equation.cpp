@@ -6,8 +6,8 @@ using namespace std;
 
 class Proof;
 
-ReducedEquation::ReducedEquation(Equation &equation, LinearSystem *system)
-    : _original_equation(equation), _system(system), _remainder(equation)
+ReducedEquation::ReducedEquation(Equation equation, LinearSystem *system)
+    : _original_equation(std::move(equation)), _system(system), _remainder(_original_equation)
 {
     _remainder.make_monic();
 }
