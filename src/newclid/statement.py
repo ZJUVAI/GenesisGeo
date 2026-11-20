@@ -35,14 +35,15 @@ class Statement:
         if "_hash" not in self.__dict__:
             self._hash = None
 
-    def check(self) -> bool:
+    def check(self, *, explain: bool = True) -> bool:
         """Symbolically check if the statement is currently considered True."""
         if self in self.dep_graph.hyper_graph:
             return True
         if not self.check_numerical():
             return False
         if self.predicate.check(self):
-            self.why()
+            if explain:
+                self.why()
             return True
         return False
 
