@@ -45,19 +45,30 @@ if _RECON_FAIL_LOG_DIR:
     )
 
 
-def _log_recon_fail(outcome: str, construction_name: str, removed_pred: str,
-                     kept_pred: str, goal_pred: str) -> None:
+def _log_recon_fail(
+    outcome: str,
+    construction_name: str,
+    removed_pred: str,
+    kept_pred: str,
+    goal_pred: str,
+) -> None:
     """记录一次 reconstruction 失败/丢弃的结构化 key（不含具体点名/坐标）。"""
     if _recon_fail_fp is None:
         return
     try:
-        _recon_fail_fp.write(json.dumps({
-            "outcome": outcome,
-            "construction": construction_name,
-            "removed_pred": removed_pred,
-            "kept_pred": kept_pred,
-            "goal_pred": goal_pred,
-        }, ensure_ascii=False) + "\n")
+        _recon_fail_fp.write(
+            json.dumps(
+                {
+                    "outcome": outcome,
+                    "construction": construction_name,
+                    "removed_pred": removed_pred,
+                    "kept_pred": kept_pred,
+                    "goal_pred": goal_pred,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
     except Exception:
         pass
 
@@ -97,7 +108,10 @@ def _build_reversible_constructions(
         declared = set(cdef.args) | set(cdef.points)
         if sentence_args != declared:
             continue
-        if sentence[0] == "eqangle" and name not in EQANGLE_RECONSTRUCTIBLE_CONSTRUCTIONS:
+        if (
+            sentence[0] == "eqangle"
+            and name not in EQANGLE_RECONSTRUCTIBLE_CONSTRUCTIONS
+        ):
             continue
         result[name] = (sentence[0], sentence)
     return result
@@ -264,25 +278,21 @@ class ProblemWorker:
                 clauses_without_coords, solver.proof
             )
             statement_str_idxs = dict()
-            pointstr2basicstrs = defaultdict(set)
-            basicstr2pointstrs = defaultdict(set)
             for clause in clauses_without_coords:
-                for points, basics in clause2basics[clause]:
+                for _, basics in clause2basics[clause]:
                     for b in basics:
                         b_str = b.to_str()
                         if b_str not in statement_str_idxs:
                             statement_str_idxs[b_str] = len(statement_str_idxs)
-                        for pname in points:
-                            pointstr2basicstrs[pname].add(b_str)
-                            basicstr2pointstrs[b_str].add(pname)
 
             # Process goals
             # first, group goals by problem key
             group_runtime = time.time()
             eq_predicates_goals = dict()
-            for goal in possible_goals:
-                # find essential_clauses
-                premises, aux = solver.proof.dep_graph.get_premises_and_aux([goal])
+            premise_groups = solver.proof.dep_graph.iter_goal_premises_and_aux(
+                possible_goals
+            )
+            for goal, (premises, aux) in zip(possible_goals, premise_groups):
                 if aux_only > 0 and len(aux) == 0:
                     continue
                 premises = [dep.statement for dep in premises]
@@ -316,30 +326,77 @@ class ProblemWorker:
             # 超过 DEADLINE 时下面的 break 会把当前及之后所有 goal group 都丢掉，
             # 记录一下，供上层统计「本来能出样本、却被时间截断」的任务数。
             deadline_hit = False
-            for group_idx, (_, goal_list) in enumerate(eq_predicates_goals.items()):
+            groups = [
+                ([data[0] for data in group], group[0][1], group[0][2])
+                for group in eq_predicates_goals.values()
+            ]
+            prepared_groups = []
+            goals_by_scope = defaultdict(list)
+            solved_by_scope = {}
+            if aux_only == 2:
+                # Batch only verdicts. Each goal group still extracts its
+                # own auxiliary proof in the original order.
+                for goals, premises, aux in groups:
+                    expanded = ProblemWorker._expand_goal_group(
+                        clause2basics, clause2args, goals, premises, aux
+                    )
+                    scope = (
+                        tuple(expanded[0]),
+                        frozenset(
+                            arg.name
+                            for statement in (*expanded[0], *goals)
+                            for arg in statement.args
+                            if isinstance(arg, Point)
+                        ),
+                    )
+                    prepared_groups.append((expanded, scope))
+                    goals_by_scope[scope].append(goals)
+
+            for group_idx, (goals, premises, aux) in enumerate(groups):
                 if time.time() > DEADLINE:
                     deadline_hit = True
                     break
-                goals = [data[0] for data in goal_list]
-                premises = goal_list[0][1]
-                aux = goal_list[0][2]
+                expanded = None
+                solved_without_aux = None
+                if prepared_groups:
+                    expanded, scope = prepared_groups[group_idx]
+                    goal_lists = goals_by_scope[scope]
+                    if expanded[0] and len(goal_lists) > 1:
+                        if scope not in solved_by_scope:
+                            merged_goals = list(
+                                dict.fromkeys(
+                                    goal.to_str()
+                                    for goal_list in goal_lists
+                                    for goal in goal_list
+                                )
+                            )
+                            solved_by_scope[scope] = (
+                                ProblemWorker._check_goals_without_aux(
+                                    expanded[0],
+                                    merged_goals,
+                                    solver_builder,
+                                    using_log,
+                                    using_exp,
+                                    custom_rules,
+                                )
+                            )
+                        solved_without_aux = solved_by_scope[scope]
                 data = ProblemWorker._process_goals_with_same_statement(
                     clause2basics,
                     clause2args,
-                    pointstr2basicstrs,
-                    basicstr2pointstrs,
                     goals,
                     solver,
                     solver_builder,
                     premises,
                     aux,
-                    n_clauses,
                     img,
                     aux_only,
                     seed,
                     using_log,
                     using_exp,
                     custom_rules,
+                    expanded=expanded,
+                    solved_without_aux=solved_without_aux,
                 )
                 generated_data.extend(data)
             process_goal_time = time.time() - process_goal_time
@@ -584,17 +641,33 @@ class ProblemWorker:
                     continue
 
                 for kept_sentence, removed_sentence in splits:
-                    candidates.append((
-                        goal, candidate_point, construction_name, matched_sentence,
-                        kept_sentence, removed_sentence, orig_clause, goal_closure_names
-                    ))
+                    candidates.append(
+                        (
+                            goal,
+                            candidate_point,
+                            construction_name,
+                            matched_sentence,
+                            kept_sentence,
+                            removed_sentence,
+                            orig_clause,
+                            goal_closure_names,
+                        )
+                    )
 
         # 打乱并采样前N个
         rng.shuffle(candidates)
-        sampled = candidates[:ProblemWorker.REVERSE_RECON_MAX_ATTEMPTS_PER_PROBLEM]
+        sampled = candidates[: ProblemWorker.REVERSE_RECON_MAX_ATTEMPTS_PER_PROBLEM]
 
-        for (goal, candidate_point, construction_name, matched_sentence,
-             kept_sentence, removed_sentence, orig_clause, goal_closure_names) in sampled:
+        for (
+            goal,
+            candidate_point,
+            construction_name,
+            matched_sentence,
+            kept_sentence,
+            removed_sentence,
+            orig_clause,
+            goal_closure_names,
+        ) in sampled:
             stats["candidates"] += 1
             record, outcome = ProblemWorker._attempt_one_reconstruction(
                 goal=goal,
@@ -836,8 +909,13 @@ class ProblemWorker:
             candidate_fl, max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS
         )
         if solver_a is None:
-            _log_recon_fail("rejected", construction_name, removed_sentence[0],
-                             kept_sentence[0], goal.predicate.NAME)
+            _log_recon_fail(
+                "rejected",
+                construction_name,
+                removed_sentence[0],
+                kept_sentence[0],
+                goal.predicate.NAME,
+            )
             return None, "rejected"
         csolver_a = CSolver(
             candidate_fl,
@@ -849,8 +927,13 @@ class ProblemWorker:
         )
         csolver_a.run(custom_rules=custom_rules)
         if ProblemWorker._goal_solved(solver_a, new_goal_tokens):
-            _log_recon_fail("solved_without_aux", construction_name, removed_sentence[0],
-                             kept_sentence[0], goal.predicate.NAME)
+            _log_recon_fail(
+                "solved_without_aux",
+                construction_name,
+                removed_sentence[0],
+                kept_sentence[0],
+                goal.predicate.NAME,
+            )
             return None, "solved_without_aux"  # 直接可证 -> 按纠正后的范围丢弃
 
         # 第二阶段：把 x 按其完整原始定义（kept + removed 两条句子）重新加回去
@@ -858,11 +941,7 @@ class ProblemWorker:
         # 原题目里本来就是两条句子的交点，只加一条会让数值构造在自由度更高的
         # 曲线/直线上任取一点，得到的不是原来那个精确的 x。
         aux_clause_str = (
-            x_name
-            + " = "
-            + " ".join(kept_sentence)
-            + ", "
-            + " ".join(removed_sentence)
+            x_name + " = " + " ".join(kept_sentence) + ", " + " ".join(removed_sentence)
         )
         candidate_fl_with_aux = (
             "; ".join(str(c) for c in other_clauses)
@@ -878,8 +957,13 @@ class ProblemWorker:
             max_attempts=ProblemWorker.REVERSE_RECON_BUILD_MAX_ATTEMPTS,
         )
         if solver_b is None:
-            _log_recon_fail("rejected", construction_name, removed_sentence[0],
-                             kept_sentence[0], goal.predicate.NAME)
+            _log_recon_fail(
+                "rejected",
+                construction_name,
+                removed_sentence[0],
+                kept_sentence[0],
+                goal.predicate.NAME,
+            )
             return None, "rejected"
         csolver_b = CSolver(
             candidate_fl_with_aux,
@@ -891,8 +975,13 @@ class ProblemWorker:
         )
         csolver_b.run(custom_rules=custom_rules)
         if not ProblemWorker._goal_solved(solver_b, new_goal_tokens):
-            _log_recon_fail("unsolved_with_aux", construction_name, removed_sentence[0],
-                             kept_sentence[0], goal.predicate.NAME)
+            _log_recon_fail(
+                "unsolved_with_aux",
+                construction_name,
+                removed_sentence[0],
+                kept_sentence[0],
+                goal.predicate.NAME,
+            )
             return None, "unsolved_with_aux"  # 加了辅助点仍不可证 -> 丢弃
 
         record = ProblemWorker._build_reconstruction_output_record(
@@ -918,8 +1007,7 @@ class ProblemWorker:
     ):
         """
         对第二阶段求解成功的题目，走现有、不做任何修改的 pipeline 阶段
-        （_get_all_premise -> get_premises_and_aux -> pointstr2basicstrs/
-        basicstr2pointstrs -> _process_goals_with_same_statement），产出和
+        （_get_all_premise -> get_premises_and_aux -> _process_goals_with_same_statement），产出和
         主 pipeline 完全一致形状的输出记录。
         """
         clauses_b_no_coords = [
@@ -939,27 +1027,14 @@ class ProblemWorker:
         premises_b = [dep.statement for dep in premises_b]
         aux_b = [dep.statement for dep in aux_b]
 
-        pointstr2basicstrs_b = defaultdict(set)
-        basicstr2pointstrs_b = defaultdict(set)
-        for clause in clauses_b_no_coords:
-            for points, basics in clause2basics_b[clause]:
-                for b in basics:
-                    b_str = b.to_str()
-                    for pname in points:
-                        pointstr2basicstrs_b[pname].add(b_str)
-                        basicstr2pointstrs_b[b_str].add(pname)
-
         records = ProblemWorker._process_goals_with_same_statement(
             clause2basics_b,
             clause2args_b,
-            pointstr2basicstrs_b,
-            basicstr2pointstrs_b,
             [goal_b],
             solver_b,
             builder_b,
             premises_b,
             aux_b,
-            n_clauses=len(clauses_b_no_coords),
             img=None,
             aux_only=0,
             seed=seed,
@@ -1062,9 +1137,6 @@ class ProblemWorker:
 
     @staticmethod
     def _find_minimal_aux_clauses_new(
-        pointstr2basicstrs,
-        basicstr2pointstrs,
-        solver,
         solver_builder,
         goals_str,
         expanded_premises,
@@ -1074,6 +1146,8 @@ class ProblemWorker:
         using_log=True,
         using_exp=False,
         custom_rules=None,
+        *,
+        solved_without_aux=None,
     ):
         """Find minimal auxiliary clause set"""
         results = []
@@ -1083,52 +1157,59 @@ class ProblemWorker:
             "run_solver_time": 0.0,
         }
 
-        # Step 1: First try solving without aux
-        t0 = time.time()
-        try:
-            proof_state_no_aux = ProofState.build_predicates(
-                predicates=expanded_premises,
-                defsJGEX=solver_builder.defs,
-                goals_str=goals_str.copy(),
-                rng=np.random.default_rng(solver_builder.seed),
+        if solved_without_aux is not None:
+            goals_str[:] = [
+                goal for goal in goals_str if goal not in solved_without_aux
+            ]
+        else:
+            # Step 1: First try solving without aux
+            t0 = time.time()
+            try:
+                proof_state_no_aux = ProofState.build_predicates(
+                    predicates=expanded_premises,
+                    defsJGEX=solver_builder.defs,
+                    goals_str=goals_str.copy(),
+                    rng=np.random.default_rng(solver_builder.seed),
+                )
+            except (IndexError, ValueError) as e:
+                logger.error(
+                    f"Failed to build predicates!\n"
+                    f"Error: {e}\n"
+                    f"goals_str: {goals_str}\n"
+                    f"expanded_premises ({len(expanded_premises)} items): "
+                    f"{[p.to_str() for p in expanded_premises][:10]}"  # Show first 10
+                )
+                raise
+            timings["build_predicates_time"] = time.time() - t0
+
+            t0 = time.time()
+            solver_no_aux = GeometricSolver(
+                proof_state_no_aux, solver_builder.rules, DDARN()
             )
-        except (IndexError, ValueError) as e:
-            logger.error(
-                f"Failed to build predicates!\n"
-                f"Error: {e}\n"
-                f"goals_str: {goals_str}\n"
-                f"expanded_premises ({len(expanded_premises)} items): "
-                f"{[p.to_str() for p in expanded_premises][:10]}"  # Show first 10
+            timings["build_solver_time"] = time.time() - t0
+
+            t0 = time.time()
+            csolver_no_aux = CSolver(
+                problem="",
+                solver=solver_no_aux,
+                using_log=using_log,
+                using_exp=using_exp,
             )
-            raise
-        timings["build_predicates_time"] = time.time() - t0
+            csolver_no_aux.run(
+                custom_rules=custom_rules, goal_checks_only=aux_only == 2
+            )
+            timings["run_solver_time"] = time.time() - t0
 
-        t0 = time.time()
-        solver_no_aux = GeometricSolver(
-            proof_state_no_aux, solver_builder.rules, DDARN()
-        )
-        timings["build_solver_time"] = time.time() - t0
-
-        t0 = time.time()
-        csolver_no_aux = CSolver(
-            problem="",
-            solver=solver_no_aux,
-            using_log=using_log,
-            using_exp=using_exp,
-        )
-        csolver_no_aux.run(custom_rules=custom_rules)
-        timings["run_solver_time"] = time.time() - t0
-
-        for goal in solver_no_aux.goals:
-            if goal.check():
-                goals_str.remove(goal.to_str())
-                # For aux_only==1, keep data without aux with 0.1 probability
-                # For aux_only==0, always keep
-                # For aux_only==2, never keep
-                if aux_only == 0 or (aux_only == 1 and rng.random() < 0.1):
-                    results.append(
-                        ProblemWorker._extract_proof_info(solver_no_aux, goal)
-                    )
+            for goal in solver_no_aux.goals:
+                if goal.check(explain=aux_only != 2):
+                    goals_str.remove(goal.to_str())
+                    # For aux_only==1, keep data without aux with 0.1 probability
+                    # For aux_only==0, always keep
+                    # For aux_only==2, never keep
+                    if aux_only == 0 or (aux_only == 1 and rng.random() < 0.1):
+                        results.append(
+                            ProblemWorker._extract_proof_info(solver_no_aux, goal)
+                        )
 
         if len(expanded_aux_groups) == 1:
             # If only one aux, no need to continue
@@ -1160,7 +1241,7 @@ class ProblemWorker:
                 using_exp=using_exp,
             )
             t0 = time.time()
-            csolver_all_aux.run(custom_rules=custom_rules)
+            csolver_all_aux.run(custom_rules=custom_rules, goal_proofs_only=True)
             timings["run_solver_time"] += time.time() - t0
 
             for goal in solver_all_aux.goals:
@@ -1187,49 +1268,12 @@ class ProblemWorker:
                 "solvers": {},
             }
         ]
-        # premise_strs = set([p.to_str() for p in premises])
-        # premise_pointstrs = set()
-        # for p in premises:
-        #     for arg in p.args:
-        #         if isinstance(arg, Point):
-        #             premise_pointstrs.add(arg.name)
-
         for i in range(len(expanded_aux_groups) - 1, -1, -1):
             new_goal_groups = []
 
             for group in goal_groups:
                 # Try without this aux for all goals in this group
                 test_aux_groups = group["aux_groups"][:i] + group["aux_groups"][i + 1 :]
-
-                # # Check if the aux set is valid w.r.t rely_on
-                # flag = True
-                # exist_stmt_strs = premise_strs.copy()
-                # # print(f"group[aux][:i]: {group["aux"][:i]}, group[aux][i+1:]: {group["aux"][i+1:]}")
-                # for aux_stmt in group["aux"][:i]:
-                #     exist_stmt_strs.add(aux_stmt.to_str())
-                # for aux_stmt in group["aux"][i+1:]:
-                #     aux_str = aux_stmt.to_str()
-                #     exist_stmt_strs.add(aux_str)
-                #     # print(f"aux: {aux_stmt}, points: {basicstr2pointstrs[aux_stmt.to_str()]}")
-                #     # print(f"exist_stmt_strs: {exist_stmt_strs}")
-                #     pointstrs_to_check = set()
-                #     for arg in aux_stmt.args:
-                #         if isinstance(arg, Point):
-                #             pointstrs_to_check.add(arg.name)
-                #     for pname in pointstrs_to_check:
-                #         if pname in premise_pointstrs or len(pointstr2basicstrs[pname]) == 0:
-                #             continue
-                #         # print(f"  checking point: {pname}, basicstrs: {pointstr2basicstrs[pname]}")
-                #         if pointstr2basicstrs[pname].isdisjoint(exist_stmt_strs):
-                #             flag = False
-                #             break
-                #     if not flag:
-                #         break
-                # # print(f"test result for {test_aux}: {flag}")
-                # if not flag:
-                #     # Cannot remove this aux due to rely_on
-                #     new_goal_groups.append(group)
-                #     continue
 
                 t0 = time.time()
                 proof_state_test = ProofState.build_predicates(
@@ -1254,7 +1298,7 @@ class ProblemWorker:
                     using_log=using_log,
                     using_exp=using_exp,
                 )
-                csolver_test.run(custom_rules=custom_rules)
+                csolver_test.run(custom_rules=custom_rules, goal_proofs_only=True)
                 timings["run_solver_time"] += time.time() - t0
 
                 # Check which goals are solved
@@ -1339,7 +1383,7 @@ class ProblemWorker:
                 using_exp=using_exp,
             )
             t0 = time.time()
-            csolver_all_aux.run(custom_rules=custom_rules)
+            csolver_all_aux.run(custom_rules=custom_rules, goal_proofs_only=True)
             timings["run_solver_time"] += time.time() - t0
 
             for goal in solver_all_aux.goals:
@@ -1357,35 +1401,7 @@ class ProblemWorker:
         return results, timings
 
     @staticmethod
-    def _process_goals_with_same_statement(
-        clause2basics,
-        clause2args,
-        pointstr2basicstrs,
-        basicstr2pointstrs,
-        goals,
-        solver,
-        solver_builder,
-        premises,
-        aux,
-        n_clauses,
-        img,
-        aux_only,
-        seed,
-        using_log=True,
-        using_exp=False,
-        custom_rules=None,
-    ):
-        """Process a single goal"""
-
-        results = []
-        name2node = dict()
-        for k, v in solver.proof.symbols_graph.name2node.items():
-            if isinstance(v, Point):
-                name2node[k] = v
-
-        # Create RNG for probabilistic filtering
-        rng = np.random.default_rng(solver_builder.seed)
-
+    def _expand_goal_group(clause2basics, clause2args, goals, premises, aux):
         # Expand proof-level premises/aux into the same clause/basic view used by
         # llm_solution_renamed() when exporting the final fl_problem and <aux>.
         # _find_minimal_aux_clauses_new() must reason over this expanded view,
@@ -1418,11 +1434,68 @@ class ProblemWorker:
             )
         )
 
+        return expanded_premises, expanded_aux_groups
+
+    @staticmethod
+    def _check_goals_without_aux(
+        premises, goals, solver_builder, using_log, using_exp, custom_rules
+    ):
+        proof = ProofState.build_predicates(
+            predicates=premises,
+            defsJGEX=solver_builder.defs,
+            goals_str=goals,
+            rng=np.random.default_rng(solver_builder.seed),
+        )
+        solver = GeometricSolver(proof, solver_builder.rules, DDARN())
+        csolver = CSolver("", solver=solver, using_log=using_log, using_exp=using_exp)
+        csolver.run(custom_rules=custom_rules, goal_checks_only=True)
+        return {goal.to_str() for goal in solver.goals if goal.check(explain=False)}
+
+    @staticmethod
+    def _process_goals_with_same_statement(
+        clause2basics,
+        clause2args,
+        goals,
+        solver,
+        solver_builder,
+        premises,
+        aux,
+        img,
+        aux_only,
+        seed,
+        using_log=True,
+        using_exp=False,
+        custom_rules=None,
+        *,
+        expanded=None,
+        solved_without_aux=None,
+    ):
+        """Process a single goal"""
+
+        results = []
+        name2node = dict()
+        for k, v in solver.proof.symbols_graph.name2node.items():
+            if isinstance(v, Point):
+                name2node[k] = v
+
+        # Create RNG for probabilistic filtering
+        rng = np.random.default_rng(solver_builder.seed)
+
+        expanded_premises, expanded_aux_groups = (
+            expanded
+            if expanded is not None
+            else ProblemWorker._expand_goal_group(
+                clause2basics, clause2args, goals, premises, aux
+            )
+        )
+
+        # A target group without premises cannot build a reduced problem.
+        # Keep processing the other groups from this seed.
+        if not expanded_premises:
+            return []
+
         try:
             res_list, aux_timings = ProblemWorker._find_minimal_aux_clauses_new(
-                pointstr2basicstrs,
-                basicstr2pointstrs,
-                solver,
                 solver_builder,
                 [goal.to_str() for goal in goals],
                 expanded_premises,
@@ -1432,39 +1505,49 @@ class ProblemWorker:
                 using_log=using_log,
                 using_exp=using_exp,
                 custom_rules=custom_rules,
+                solved_without_aux=solved_without_aux,
             )
         except Exception as e:
             # Extract fl_statement from solver_builder
             fl_statement_parts = []
             try:
-                if hasattr(solver_builder, 'problemJGEX') and solver_builder.problemJGEX:
+                if (
+                    hasattr(solver_builder, "problemJGEX")
+                    and solver_builder.problemJGEX
+                ):
                     fl_statement_parts.append(str(solver_builder.problemJGEX))
-            except:
+            except Exception:
                 pass
 
             try:
                 # Try to reconstruct from solver's proof state
-                if hasattr(solver, 'proof') and hasattr(solver.proof, 'symbols_graph'):
-                    points = [p.name for p in solver.proof.symbols_graph.nodes_of_type(Point)]
+                if hasattr(solver, "proof") and hasattr(solver.proof, "symbols_graph"):
+                    points = [
+                        p.name for p in solver.proof.symbols_graph.nodes_of_type(Point)
+                    ]
                     fl_statement_parts.append(f"Points: {', '.join(points)}")
-            except:
+            except Exception:
                 pass
 
-            fl_statement = '\n'.join(fl_statement_parts) if fl_statement_parts else "<unable to extract>"
+            fl_statement = (
+                "\n".join(fl_statement_parts)
+                if fl_statement_parts
+                else "<unable to extract>"
+            )
 
             logger.error(
-                f"\n{'='*60}\n"
+                f"\n{'=' * 60}\n"
                 f"ERROR in _find_minimal_aux_clauses_new!\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
                 f"fl_statement:\n{fl_statement}\n"
-                f"{'-'*60}\n"
+                f"{'-' * 60}\n"
                 f"goals: {[goal.to_str() for goal in goals]}\n"
-                f"{'-'*60}\n"
+                f"{'-' * 60}\n"
                 f"n_premises (before expansion): {len(premises)}\n"
                 f"n_expanded_premises: {len(expanded_premises)}\n"
-                f"{'-'*60}\n"
+                f"{'-' * 60}\n"
                 f"Original error: {type(e).__name__}: {e}\n"
-                f"{'='*60}"
+                f"{'=' * 60}"
             )
             raise
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from functools import cache
 from typing import TYPE_CHECKING, Collection, Optional, Set
 from newclid.dependencies.dependency import IN_PREMISES, NUMERICAL_CHECK, TRIVIAL
 from newclid.dependencies.symbols import Point
@@ -235,6 +236,52 @@ class DependencyGraph:
         )
 
     def get_premises_and_aux(self, goals):
+        top_premises = self._top_premises(goals)
+        points = self.points_dependency_closure(
+            [arg for goal in goals for arg in goal.args if isinstance(arg, Point)]
+        )
+        return self._split_premises(points, top_premises)
+
+    def iter_goal_premises_and_aux(self, goals):
+        """Reuse premise leaves while reading many goals from the same closure."""
+
+        @cache
+        def premise_leaves(statement):
+            dependency = self.hyper_graph.get(statement)
+            if dependency is None:
+                return ()
+            if not dependency.why:
+                return (dependency,) if dependency.reason == IN_PREMISES else ()
+            return tuple(
+                dict.fromkeys(
+                    leaf
+                    for premise in dependency.why
+                    for leaf in premise_leaves(premise)
+                )
+            )
+
+        @cache
+        def point_closure(point):
+            return self.points_dependency_closure((point,))
+
+        cache_enabled = True
+        for goal in goals:
+            if cache_enabled:
+                try:
+                    top_premises = set(premise_leaves(goal))
+                except RecursionError:
+                    # Imported dependency graphs can contain cycles. Use the
+                    # existing traversal, which tracks visited nodes per goal.
+                    cache_enabled = False
+                    premise_leaves.cache_clear()
+            if not cache_enabled:
+                top_premises = self._top_premises([goal])
+            points = set().union(
+                *(point_closure(arg) for arg in goal.args if isinstance(arg, Point))
+            )
+            yield self._split_premises(points, top_premises)
+
+    def _top_premises(self, goals):
         visited: Set[Statement] = set()
         top_premises: Set[Dependency] = set()
 
@@ -259,29 +306,9 @@ class DependencyGraph:
         for goal in goals:
             dfs(goal)
 
-        points: Set[Point] = set()
-        queue = deque()
+        return top_premises
 
-        for goal in goals:
-            for arg in goal.args:
-                if isinstance(arg, Point):
-                    if arg not in points:
-                        points.add(arg)
-                        queue.append(arg)
-
-        while queue:
-            q = queue.popleft()
-            for p in q.clause.points:
-                p_name = p.split("@")[0]
-                p_point = self.symbols_graph.names2points([p_name])[0]
-                if p_point not in points:
-                    points.add(p_point)
-                    queue.append(p_point)
-            for p in q.rely_on:
-                if p not in points:
-                    points.add(p)
-                    queue.append(p)
-
+    def _split_premises(self, points, top_premises):
         premises = []
         aux = []
 

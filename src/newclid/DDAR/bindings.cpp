@@ -440,10 +440,60 @@ vector<CustomRule> parse_custom_theorems(const vector<string> &theorem_strings)
     return rules;
 }
 
-static py::list export_dependency_graph(const DDARSolver &solver)
+static py::list export_dependency_graph(
+    const DDARSolver &solver, bool immutable_tokens,
+    const std::unordered_set<std::string> &goal_predicates, bool goal_proofs_only)
 {
+    unordered_set<const Proof *> needed;
+    const bool limit_to_proofs = goal_proofs_only && !solver.goals().empty();
+    const bool limit_to_verdicts = !goal_predicates.empty() && solver.is_solved();
+    if (limit_to_proofs)
+    {
+        vector<const Proof *> pending;
+        unordered_set<string> unproved_predicates;
+        for (const Proof *goal : solver.goals())
+        {
+            if (goal->is_proved())
+            {
+                pending.push_back(goal);
+            }
+            else
+            {
+                unproved_predicates.insert(goal->statement()->name());
+            }
+        }
+        // Python can recognize an equivalent conclusion for a goal that
+        // DDAR did not prove explicitly. Retain those facts and their proofs.
+        if (!unproved_predicates.empty())
+        {
+            for (const Proof *proof : solver.checked_statements())
+            {
+                if (unproved_predicates.count(proof->statement()->name()))
+                {
+                    pending.push_back(proof);
+                }
+            }
+        }
+        while (!pending.empty())
+        {
+            const Proof *proof = pending.back();
+            pending.pop_back();
+            if (needed.insert(proof).second)
+            {
+                const auto deps = proof->get_dependencies();
+                pending.insert(pending.end(), deps.begin(), deps.end());
+            }
+        }
+    }
+    else if (limit_to_verdicts)
+    {
+        needed.insert(solver.goals().begin(), solver.goals().end());
+    }
+
     unordered_map<const Proof *, py::tuple> tokens;
-    auto token_list = [&tokens](const Proof *proof)
+    // Point names and predicate names recur throughout a dependency graph.
+    unordered_map<string, py::str> token_strings;
+    auto statement_tokens = [&tokens, &token_strings, immutable_tokens](const Proof *proof) -> py::object
     {
         auto it = tokens.find(proof);
         if (it == tokens.end())
@@ -452,9 +502,18 @@ static py::list export_dependency_graph(const DDARSolver &solver)
             py::tuple immutable_tokens(normalized.size());
             for (size_t i = 0; i < normalized.size(); ++i)
             {
-                immutable_tokens[i] = py::str(normalized[i]);
+                auto [token, inserted] = token_strings.try_emplace(normalized[i]);
+                if (inserted)
+                {
+                    token->second = py::str(normalized[i]);
+                }
+                immutable_tokens[i] = token->second;
             }
             it = tokens.emplace(proof, std::move(immutable_tokens)).first;
+        }
+        if (immutable_tokens)
+        {
+            return it->second;
         }
         return py::list(it->second);
     };
@@ -462,6 +521,11 @@ static py::list export_dependency_graph(const DDARSolver &solver)
     py::list graph;
     for (const Proof *proof : solver.checked_statements())
     {
+        if (((limit_to_proofs || limit_to_verdicts) && !needed.count(proof)) ||
+            (!goal_predicates.empty() && !goal_predicates.count(proof->statement()->name())))
+        {
+            continue;
+        }
         if (!proof->is_proved())
         {
             cout << "?????" << endl;
@@ -470,9 +534,9 @@ static py::list export_dependency_graph(const DDARSolver &solver)
         py::list dependencies;
         for (const Proof *premise : proof->get_dependencies())
         {
-            dependencies.append(token_list(premise));
+            dependencies.append(statement_tokens(premise));
         }
-        graph.append(py::make_tuple(token_list(proof), std::move(dependencies), proof->reason()));
+        graph.append(py::make_tuple(statement_tokens(proof), std::move(dependencies), proof->reason()));
     }
     return graph;
 }
@@ -494,6 +558,16 @@ extern "C"
             config_map[item.first.cast<string>()] = item.second.cast<bool>();
         }
 
+        const bool immutable_tokens = config_map["immutable_dependency_tokens"];
+        std::unordered_set<std::string> goal_predicates;
+        if (config_map["export_goal_predicates_only"])
+        {
+            for (const auto &goal : goals)
+            {
+                goal_predicates.insert(goal.first);
+            }
+        }
+
         Problem problem;
         problem.load_from_data(name, points, premises, goals);
 
@@ -511,9 +585,14 @@ extern "C"
         // }
 
         // 求解结束后，对前提过多的 AR 推导尝试简化
-        solver.simplify_ar();
+        // A successful verdict-only query already has every requested fact.
+        if (goal_predicates.empty() || !solver.is_solved())
+        {
+            solver.simplify_ar();
+        }
 
-        py::list dep_graph = export_dependency_graph(solver);
+        py::list dep_graph = export_dependency_graph(
+            solver, immutable_tokens, goal_predicates, config_map["export_goal_proofs_only"]);
 
         // if (do_analyze)
         // {
@@ -542,6 +621,16 @@ extern "C"
             config_map[item.first.cast<string>()] = item.second.cast<bool>();
         }
 
+        const bool immutable_tokens = config_map["immutable_dependency_tokens"];
+        std::unordered_set<std::string> goal_predicates;
+        if (config_map["export_goal_predicates_only"])
+        {
+            for (const auto &goal : goals)
+            {
+                goal_predicates.insert(goal.first);
+            }
+        }
+
         Problem problem;
         problem.load_from_data(name, points, premises, goals);
 
@@ -567,9 +656,14 @@ extern "C"
         // }
 
         // 求解结束后，对前提过多的 AR 推导尝试简化
-        solver.simplify_ar();
+        // A successful verdict-only query already has every requested fact.
+        if (goal_predicates.empty() || !solver.is_solved())
+        {
+            solver.simplify_ar();
+        }
 
-        py::list dep_graph = export_dependency_graph(solver);
+        py::list dep_graph = export_dependency_graph(
+            solver, immutable_tokens, goal_predicates, config_map["export_goal_proofs_only"]);
 
         // if (do_analyze)
         // {

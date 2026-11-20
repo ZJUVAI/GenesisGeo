@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Optional, List, Tuple
 from typing_extensions import Self
 from fractions import Fraction
+from functools import cache
 
 
 from newclid.agent.ddarn import DDARN
@@ -238,7 +239,7 @@ class CSolver:
         points: List[Tuple[str, Any, Any]] = None,
         premises: List[Tuple[str, List[str]]] = None,
         goals: List[Tuple[str, List[str]]] = None,
-        **overrides
+        **overrides,
     ):
         """
         Initialize CSolver with configuration.
@@ -285,7 +286,7 @@ class CSolver:
         self.goals: List[Tuple[str, List[str]]] = []
         self.useful_points: List[str] = []
 
-        if final_config.get('light', False):
+        if final_config.get("light", False):
             # 轻量化路径：跳过 dep_graph、Matcher、rely 等符号推理开销
             self.solver = None
             problemJGEX = ProblemJGEX.from_text(self.problem)
@@ -366,14 +367,51 @@ class CSolver:
         max_level: int = 500,
         save_path: str | Path | None = None,
         custom_rules: List[str] = None,
+        *,
+        goal_checks_only: bool = False,
+        goal_proofs_only: bool = False,
     ) -> bool:
         """
         运行 DDAR 并执行求解。
         :param max_level: 最大推理层数
         :param save_path: 可选，保存证明步骤的路径。
+        :param goal_checks_only: 仅用于之后检查目标真假、不读取证明的调用。
+        :param goal_proofs_only: 导入已证目标的证明，以及判定其余目标所需的候选证明。
         :return: bool 表示是否成功求解。
         """
         t0 = time.time()
+
+        # These checks read the target fact and the state built from premises.
+        # DDAR graph import does not update that numerical or algebraic state.
+        goal_predicates = {name for name, _ in self.goals}
+        supported_goals = {
+            "coll",
+            "cong",
+            "cyclic",
+            "eqangle",
+            "eqratio",
+            "midp",
+            "para",
+            "perp",
+        }
+        if goal_checks_only:
+            supported_goals.update(
+                ("aconst", "rconst", "simtri", "simtrir", "contri", "contrir")
+            )
+        can_limit_graph = (
+            save_path is None
+            and bool(goal_predicates)
+            and goal_predicates <= supported_goals
+        )
+
+        config = dict(
+            self.config,
+            immutable_dependency_tokens=True,
+            export_goal_predicates_only=can_limit_graph and goal_checks_only,
+            export_goal_proofs_only=(
+                can_limit_graph and goal_proofs_only and not goal_checks_only
+            ),
+        )
 
         if custom_rules:
             solved, dep_graph = DDAR.run_ddar_with_custom_theorems(
@@ -383,7 +421,7 @@ class CSolver:
                 self.goals,
                 custom_rules,
                 max_level,
-                self.config,
+                config,
             )
         else:
             solved, dep_graph = DDAR.run_ddar(
@@ -392,25 +430,39 @@ class CSolver:
                 self.premises,
                 self.goals,
                 max_level,
-                self.config,
+                config,
             )
 
         if self.solver is not None:
-            for stmt, deps, reason in dep_graph:
-                conclusion = Statement.from_tokens(stmt, self.solver.proof.dep_graph)
-                why = []
-                flag = True
-                for dep in deps:
-                    premise = Statement.from_tokens(dep, self.solver.proof.dep_graph)
-                    if premise == conclusion:
-                        flag = False
-                        break
-                    why.append(premise)
-                if not flag:
-                    continue
-                dep = Dependency.mk(conclusion, reason, tuple(why))
-                # dep.add()
-                self.solver.proof.dep_graph.hyper_graph[conclusion] = dep
+            proof_graph = self.solver.proof.dep_graph
+
+            @cache
+            def parse_statement(tokens):
+                return Statement.from_tokens(tokens, proof_graph)
+
+            if can_limit_graph and goal_checks_only:
+                for stmt, deps, reason in dep_graph:
+                    conclusion = parse_statement(tuple(stmt))
+                    for dep in deps:
+                        if parse_statement(tuple(dep)) == conclusion:
+                            break
+                    else:
+                        proof_graph.hyper_graph[conclusion] = Dependency(
+                            conclusion, reason, ()
+                        )
+            else:
+                for stmt, deps, reason in dep_graph:
+                    conclusion = parse_statement(tuple(stmt))
+                    why = []
+                    for dep in deps:
+                        premise = parse_statement(tuple(dep))
+                        if premise == conclusion:
+                            break
+                        why.append(premise)
+                    else:
+                        proof_graph.hyper_graph[conclusion] = Dependency.mk(
+                            conclusion, reason, tuple(why)
+                        )
 
             self.solver.run_infos["success"] = solved
             self.solver.run_infos["runtime"] = time.time() - t0
