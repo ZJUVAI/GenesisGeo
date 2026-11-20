@@ -6,8 +6,12 @@ from matplotlib.pylab import Generator
 import numpy as np
 from newclid.dependencies.symbols import Point
 from newclid.numerical import close_enough
-from newclid.numerical.draw_figure import draw_segment, draw_segment_num, get_figure_theme
-from newclid.numerical.geometries import LineNum
+from newclid.numerical.draw_figure import (
+    draw_segment,
+    draw_segment_num,
+    get_figure_theme,
+)
+from newclid.numerical.geometries import LineNum, segment_angle
 from newclid.predicates.congruence import Cong
 from newclid.predicates.predicate import Predicate
 from newclid.algebraic_reasoning.tables import Angle_Chase
@@ -43,7 +47,7 @@ class Para(Predicate):
         args: tuple[Point] = statement.args
         angle = None
         for a, b in reshape(list(args), 2):
-            _angle = (b.num - a.num).angle() % np.pi
+            _angle = segment_angle(b.num.x - a.num.x, b.num.y - a.num.y) % np.pi
             if angle is not None and not close_enough(angle, _angle):
                 return False
             angle = _angle

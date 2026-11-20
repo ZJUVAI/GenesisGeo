@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import Any, Iterable, Optional, Sequence, Union
 
 from numpy.random import Generator
@@ -7,6 +8,12 @@ import numpy as np
 
 
 ObjNum = Union["PointNum", "LineNum", "CircleNum", "RayNum", "SegmentNum"]
+
+
+@lru_cache(maxsize=4096)
+def segment_angle(dx: float, dy: float) -> float:
+    """Direction of a point difference with PointNum's near-zero normalization."""
+    return np.arctan2(0.0 if nearly_zero(dy) else dy, 0.0 if nearly_zero(dx) else dx)
 
 
 class PointNum:

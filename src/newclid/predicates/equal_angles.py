@@ -1,10 +1,12 @@
 from __future__ import annotations
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from matplotlib.axes import Axes
 import numpy as np
 import logging
 
+from newclid.numerical.geometries import segment_angle
 from newclid.numerical import close_enough
 from newclid.numerical.draw_figure import draw_angle, draw_segment, get_figure_theme
 from newclid.predicates.predicate import Predicate
@@ -33,48 +35,49 @@ class EqAngle(Predicate):
 
     @classmethod
     def preparse(cls, args: tuple[str, ...]):
+        return cls._normalize(tuple(args))
+
+    @classmethod
+    @lru_cache(maxsize=4096)
+    def _ranked_segment(cls, left: str, right: str):
+        low, high = cls.custom_key(left), cls.custom_key(right)
+        if low <= high:
+            return (low, high), (left, right)
+        return (high, low), (right, left)
+
+    @classmethod
+    @lru_cache(maxsize=32_768)
+    def _normalize(cls, args: tuple[str, ...]):
+        # The same angle and ratio tokens recur across proof states.
         a, b, c, d, e, f, g, h = args
         if a == b or c == d or e == f or g == h:
             return
-        if cls.compare(a, b) > 0:
-            a, b = b, a
-        if cls.compare(c, d) > 0:
-            c, d = d, c
-        if cls.compare(e, f) > 0:
-            e, f = f, e
-        if cls.compare(g, h) > 0:
-            g, h = h, g
+        # Compare segment ranks separately from their names so ties keep
+        # the original permutation order.
+        ranked_segment = cls._ranked_segment
+        ab, cd, ef, gh = (
+            ranked_segment(a, b),
+            ranked_segment(c, d),
+            ranked_segment(e, f),
+            ranked_segment(g, h),
+        )
+        ra, rc, re, rg = ab[0], cd[0], ef[0], gh[0]
+        order = min(
+            (ra, rc, re, rg, 0),
+            (re, rg, ra, rc, 1),
+            (rc, ra, rg, re, 2),
+            (rg, re, rc, ra, 3),
+        )[-1]
 
-        g1a = (a, b, c, d)
-        g1b = (e, f, g, h)
-        g2a = (c, d, a, b)
-        g2b = (g, h, e, f)
-        if cls.compare(g1a, g1b) <= 0:
-            groups1 = g1a + g1b
-        else:
-            groups1 = g1b + g1a
-        if cls.compare(g2a, g2b) <= 0:
-            groups2 = g2a + g2b
-        else:
-            groups2 = g2b + g2a
-        groups1 = groups1 if cls.compare(groups1, groups2) <= 0 else groups2
-        a, b, c, d, e, f, g, h = groups1
-        groups2 = (a, b, e, f, c, d, g, h)
-        return groups1 if cls.compare(groups1, groups2) <= 0 else groups2
-
-        # groups: list[tuple[str, str, str, str]] = []
-        # groups1: list[tuple[str, str, str, str]] = []
-        # if len(args) % 4:
-        #     return None
-        # for a, b, c, d in reshape(args, 4):
-        #     if a == b or c == d:
-        #         return None
-        #     a, b = sorted((a, b))
-        #     c, d = sorted((c, d))
-        #     groups.append((a, b, c, d))
-        #     groups1.append((c, d, a, b))
-        # assert data == sum(min(sorted(groups), sorted(groups1)), ())
-        # return sum(min(sorted(groups), sorted(groups1)), ())
+        if order == 1:
+            ab, cd, ef, gh = ef, gh, ab, cd
+        elif order == 2:
+            ab, cd, ef, gh = cd, ab, gh, ef
+        elif order == 3:
+            ab, cd, ef, gh = gh, ef, cd, ab
+        if ef[0] < cd[0]:
+            cd, ef = ef, cd
+        return ab[1] + cd[1] + ef[1] + gh[1]
 
     @classmethod
     def parse(cls, args: tuple[str, ...], dep_graph: DependencyGraph):
@@ -88,7 +91,10 @@ class EqAngle(Predicate):
         args: tuple[Point, ...] = statement.args
         angle = None
         for a, b, c, d in reshape(list(args), 4):
-            _angle = ((d.num - c.num).angle() - (b.num - a.num).angle()) % np.pi
+            _angle = (
+                segment_angle(d.num.x - c.num.x, d.num.y - c.num.y)
+                - segment_angle(b.num.x - a.num.x, b.num.y - a.num.y)
+            ) % np.pi
             if close_enough(_angle, np.pi):
                 _angle = 0.0
             if angle is not None and not close_enough(angle, _angle):

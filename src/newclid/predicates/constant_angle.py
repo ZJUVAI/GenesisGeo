@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from matplotlib.axes import Axes
 
 from newclid.dependencies.symbols import Point
+from newclid.numerical.geometries import segment_angle
 from newclid.numerical import close_enough
 from newclid.predicates.predicate import Predicate
 from newclid.algebraic_reasoning.tables import Angle_Chase
@@ -18,6 +19,13 @@ if TYPE_CHECKING:
     from newclid.algebraic_reasoning.tables import SumCV
     from newclid.dependencies.dependency_graph import DependencyGraph
     from newclid.statement import Statement
+
+
+def _angle_between_segments(a: Point, b: Point, c: Point, d: Point) -> float:
+    return (
+        segment_angle(c.num.x - d.num.x, c.num.y - d.num.y)
+        - segment_angle(a.num.x - b.num.x, a.num.y - b.num.y)
+    ) % pi
 
 
 class ConstantAngle(Predicate):
@@ -61,9 +69,7 @@ class ConstantAngle(Predicate):
     def check_numerical(cls, statement: Statement) -> bool:
         args: tuple[Point, Point, Point, Point, Fraction] = statement.args
         a, b, c, d, y = args
-        return close_enough(
-            float(y) * pi, ((c.num - d.num).angle() - (a.num - b.num).angle()) % pi
-        )
+        return close_enough(float(y) * pi, _angle_between_segments(a, b, c, d))
 
     @classmethod
     def _prep_ar(cls, statement: Statement) -> tuple[list[SumCV], Table]:
@@ -152,7 +158,7 @@ class ACompute(Predicate):
     def check_numerical(cls, statement: Statement) -> bool:
         args: tuple[Point, Point, Point, Point] = statement.args
         a, b, c, d = args
-        ang = ((c.num - d.num).angle() - (a.num - b.num).angle()) % pi
+        ang = _angle_between_segments(a, b, c, d)
         if close_enough(ang, pi):
             ang = 0
         get_quotient(ang / pi)
@@ -162,7 +168,7 @@ class ACompute(Predicate):
     def why(cls, statement: Statement):
         args: tuple[Point, Point, Point, Point] = statement.args
         a, b, c, d = args
-        y = get_quotient(((c.num - d.num).angle() - (a.num - b.num).angle()) % pi / pi)
+        y = get_quotient(_angle_between_segments(a, b, c, d) / pi)
         dep = statement.with_new(ConstantAngle, (a, b, c, d, y)).why()
         return dep.with_new(statement) if dep else None
 
@@ -170,12 +176,12 @@ class ACompute(Predicate):
     def check(cls, statement: Statement) -> bool:
         args: tuple[Point, Point, Point, Point] = statement.args
         a, b, c, d = args
-        y = get_quotient(((c.num - d.num).angle() - (a.num - b.num).angle()) % pi / pi)
-        return statement.with_new(ConstantAngle, (a, b, c, d, y)).check()
+        y = get_quotient(_angle_between_segments(a, b, c, d) / pi)
+        return statement.with_new(ConstantAngle, (a, b, c, d, y)).check(explain=False)
 
     @classmethod
     def pretty(cls, statement: Statement) -> str:
         args: tuple[Point, Point, Point, Point] = statement.args
         a, b, c, d = args
-        y = get_quotient(((c.num - d.num).angle() - (a.num - b.num).angle()) % pi / pi)
+        y = get_quotient(_angle_between_segments(a, b, c, d) / pi)
         return f"∠({a.pretty_name}{b.pretty_name},{c.pretty_name}{d.pretty_name}) = {fraction_to_angle(y)}"

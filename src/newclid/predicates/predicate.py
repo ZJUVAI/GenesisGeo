@@ -1,5 +1,7 @@
 from __future__ import annotations
 from abc import ABC
+from functools import lru_cache
+from operator import attrgetter
 from typing import TYPE_CHECKING, Any, Optional
 from numpy.random import Generator
 from fractions import Fraction
@@ -10,6 +12,9 @@ if TYPE_CHECKING:
     from newclid.dependencies.dependency import Dependency
     from newclid.dependencies.dependency_graph import DependencyGraph
     from newclid.statement import Statement
+
+
+_point_name = attrgetter("name")
 
 
 class Predicate(ABC):
@@ -60,11 +65,11 @@ class Predicate(ABC):
 
     @classmethod
     def to_repr(cls, statement: Statement) -> str:
-        res = cls.NAME + "["
-        for a in statement.args:
-            res += repr(a) + ","
-        res += "]"
-        return res
+        args = statement.args
+        if not args:
+            return cls.NAME + "[]"
+        get_arg_text = _point_name if cls.NAME in ("eqangle", "eqratio") else repr
+        return cls.NAME + "[" + ",".join(map(get_arg_text, args)) + ",]"
 
     @classmethod
     def to_str(cls, statement: Statement) -> str:
@@ -98,10 +103,11 @@ class Predicate(ABC):
         draw_annotations: bool = True,
     ): ...
 
-    @classmethod
-    def custom_key(cls, s):
+    @staticmethod
+    @lru_cache(maxsize=1024)
+    def custom_key(s):
         if len(s) == 1:
-            return ord(s[0]) - ord("a")
+            return ord(s) - ord("a")
         return (int(s[1:]) + 1) * 26 + ord(s[0]) - ord("a")
 
     @classmethod
