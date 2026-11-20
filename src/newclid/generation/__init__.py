@@ -21,7 +21,6 @@ from newclid.generation.sampler import ProblemSampler
 from newclid.generation.filter import GoalFilter
 from newclid.generation.statistics import Statistics, get_first_predicate
 from newclid.generation.worker import ProblemWorker
-from newclid.generation.pipeline import ProblemPipeline
 
 __all__ = [
     # Core public API
@@ -33,3 +32,11 @@ __all__ = [
     "Statistics",
     "get_first_predicate",
 ]
+
+
+def __getattr__(name):
+    if name == "ProblemPipeline":
+        from newclid.generation.pipeline import ProblemPipeline
+
+        return ProblemPipeline
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -19,7 +19,6 @@ import signal
 from contextlib import contextmanager
 from collections import defaultdict
 from functools import cache
-import ray
 import numpy as np
 
 from newclid.generation.sampler import ProblemSampler
@@ -163,7 +162,7 @@ class ProblemWorker:
     # possible_goals 很大时（如 on_aline 派生出的大量 eqangle）尝试次数暴涨。
     REVERSE_RECON_MAX_ATTEMPTS_PER_PROBLEM = 20
 
-    @ray.remote(num_cpus=1, max_retries=0)
+    @staticmethod
     def ray_process_single_problem(args):
         try:
             return ProblemWorker._process_single_problem(args)

@@ -19,7 +19,9 @@ from newclid.generation.worker import ProblemWorker
 from newclid.generation.writer import Writer
 from newclid.discovery.utils.rule_parser import to_pipe_format
 
-# logging.basicConfig(level=logging.DEBUG, force=True)
+_process_problem_remote = ray.remote(num_cpus=1, max_retries=0)(
+    ProblemWorker.ray_process_single_problem
+)
 
 
 class ProblemPipeline:
@@ -380,9 +382,7 @@ class ProblemPipeline:
             while len(pending_tasks) < max_pending:
                 task_args = next(task_iterator)
                 seed = task_args[1]
-                pending_tasks[
-                    ProblemWorker.ray_process_single_problem.remote(task_args)
-                ] = (
+                pending_tasks[_process_problem_remote.remote(task_args)] = (
                     time.time(),
                     seed,
                 )
@@ -445,8 +445,11 @@ def load_custom_rules(rules_path: str | None) -> list[str] | None:
                 guards_list.append("")
 
     return [
-        to_pipe_format(f"custom_{i:05d}", rule_texts[i],
-                       guards=guards_list[i] if i < len(guards_list) else "")
+        to_pipe_format(
+            f"custom_{i:05d}",
+            rule_texts[i],
+            guards=guards_list[i] if i < len(guards_list) else "",
+        )
         for i in range(len(rule_texts))
     ]
 
@@ -658,7 +661,9 @@ def main():
         custom_rules_path=args.custom_rules_path,
     )
     write_cli_args(
-        os.path.join(generator.writer.output_dir, generator.file_prefix + "_params.json"),
+        os.path.join(
+            generator.writer.output_dir, generator.file_prefix + "_params.json"
+        ),
         args,
     )
     generator.generate()
