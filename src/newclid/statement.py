@@ -107,7 +107,7 @@ class Statement:
         if tokens in dep_graph.token_statement:
             return dep_graph.token_statement[tokens]
 
-        parsed = pred.parse_preparsed(preparsed, dep_graph)
+        parsed = pred.parse(tokens[1:], dep_graph)
         if not parsed:
             dep_graph.token_statement[tokens] = None
             return None
