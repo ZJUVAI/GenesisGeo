@@ -17,6 +17,12 @@ TRAINING_INPUTS = ROOT / "benchmarks" / "ddar-pgo-inputs.jsonl.gz"
 
 
 class DDARBuildCommand(build_ext):
+    def copy_extensions_to_source(self):
+        build_py = self.get_finalized_command("build_py")
+        package = DDAR.rsplit(".", 1)[0]
+        Path(build_py.get_package_dir(package)).mkdir(parents=True, exist_ok=True)
+        super().copy_extensions_to_source()
+
     def build_extension(self, ext):
         if ext.name != DDAR:
             return super().build_extension(ext)
