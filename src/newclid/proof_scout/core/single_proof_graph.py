@@ -10,6 +10,7 @@ SingleProofGraph: 单题目证明图
 
 不引入新依赖；仅继承并复用 ProofGraph 的解析逻辑。
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
@@ -28,11 +29,14 @@ class SingleProofGraph(ProofGraph):
     def __init__(self, *, verbose: bool = False) -> None:
         # 复用父类实现；当非 verbose 时，将日志级别提升为 WARNING，屏蔽 info 级输出
         from logging import INFO, WARNING
+
         super().__init__(verbose=verbose, log_level=(INFO if verbose else WARNING))
         self._single_problem_id: Optional[str] = None
 
     @classmethod
-    def build_from_result_record(cls, result_obj: Dict[str, Any], *, verbose: bool = False) -> "SingleProofGraph":
+    def build_from_result_record(
+        cls, result_obj: Dict[str, Any], *, verbose: bool = False
+    ) -> "SingleProofGraph":
         """从 results[*] 的一条记录构建单题图。
 
         要求：result_obj 至少包含 problem_id 与 proof 三段文本（字典或字符串，沿用父类解析）。

@@ -15,7 +15,7 @@ GenesisGeo is a neuro-symbolic system that proves geometry theorems by combining
 **Highlights:**
 
 - Synthetic data generation pipeline producing **1 million** multimodal geometry problems with diagrams and machine-checkable proof traces
-- Enhanced DDAR engine with **~20x** speedup over the AlphaGeometry engine
+- Enhanced DDAR engine with **~750x** speedup over the AlphaGeometry engine
 - Neuro-symbolic prover fine-tuned from **Qwen3-VL-2B**
 
 ## Results
@@ -28,6 +28,25 @@ GenesisGeo is a neuro-symbolic system that proves geometry theorems by combining
 Paper-reported results with a 32 × 512 × 4 search budget and a
 60-minute time limit per problem.
 
+### Symbolic Engine performance on IMO-30
+
+The table shows mean times for the 10 problems. The final row sums the mean times
+and speedups relative to AlphaGeometry.
+
+| IMO-30 problem | AlphaGeometry DDAR | Newclid C++ (Yuclid) | GenesisGeo C++ DDAR |
+|---|---:|---:|---:|
+| 2003 P4 | 32.427 s | 188.59 ms | 20.80 ms |
+| 2013 P4 | 16.023 s | 87.18 ms | 13.45 ms |
+| 2015 P4 | 28.299 s | 298.21 ms | 24.28 ms |
+| 2010 P4 | 13.321 s | 85.17 ms | 11.61 ms |
+| 2002 P2a | 16.051 s | 100.45 ms | 20.34 ms |
+| 2000 P1 | 19.591 s | 170.07 ms | 25.46 ms |
+| 2005 P5 | 15.975 s | 177.11 ms | 22.16 ms |
+| 2012 P1 | 22.734 s | 178.32 ms | 44.56 ms |
+| 2016 P1 | 47.596 s | 1,020.74 ms | 95.92 ms |
+| 2022 P4 | 3.943 s | 40.85 ms | 8.07 ms |
+| **Total** | **215.960 s (1.00×)** | **2.347 s (92.03×)** | **0.287 s (753.39×)** |
+
 ## Setup
 
 ```bash
@@ -38,12 +57,12 @@ source .venv/bin/activate
 uv sync --extra full
 ```
 
-With Python 3.10 and a C++ compiler, `pip install .` builds DDAR into the
-wheel. GCC builds try profile-guided optimization (PGO) using a fixed workload
-derived from JGEX, IMO30, and HAGeo409. If profile collection or the optimized
-build fails, installation builds ordinary Release instead. To skip profiling,
-run `PGO=0 pip install .`. The installed
-`newclid.DDAR.build.DDAR.build_variant` reports `pgo` or `release`.
+`uv sync --extra full` builds DDAR in Release mode by default. To rebuild
+with profile-guided optimization (PGO) using GCC, run:
+
+```bash
+PGO=1 uv sync --extra full --reinstall-package newclid
+```
 
 ## Data Generation
 

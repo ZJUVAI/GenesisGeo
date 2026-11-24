@@ -12,12 +12,12 @@ FilterAndPruneEngine
 
 不引入新依赖；复用 data_discovery 中现有类。
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import re
-import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import hashlib
@@ -108,7 +108,9 @@ def _record_dedup_key(rec: Dict[str, Any]) -> Optional[str]:
         return None
 
 
-def _dedup_by_question_and_aux(records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def _dedup_by_question_and_aux(
+    records: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """对 records 进行基于(题干+aux)的哈希去重。
     - 缺关键字段或解析异常的样本不参与去重（视为独特，直接保留）。
     - 返回 (去重后的列表, 统计信息)。
@@ -163,11 +165,11 @@ def _extract_coords_from_fl_problem(fl_problem: str) -> dict:
     coords = {}
     # 匹配 word@float_float 格式（坐标可为负数和科学计数法）
     pattern = re.compile(
-        r'\b([A-Za-z][A-Za-z0-9]*)'   # 点名
-        r'@'
-        r'(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)'  # x 坐标
-        r'_'
-        r'(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)'  # y 坐标
+        r"\b([A-Za-z][A-Za-z0-9]*)"  # 点名
+        r"@"
+        r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"  # x 坐标
+        r"_"
+        r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"  # y 坐标
     )
     for m in pattern.finditer(fl_problem or ""):
         name, x, y = m.group(1), m.group(2), m.group(3)
@@ -186,7 +188,9 @@ def _sanitize_basename(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9_\-]+", "_", stem)
 
 
-def _convert_llm_record(record: Dict[str, Any], base: str, index: int) -> Dict[str, Any]:
+def _convert_llm_record(
+    record: Dict[str, Any], base: str, index: int
+) -> Dict[str, Any]:
     llm_input = record.get("llm_input_renamed", "")
     llm_output = record.get("llm_output_renamed", "")
 
@@ -200,7 +204,9 @@ def _convert_llm_record(record: Dict[str, Any], base: str, index: int) -> Dict[s
     aux_section = _extract_tag_content(llm_output, "aux")
     analysis_segments.extend(_extract_fact_segments(aux_section))
     analysis = "; ".join(analysis_segments)
-    numerical = _sanitize_clause_section(_extract_tag_content(llm_output, "numerical_check"))
+    numerical = _sanitize_clause_section(
+        _extract_tag_content(llm_output, "numerical_check")
+    )
     trivial = _sanitize_clause_section(_extract_tag_content(llm_output, "trivial"))
     if trivial:
         numerical = f"{numerical}; {trivial}" if numerical else trivial
@@ -276,10 +282,18 @@ def _normalize_input_object(path: Path) -> Dict[str, Any]:
     raise ValueError("输入文件必须为 JSON 对象或数组（新格式）")
 
 
-def _combine_pngs_h(left_png: Path, right_png: Path, out_png: Path, *, title: Optional[str] = None, subtitle: Optional[str] = None) -> str:
+def _combine_pngs_h(
+    left_png: Path,
+    right_png: Path,
+    out_png: Path,
+    *,
+    title: Optional[str] = None,
+    subtitle: Optional[str] = None,
+) -> str:
     """将两张 PNG 水平合并为一张，并在子图上方标注标题与副标题。"""
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.image as mpimg
@@ -304,7 +318,15 @@ def _combine_pngs_h(left_png: Path, right_png: Path, out_png: Path, *, title: Op
         fig.suptitle(title, fontsize=12)
     if subtitle:
         sub = subtitle if len(subtitle) <= 220 else (subtitle[:217] + "...")
-        fig.text(0.5, 0.015, "proposition w/o aux: " + sub, ha='center', va='bottom', fontsize=11, bbox=dict(boxstyle='round', fc='white', ec='#999999', alpha=0.85))
+        fig.text(
+            0.5,
+            0.015,
+            "proposition w/o aux: " + sub,
+            ha="center",
+            va="bottom",
+            fontsize=11,
+            bbox=dict(boxstyle="round", fc="white", ec="#999999", alpha=0.85),
+        )
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout(rect=(0, 0.03, 1, 0.96))
@@ -322,6 +344,7 @@ def _combine_pngs_h(left_png: Path, right_png: Path, out_png: Path, *, title: Op
 # - _build_proposition_no_aux: (Step 1d) extract premises/conclusion from pruned graph
 # - _worker_prune: (Step 1c) build + prune proof graph for one record
 # ==============================================================================
+
 
 def _parse_args_from_label(raw_label: str) -> List[str]:
     try:
@@ -344,7 +367,7 @@ def _alpha_seq(n: int) -> str:
     letters: List[str] = []
     while True:
         n, r = divmod(n, 26)
-        letters.append(chr(ord('a') + r))
+        letters.append(chr(ord("a") + r))
         if n == 0:
             break
         n -= 1
@@ -396,7 +419,11 @@ def _to_rule_text(premises: List[str], conclusion: str) -> Tuple[str, Dict[str, 
 
     prem_txts = [_fmt(n, a) for (n, a) in parsed_prems]
     concl_txt = _fmt(cn, ca)
-    rule_text = (", ".join(prem_txts) + " => " + concl_txt) if prem_txts else ("=> " + concl_txt)
+    rule_text = (
+        (", ".join(prem_txts) + " => " + concl_txt)
+        if prem_txts
+        else ("=> " + concl_txt)
+    )
     return rule_text, rename
 
 
@@ -412,7 +439,9 @@ def _parse_clause(clause: str) -> Tuple[str, List[str]]:
     return tokens[0], tokens[1:]
 
 
-def _split_rule_text(rule_text: str) -> Tuple[List[Tuple[str, List[str]]], Tuple[str, List[str]]]:
+def _split_rule_text(
+    rule_text: str,
+) -> Tuple[List[Tuple[str, List[str]]], Tuple[str, List[str]]]:
     if not isinstance(rule_text, str):
         return [], ("", [])
     if "=>" in rule_text:
@@ -483,7 +512,9 @@ def _pid_to_rid(pid: str) -> str:
     return pid_str
 
 
-def _build_proposition_no_aux(rendered: Dict[str, Any], aux_points: List[str]) -> Optional[Dict[str, Any]]:
+def _build_proposition_no_aux(
+    rendered: Dict[str, Any], aux_points: List[str]
+) -> Optional[Dict[str, Any]]:
     """Step 1d helper: extract proposition (premises + conclusion) from a pruned proof graph.
 
     1. Identify fact nodes (type=="fact") in the pruned graph.
@@ -518,7 +549,11 @@ def _build_proposition_no_aux(rendered: Dict[str, Any], aux_points: List[str]) -
             kept_premises.append(raw_label)
 
     concl_label = str(fact_nodes[concl_ids[0]].get("label", ""))
-    text = (", ".join(kept_premises) + " -> " + concl_label) if kept_premises else ("-> " + concl_label)
+    text = (
+        (", ".join(kept_premises) + " -> " + concl_label)
+        if kept_premises
+        else ("-> " + concl_label)
+    )
     return {"premises": kept_premises, "conclusion": concl_label, "text": text}
 
 
@@ -538,6 +573,7 @@ def _worker_prune(rec: Dict[str, Any]) -> Tuple[str, Any]:
         # 延迟导入，降低主进程依赖
         from newclid.proof_scout.core.graph_pruner import GraphPruner
         from newclid.proof_scout.core.single_proof_graph import SingleProofGraph
+
         pruner = GraphPruner()
         spg = SingleProofGraph.build_from_result_record(rec, verbose=False)
         rendered_list = pruner.prune_proof_graph(spg).get(pid, [])
@@ -547,6 +583,7 @@ def _worker_prune(rec: Dict[str, Any]) -> Tuple[str, Any]:
 
 
 # ========================= Streaming helpers =========================
+
 
 def _stream_jsonl_chunks(
     path: Path, chunk_size: int = 10000
@@ -600,6 +637,7 @@ def _ray_prune_chunk_bounded(
             pid = str(pid_val)
             from newclid.proof_scout.core.graph_pruner import GraphPruner
             from newclid.proof_scout.core.single_proof_graph import SingleProofGraph
+
             pruner = GraphPruner()
             spg = SingleProofGraph.build_from_result_record(rec, verbose=False)
             rendered_list = pruner.prune_proof_graph(spg).get(pid, [])
@@ -610,8 +648,7 @@ def _ray_prune_chunk_bounded(
     pending: Dict[Any, str] = {}  # ray ref -> pid
     results: Dict[str, List[Dict[str, Any]]] = {}
     rec_iter = iter(
-        r for r in records
-        if isinstance(r, dict) and r.get("problem_id") is not None
+        r for r in records if isinstance(r, dict) and r.get("problem_id") is not None
     )
 
     # Initial fill
@@ -668,7 +705,14 @@ def _worker_render_combined(
             td_path = _Path(td)
             left_png = td_path / f"left_{pid}.png"
             right_png = td_path / f"right_{pid}.png"
-            viz_left.render_problem(spg, pid, str(left_png), label_mode=label_mode, highlight=True, figsize=single_figsize)
+            viz_left.render_problem(
+                spg,
+                pid,
+                str(left_png),
+                label_mode=label_mode,
+                highlight=True,
+                figsize=single_figsize,
+            )
             # 修剪图（附 aux_points）
             rendered2 = dict(rendered)
             aux_points = rec.get("aux_points") or []
@@ -687,15 +731,25 @@ def _worker_render_combined(
                 layout_nodesep=nodesep,
             )
             # 合图副标题优先使用规则文本
-            prop = _build_proposition_no_aux(rendered2, list(rec.get("aux_points") or []))
+            prop = _build_proposition_no_aux(
+                rendered2, list(rec.get("aux_points") or [])
+            )
             subtitle = None
             if isinstance(prop, dict):
                 try:
-                    rule_text, _ = _to_rule_text(prop.get("premises", []) or [], prop.get("conclusion", ""))
+                    rule_text, _ = _to_rule_text(
+                        prop.get("premises", []) or [], prop.get("conclusion", "")
+                    )
                     subtitle = rule_text
                 except Exception:
                     subtitle = prop.get("text")
-            _combine_pngs_h(left_png, right_png, _Path(out_png), title=f"Problem {pid}", subtitle=subtitle)
+            _combine_pngs_h(
+                left_png,
+                right_png,
+                _Path(out_png),
+                title=f"Problem {pid}",
+                subtitle=subtitle,
+            )
         return (pid, "ok")
     except Exception:
         return (str(rec.get("problem_id")), "failed")
@@ -753,7 +807,14 @@ class FilterAndPruneEngine:
         self.symmetry_config_path = symmetry_config_path
         self.skip_predicates = set()
         # self.skip_predicates = set(p.lower() for p in (skip_predicates if skip_predicates is not None else ["eqpoint", "constline"]))
-        self.rule_skip_predicates = set(p.lower() for p in (rule_skip_predicates if rule_skip_predicates is not None else ["aconst", "rconst"]))
+        self.rule_skip_predicates = set(
+            p.lower()
+            for p in (
+                rule_skip_predicates
+                if rule_skip_predicates is not None
+                else ["aconst", "rconst"]
+            )
+        )
         # 硬编码 19 个谓词的对称性配置（优先），外部 JSON 仅作覆盖
         self._symmetry_cfg: Dict[str, Any] = self._build_hardcoded_symmetry_config()
         if self.symmetry_config_path:
@@ -861,8 +922,14 @@ class FilterAndPruneEngine:
         }
 
     # --- 谓词对称性与规范化 ---
-    def _normalize_clause_by_symmetry(self, pred: str, args: List[str]) -> Tuple[str, Tuple[str, ...]]:
-        spec = self._symmetry_cfg.get(pred) if isinstance(self._symmetry_cfg, dict) else None
+    def _normalize_clause_by_symmetry(
+        self, pred: str, args: List[str]
+    ) -> Tuple[str, Tuple[str, ...]]:
+        spec = (
+            self._symmetry_cfg.get(pred)
+            if isinstance(self._symmetry_cfg, dict)
+            else None
+        )
         if not spec or not isinstance(spec, dict):
             return pred, tuple(args)
         kind = spec.get("kind")
@@ -895,12 +962,15 @@ class FilterAndPruneEngine:
             return pred, tuple(norm_args)
         return pred, tuple(args)
 
-    def _normalize_by_preparse(self, pred: str, args: List[str]) -> Tuple[str, Tuple[str, ...]]:
+    def _normalize_by_preparse(
+        self, pred: str, args: List[str]
+    ) -> Tuple[str, Tuple[str, ...]]:
         """Delegate to EqAngle.preparse() for eqangle/eqratio normalization."""
         if len(args) != 8:
             return pred, tuple(args)
         try:
             from newclid.predicates.equal_angles import EqAngle
+
             result = EqAngle.preparse(tuple(args))
             if result is None:
                 return pred, tuple(args)
@@ -908,7 +978,9 @@ class FilterAndPruneEngine:
         except Exception:
             return pred, tuple(args)
 
-    def _normalize_by_rotation(self, pred: str, args: List[str], spec: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
+    def _normalize_by_rotation(
+        self, pred: str, args: List[str], spec: Dict[str, Any]
+    ) -> Tuple[str, Tuple[str, ...]]:
         """Normalize predicates with rotation symmetry (contri, simtri, etc.)."""
         groups = spec.get("groups", [[0, 1, 2], [3, 4, 5]])
         allow_perm = bool(spec.get("allow_group_permutation", False))
@@ -928,7 +1000,11 @@ class FilterAndPruneEngine:
             g2_rots = [g2, [g2[1], g2[2], g2[0]], [g2[2], g2[0], g2[1]]]
         else:  # opposite
             g2_rev = g2[::-1]
-            g2_rots = [g2_rev, [g2_rev[1], g2_rev[2], g2_rev[0]], [g2_rev[2], g2_rev[0], g2_rev[1]]]
+            g2_rots = [
+                g2_rev,
+                [g2_rev[1], g2_rev[2], g2_rev[0]],
+                [g2_rev[2], g2_rev[0], g2_rev[1]],
+            ]
 
         candidates: List[Tuple[str, ...]] = []
         for r1 in g1_rots:
@@ -939,7 +1015,9 @@ class FilterAndPruneEngine:
 
         return pred, min(candidates)
 
-    def _normalize_sameside(self, pred: str, args: List[str]) -> Tuple[str, Tuple[str, ...]]:
+    def _normalize_sameside(
+        self, pred: str, args: List[str]
+    ) -> Tuple[str, Tuple[str, ...]]:
         """Normalize sameside: [a][bc][d][ef], pair (a,bc)<->(d,ef) swappable, bc/ef swappable."""
         if len(args) != 6:
             return pred, tuple(args)
@@ -952,7 +1030,9 @@ class FilterAndPruneEngine:
         cand2 = tuple([d] + ef + [a] + bc)
         return pred, min(cand1, cand2)
 
-    def _normalize_swap_pairs_const(self, pred: str, args: List[str], spec: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
+    def _normalize_swap_pairs_const(
+        self, pred: str, args: List[str], spec: Dict[str, Any]
+    ) -> Tuple[str, Tuple[str, ...]]:
         """Normalize aconst/rconst: [ab][cd][const], ab/cd groups swappable, constant stays."""
         groups = spec.get("groups", [[0, 1], [2, 3]])
         allow_perm = bool(spec.get("allow_group_permutation", False))
@@ -1065,7 +1145,9 @@ class FilterAndPruneEngine:
             return []
 
         eqpoint_pairs: List[Tuple[str, str]] = []
-        pattern = re.compile(r'\beqpoint\s+([A-Za-z][A-Za-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_]*)\s+\[\d+\]')
+        pattern = re.compile(
+            r"\beqpoint\s+([A-Za-z][A-Za-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_]*)\s+\[\d+\]"
+        )
         for match in pattern.finditer(proof_text):
             p1, p2 = match.group(1), match.group(2)
             eqpoint_pairs.append((p1, p2))
@@ -1086,7 +1168,9 @@ class FilterAndPruneEngine:
         return mapped
 
     @staticmethod
-    def _build_equivalence_classes(eqpoint_pairs: List[Tuple[str, str]]) -> Dict[str, str]:
+    def _build_equivalence_classes(
+        eqpoint_pairs: List[Tuple[str, str]],
+    ) -> Dict[str, str]:
         """Build point equivalence classes via Union-Find.
 
         Returns: mapping from every point to its representative (lexicographically smallest).
@@ -1114,7 +1198,9 @@ class FilterAndPruneEngine:
 
         return {pt: find(pt) for pt in parent}
 
-    def _generate_merged_rule(self, rule_text: str, eqpoint_pairs: List[Tuple[str, str]]) -> str:
+    def _generate_merged_rule(
+        self, rule_text: str, eqpoint_pairs: List[Tuple[str, str]]
+    ) -> str:
         """Generate a rule variant with eqpoint-equivalent points merged."""
         if not eqpoint_pairs:
             return rule_text
@@ -1131,11 +1217,7 @@ class FilterAndPruneEngine:
         left_str = ", ".join(
             f"{n} " + " ".join(a) if a else n for n, a in new_left if n
         )
-        right_str = (
-            f"{new_right[0]} " + " ".join(new_right[1])
-            if new_right[0]
-            else ""
-        )
+        right_str = f"{new_right[0]} " + " ".join(new_right[1]) if new_right[0] else ""
         if left_str and right_str:
             return f"{left_str} => {right_str}"
         if right_str:
@@ -1181,7 +1263,9 @@ class FilterAndPruneEngine:
             right_norm_clause = self._normalize_clause_by_symmetry(rn, map_args(ra))
 
         # 前提子句排序（字典序）
-        left_norm_clauses.sort(key=lambda nc: f"{nc[0]} " + " ".join(nc[1]) if nc[1] else nc[0])
+        left_norm_clauses.sort(
+            key=lambda nc: f"{nc[0]} " + " ".join(nc[1]) if nc[1] else nc[0]
+        )
 
         # Step 3.5: 根据排序后的点出现顺序重新命名
         final_seq: List[str] = []
@@ -1195,16 +1279,24 @@ class FilterAndPruneEngine:
             collect_final(a)
         collect_final(right_norm_clause[1])
 
-        final_rename: Dict[str, str] = {old: _alpha_seq(i) for i, old in enumerate(final_seq)}
+        final_rename: Dict[str, str] = {
+            old: _alpha_seq(i) for i, old in enumerate(final_seq)
+        }
 
         def final_map_args(args: Tuple[str, ...]) -> Tuple[str, ...]:
-            return tuple(final_rename.get(a, a) if _is_point_token(a) else a for a in args)
+            return tuple(
+                final_rename.get(a, a) if _is_point_token(a) else a for a in args
+            )
 
         left_norm_clauses = [(n, final_map_args(a)) for n, a in left_norm_clauses]
         right_norm_clause = (right_norm_clause[0], final_map_args(right_norm_clause[1]))
 
         left_texts = [f"{n} " + " ".join(a) if a else n for (n, a) in left_norm_clauses]
-        right_text = f"{right_norm_clause[0]} " + " ".join(right_norm_clause[1]) if right_norm_clause[0] else ""
+        right_text = (
+            f"{right_norm_clause[0]} " + " ".join(right_norm_clause[1])
+            if right_norm_clause[0]
+            else ""
+        )
         if left_texts and right_text:
             return ", ".join(left_texts) + " => " + right_text
         if right_text:
@@ -1212,7 +1304,9 @@ class FilterAndPruneEngine:
         return ", ".join(left_texts)
 
     # --- Step 4: Normalization ---
-    def _normalize_rules(self, results: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int, List[Tuple[str, List[str], str]]]:
+    def _normalize_rules(
+        self, results: List[Dict[str, Any]]
+    ) -> Tuple[List[Dict[str, Any]], int, List[Tuple[str, List[str], str]]]:
         """Step 4: Normalize rules — missing_points check + canonicalize + signature.
 
         Returns: (normalized_rules, n_skipped, skipped_entries)
@@ -1247,25 +1341,29 @@ class FilterAndPruneEngine:
             if not norm:
                 continue
 
-            normalized_rules.append({
-                "pid": str(rec.get("problem_id", "<unknown>")),
-                "seed": rec.get("seed"),
-                "original": rule,
-                "normalized": norm,
-                "llm_input_renamed": rec.get("llm_input_renamed", ""),
-                "llm_output_renamed": rec.get("llm_output_renamed", ""),
-                "point_coords": rec.get("point_coords", {}),
-                "eqpoint_original": rec.get("eqpoint_original"),
-                "eqpoint_mapped": rec.get("eqpoint_mapped"),
-                "proposition_rule_merged": rec.get("proposition_rule_merged"),
-            })
+            normalized_rules.append(
+                {
+                    "pid": str(rec.get("problem_id", "<unknown>")),
+                    "seed": rec.get("seed"),
+                    "original": rule,
+                    "normalized": norm,
+                    "llm_input_renamed": rec.get("llm_input_renamed", ""),
+                    "llm_output_renamed": rec.get("llm_output_renamed", ""),
+                    "point_coords": rec.get("point_coords", {}),
+                    "eqpoint_original": rec.get("eqpoint_original"),
+                    "eqpoint_mapped": rec.get("eqpoint_mapped"),
+                    "proposition_rule_merged": rec.get("proposition_rule_merged"),
+                }
+            )
 
         # Generate signatures
         for item in normalized_rules:
             item["signature"] = self._signature_from_normalized_rule(item["normalized"])
 
-        print(f"[Step 4: normalization] input={skipped + len(normalized_rules)} "
-              f"normalized={len(normalized_rules)} skipped={skipped}")
+        print(
+            f"[Step 4: normalization] input={skipped + len(normalized_rules)} "
+            f"normalized={len(normalized_rules)} skipped={skipped}"
+        )
         return normalized_rules, skipped, skipped_entries
 
     # --- Step 5: Deduplication ---
@@ -1302,19 +1400,21 @@ class FilterAndPruneEngine:
 
             if norm_hash not in seen_hashes:
                 seen_hashes[norm_hash] = item
-                entries.append({
-                    "rid": _pid_to_rid(item["pid"]),
-                    "norm_rule": item["normalized"],
-                    "rule": item["original"],
-                    "pid": item["pid"],
-                    "seed": item.get("seed"),
-                    "llm_input_renamed": item.get("llm_input_renamed", ""),
-                    "llm_output_renamed": item.get("llm_output_renamed", ""),
-                    "point_coords": item.get("point_coords", {}),
-                    "eqpoint_original": item.get("eqpoint_original"),
-                    "eqpoint_mapped": item.get("eqpoint_mapped"),
-                    "proposition_rule_merged": item.get("proposition_rule_merged"),
-                })
+                entries.append(
+                    {
+                        "rid": _pid_to_rid(item["pid"]),
+                        "norm_rule": item["normalized"],
+                        "rule": item["original"],
+                        "pid": item["pid"],
+                        "seed": item.get("seed"),
+                        "llm_input_renamed": item.get("llm_input_renamed", ""),
+                        "llm_output_renamed": item.get("llm_output_renamed", ""),
+                        "point_coords": item.get("point_coords", {}),
+                        "eqpoint_original": item.get("eqpoint_original"),
+                        "eqpoint_mapped": item.get("eqpoint_mapped"),
+                        "proposition_rule_merged": item.get("proposition_rule_merged"),
+                    }
+                )
             else:
                 # Track duplicates
                 if norm_hash not in norm_dup_map:
@@ -1322,8 +1422,10 @@ class FilterAndPruneEngine:
                     norm_dup_map[norm_hash] = [(first["pid"], first["original"])]
                 norm_dup_map[norm_hash].append((item["pid"], item["original"]))
 
-        print(f"[Step 5: deduplication] input={len(normalized_rules)} "
-              f"unique={len(entries)} duplicates={len(normalized_rules) - len(entries)}")
+        print(
+            f"[Step 5: deduplication] input={len(normalized_rules)} "
+            f"unique={len(entries)} duplicates={len(normalized_rules) - len(entries)}"
+        )
         return entries, norm_dup_map
 
     # --- Step 6: Rule dump ---
@@ -1346,7 +1448,13 @@ class FilterAndPruneEngine:
                 rule_lower = e["norm_rule"].lower()
                 matched = [p for p in self.rule_skip_predicates if p in rule_lower]
                 if matched:
-                    skipped_by_pred.append({"rid": e["rid"], "rule": e["norm_rule"], "matched_predicates": matched})
+                    skipped_by_pred.append(
+                        {
+                            "rid": e["rid"],
+                            "rule": e["norm_rule"],
+                            "matched_predicates": matched,
+                        }
+                    )
                 else:
                     final_entries.append(e)
         else:
@@ -1377,7 +1485,9 @@ class FilterAndPruneEngine:
 
         # Write skipped rules (missing points)
         if self.print_skipped_rules and skipped_entries:
-            skipped_path = pruned_path.with_name(pruned_path.stem + "_rules_skipped.txt")
+            skipped_path = pruned_path.with_name(
+                pruned_path.stem + "_rules_skipped.txt"
+            )
             out_lines: List[str] = []
             for spid, miss, srule in skipped_entries:
                 out_lines.append(f"pid={spid} missing_points={miss}")
@@ -1386,25 +1496,38 @@ class FilterAndPruneEngine:
             with open(skipped_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(out_lines) + ("\n" if out_lines else ""))
 
-        print(f"[Step 6: rule dump] wrote {len(final_entries)} rules to {rules_path}"
-              f" (skipped_predicates={len(skipped_by_pred)}"
-              f"{' rule_skip_predicates=' + str(sorted(self.rule_skip_predicates)) if skipped_by_pred else ''})")
+        print(
+            f"[Step 6: rule dump] wrote {len(final_entries)} rules to {rules_path}"
+            f" (skipped_predicates={len(skipped_by_pred)}"
+            f"{' rule_skip_predicates=' + str(sorted(self.rule_skip_predicates)) if skipped_by_pred else ''})"
+        )
 
         # Write eqpoint-related outputs
         rules_with_eqpoint = [
-            e for e in final_entries
+            e
+            for e in final_entries
             if e.get("eqpoint_mapped") and len(e.get("eqpoint_mapped", [])) > 0
         ]
         if rules_with_eqpoint:
-            eqpoint_path = pruned_path.with_name(pruned_path.stem + "_rules_with_eqpoint.json")
+            eqpoint_path = pruned_path.with_name(
+                pruned_path.stem + "_rules_with_eqpoint.json"
+            )
             with open(eqpoint_path, "w", encoding="utf-8") as f:
-                json.dump([{
-                    "rid": e["rid"],
-                    "pid": e["pid"],
-                    "rule": e["norm_rule"],
-                    "eqpoint_mapped": e.get("eqpoint_mapped", []),
-                    "rule_merged": e.get("proposition_rule_merged", ""),
-                } for e in rules_with_eqpoint], f, ensure_ascii=False, indent=2)
+                json.dump(
+                    [
+                        {
+                            "rid": e["rid"],
+                            "pid": e["pid"],
+                            "rule": e["norm_rule"],
+                            "eqpoint_mapped": e.get("eqpoint_mapped", []),
+                            "rule_merged": e.get("proposition_rule_merged", ""),
+                        }
+                        for e in rules_with_eqpoint
+                    ],
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             # Write merged rules text
             merged_path = pruned_path.with_name(pruned_path.stem + "_rules_merged.txt")
@@ -1415,7 +1538,9 @@ class FilterAndPruneEngine:
             with open(merged_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(merged_lines) + ("\n" if merged_lines else ""))
 
-            print(f"[Step 6: eqpoint output] wrote {len(rules_with_eqpoint)} rules with eqpoint to {eqpoint_path}")
+            print(
+                f"[Step 6: eqpoint output] wrote {len(rules_with_eqpoint)} rules with eqpoint to {eqpoint_path}"
+            )
 
         return len(final_entries), len(skipped_by_pred), final_entries
 
@@ -1430,7 +1555,12 @@ class FilterAndPruneEngine:
         except Exception:
             return "prem:0|concl:0|"
 
-    def run(self, input_json: str | Path, output_dir: str | Path, save_intermediates: bool = False) -> Dict[str, Any]:
+    def run(
+        self,
+        input_json: str | Path,
+        output_dir: str | Path,
+        save_intermediates: bool = False,
+    ) -> Dict[str, Any]:
         """Run the complete filter-and-prune pipeline.
 
         Pipeline steps:
@@ -1461,7 +1591,8 @@ class FilterAndPruneEngine:
         total_results = len(src_results_all)
 
         from newclid.proof_scout.core.aux_extractor import AuxExtractor
-        aux_extractor = AuxExtractor()
+
+        AuxExtractor()
 
         src_results_kept = []
         dropped_no_aux = []
@@ -1477,46 +1608,85 @@ class FilterAndPruneEngine:
                 llm_out = (rec.get("llm_output_renamed") or "").lower()
                 matched_preds = [p for p in self.skip_predicates if p in llm_out]
                 if matched_preds:
-                    dropped_predicate.append({"record": rec, "matched_predicates": matched_preds})
+                    dropped_predicate.append(
+                        {"record": rec, "matched_predicates": matched_preds}
+                    )
                     continue
             src_results_kept.append(rec)
 
         kept = len(src_results_kept)
-        print(f"[Step 1: input filter] total={total_results} kept={kept} "
-              f"dropped_no_aux={len(dropped_no_aux)} dropped_predicate={len(dropped_predicate)}"
-              f"{' skip_predicates=' + str(sorted(self.skip_predicates)) if self.skip_predicates else ''}")
+        print(
+            f"[Step 1: input filter] total={total_results} kept={kept} "
+            f"dropped_no_aux={len(dropped_no_aux)} dropped_predicate={len(dropped_predicate)}"
+            f"{' skip_predicates=' + str(sorted(self.skip_predicates)) if self.skip_predicates else ''}"
+        )
 
         # Save intermediate: step 1
         if intermediates_dir:
-            kept_records = [{"problem_id": str(r.get("problem_id", "")),
-                            "aux_points": r.get("aux_points", []),
-                            "fl_problem": r.get("fl_problem", "")[:200]}
-                           for r in src_results_kept]
-            no_aux_records = [{"problem_id": str(r.get("problem_id", "")),
-                              "aux_points": r.get("aux_points", []),
-                              "fl_problem": r.get("fl_problem", "")[:200]}
-                             for r in dropped_no_aux]
-            pred_records = [{"problem_id": str(d["record"].get("problem_id", "")),
-                            "matched_predicates": d["matched_predicates"]}
-                           for d in dropped_predicate]
-            with open(intermediates_dir / "step1_input_filter.json", "w", encoding="utf-8") as f:
-                json.dump({"total": total_results, "kept": kept,
-                           "dropped_no_aux": len(dropped_no_aux),
-                           "dropped_predicate": len(dropped_predicate),
-                           "skip_predicates": sorted(self.skip_predicates) if self.skip_predicates else [],
-                           "kept_records": kept_records,
-                           "dropped_no_aux_records": no_aux_records,
-                           "dropped_predicate_records": pred_records}, f, ensure_ascii=False, indent=2)
+            kept_records = [
+                {
+                    "problem_id": str(r.get("problem_id", "")),
+                    "aux_points": r.get("aux_points", []),
+                    "fl_problem": r.get("fl_problem", "")[:200],
+                }
+                for r in src_results_kept
+            ]
+            no_aux_records = [
+                {
+                    "problem_id": str(r.get("problem_id", "")),
+                    "aux_points": r.get("aux_points", []),
+                    "fl_problem": r.get("fl_problem", "")[:200],
+                }
+                for r in dropped_no_aux
+            ]
+            pred_records = [
+                {
+                    "problem_id": str(d["record"].get("problem_id", "")),
+                    "matched_predicates": d["matched_predicates"],
+                }
+                for d in dropped_predicate
+            ]
+            with open(
+                intermediates_dir / "step1_input_filter.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(
+                    {
+                        "total": total_results,
+                        "kept": kept,
+                        "dropped_no_aux": len(dropped_no_aux),
+                        "dropped_predicate": len(dropped_predicate),
+                        "skip_predicates": sorted(self.skip_predicates)
+                        if self.skip_predicates
+                        else [],
+                        "kept_records": kept_records,
+                        "dropped_no_aux_records": no_aux_records,
+                        "dropped_predicate_records": pred_records,
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         if kept <= 0:
-            return {"total": total_results, "kept": 0, "dropped": total_results - kept, "rendered": 0, "skipped": 0, "failed": 0}
+            return {
+                "total": total_results,
+                "kept": 0,
+                "dropped": total_results - kept,
+                "rendered": 0,
+                "skipped": 0,
+                "failed": 0,
+            }
 
         # Update normalized_obj with filtered results for downstream steps
         aux_obj = dict(normalized_obj)
         aux_obj["results"] = src_results_kept
         src_results_for_prune = src_results_kept
 
-        pids = [str(r.get("problem_id")) for r in src_results_for_prune if isinstance(r, dict) and r.get("problem_id") is not None]
+        pids = [
+            str(r.get("problem_id"))
+            for r in src_results_for_prune
+            if isinstance(r, dict) and r.get("problem_id") is not None
+        ]
 
         # Build pid → source record index for later steps
         idx_src: Dict[str, Any] = {}
@@ -1536,7 +1706,11 @@ class FilterAndPruneEngine:
         if mw > 1:
             print(f"[Step 2: graph prune] parallel pruning with max_workers={mw}")
             with ProcessPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_worker_prune, rec) for rec in src_results_for_prune if isinstance(rec, dict) and rec.get("problem_id") is not None]
+                futs = [
+                    ex.submit(_worker_prune, rec)
+                    for rec in src_results_for_prune
+                    if isinstance(rec, dict) and rec.get("problem_id") is not None
+                ]
                 for pid, rendered_list in (f.result() for f in as_completed(futs)):
                     if rendered_list:
                         pruned_map[pid] = rendered_list
@@ -1578,26 +1752,49 @@ class FilterAndPruneEngine:
                     edges = rendered.get("edges", [])
                     fact_nodes = [n for n in nodes if n.get("type") == "fact"]
                     thm_nodes = [n for n in nodes if n.get("type") == "theorem"]
-                    pruned_records.append({"problem_id": sub_pid, "orig_pid": pid,
-                                           "n_subgraphs": len(rendered_list),
-                                           "n_nodes": len(nodes), "n_edges": len(edges),
-                                           "n_fact_nodes": len(fact_nodes), "n_theorem_nodes": len(thm_nodes)})
+                    pruned_records.append(
+                        {
+                            "problem_id": sub_pid,
+                            "orig_pid": pid,
+                            "n_subgraphs": len(rendered_list),
+                            "n_nodes": len(nodes),
+                            "n_edges": len(edges),
+                            "n_fact_nodes": len(fact_nodes),
+                            "n_theorem_nodes": len(thm_nodes),
+                        }
+                    )
             # Collect failed records with details
             for pid in failed_pids:
                 src_rec = idx_src.get(pid, {})
                 fl_problem = src_rec.get("fl_problem", "")
-                failed_records.append({
-                    "problem_id": pid,
-                    "fl_problem": fl_problem[:300],
-                    "aux_points": src_rec.get("aux_points", []),
-                    "reason": "Graph pruning failed (likely no valid proof structure)"
-                })
-            with open(intermediates_dir / "step2_graph_prune.json", "w", encoding="utf-8") as f:
-                json.dump({"input": len(pids), "pruned": pruned_count, "total_subgraphs": total_subgraphs,
-                           "failed": failed_count,
-                           "pruned_records": pruned_records, "failed_pids": failed_pids,
-                           "failed_records": failed_records}, f, ensure_ascii=False, indent=2)
-        print(f"[Step 2: graph prune] input={len(pids)} pruned={len(pruned_map)} subgraphs={sum(len(rl) for rl in pruned_map.values())} failed={len(pids)-len(pruned_map)}")
+                failed_records.append(
+                    {
+                        "problem_id": pid,
+                        "fl_problem": fl_problem[:300],
+                        "aux_points": src_rec.get("aux_points", []),
+                        "reason": "Graph pruning failed (likely no valid proof structure)",
+                    }
+                )
+            with open(
+                intermediates_dir / "step2_graph_prune.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(
+                    {
+                        "input": len(pids),
+                        "pruned": pruned_count,
+                        "total_subgraphs": total_subgraphs,
+                        "failed": failed_count,
+                        "pruned_records": pruned_records,
+                        "failed_pids": failed_pids,
+                        "failed_records": failed_records,
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        print(
+            f"[Step 2: graph prune] input={len(pids)} pruned={len(pruned_map)} subgraphs={sum(len(rl) for rl in pruned_map.values())} failed={len(pids) - len(pruned_map)}"
+        )
 
         # ================================================================
         # Step 3: Proposition extraction
@@ -1632,16 +1829,22 @@ class FilterAndPruneEngine:
                 base["llm_output_renamed"] = src.get("llm_output_renamed", "")
                 base["point_coords"] = src.get("point_coords", {})
                 base["seed"] = src.get("seed")
-                prop = _build_proposition_no_aux(rendered, list(base.get("aux_points", []) or []))
+                prop = _build_proposition_no_aux(
+                    rendered, list(base.get("aux_points", []) or [])
+                )
                 if prop:
                     base["proposition_no_aux"] = prop
                     try:
-                        rule_text, rename_map = _to_rule_text(prop.get("premises", []) or [], prop.get("conclusion", ""))
+                        rule_text, rename_map = _to_rule_text(
+                            prop.get("premises", []) or [], prop.get("conclusion", "")
+                        )
                         base["proposition_rule"] = rule_text
                         base["rename_map"] = rename_map
                         base["proposition_no_aux"]["rule_text"] = rule_text
                     except Exception:
-                        base["proposition_no_aux"].setdefault("rule_text", prop.get("text", ""))
+                        base["proposition_no_aux"].setdefault(
+                            "rule_text", prop.get("text", "")
+                        )
                 out_results.append(base)
 
         # Save intermediate: step 1d proposition extraction
@@ -1654,44 +1857,87 @@ class FilterAndPruneEngine:
             success_records = []
             fail_no_fact_records = []
             fail_multi_concl_records = []
-            out_pid_set = {r.get("problem_id") for r in out_results if r.get("proposition_no_aux")}
+            out_pid_set = {
+                r.get("problem_id") for r in out_results if r.get("proposition_no_aux")
+            }
             # Iterate over all sub_pids in flat_rendered_map
             for sub_pid, rendered in flat_rendered_map.items():
                 nodes = rendered.get("nodes", [])
                 edges = rendered.get("edges", [])
                 fact_nodes_d = [n for n in nodes if n.get("type") == "fact"]
                 if sub_pid in out_pid_set:
-                    rec_d = next((r for r in out_results if r.get("problem_id") == sub_pid), {})
+                    rec_d = next(
+                        (r for r in out_results if r.get("problem_id") == sub_pid), {}
+                    )
                     prop = rec_d.get("proposition_no_aux", {})
-                    success_records.append({
-                        "problem_id": sub_pid, "aux_points": rec_d.get("aux_points", []),
-                        "rule": rec_d.get("proposition_rule", ""),
-                        "premises": prop.get("premises", []),
-                        "conclusion": prop.get("conclusion", ""),
-                    })
+                    success_records.append(
+                        {
+                            "problem_id": sub_pid,
+                            "aux_points": rec_d.get("aux_points", []),
+                            "rule": rec_d.get("proposition_rule", ""),
+                            "premises": prop.get("premises", []),
+                            "conclusion": prop.get("conclusion", ""),
+                        }
+                    )
                 elif not fact_nodes_d:
                     no_fact += 1
-                    thm_labels = [n.get("label", "") for n in nodes if n.get("type") == "theorem"]
-                    fail_no_fact_records.append({"problem_id": sub_pid, "n_nodes": len(nodes),
-                                                  "theorem_labels": thm_labels[:10]})
+                    thm_labels = [
+                        n.get("label", "") for n in nodes if n.get("type") == "theorem"
+                    ]
+                    fail_no_fact_records.append(
+                        {
+                            "problem_id": sub_pid,
+                            "n_nodes": len(nodes),
+                            "theorem_labels": thm_labels[:10],
+                        }
+                    )
                 else:
                     indeg_c = {n.get("idx"): 0 for n in nodes}
                     outdeg_c = {n.get("idx"): 0 for n in nodes}
                     for u, v in edges:
                         outdeg_c[u] = outdeg_c.get(u, 0) + 1
                         indeg_c[v] = indeg_c.get(v, 0) + 1
-                    concl_ids = [n.get("idx") for n in fact_nodes_d if outdeg_c.get(n.get("idx"), 0) == 0]
-                    concl_labels = [str(fact_nodes_d[i].get("label", "")) for i, n in enumerate(fact_nodes_d) if n.get("idx") in concl_ids] if len(concl_ids) != 1 else []
+                    concl_ids = [
+                        n.get("idx")
+                        for n in fact_nodes_d
+                        if outdeg_c.get(n.get("idx"), 0) == 0
+                    ]
+                    concl_labels = (
+                        [
+                            str(fact_nodes_d[i].get("label", ""))
+                            for i, n in enumerate(fact_nodes_d)
+                            if n.get("idx") in concl_ids
+                        ]
+                        if len(concl_ids) != 1
+                        else []
+                    )
                     if len(concl_ids) != 1:
                         multi_concl += 1
-                        fail_multi_concl_records.append({"problem_id": sub_pid, "n_conclusions": len(concl_ids),
-                                                          "conclusion_labels": concl_labels[:5]})
-            with open(intermediates_dir / "step3_propositions.json", "w", encoding="utf-8") as f:
-                json.dump({"input": len(out_results), "has_proposition": has_prop, "has_rule": has_rule,
-                           "fail_no_fact_nodes": no_fact, "fail_multi_conclusion": multi_concl,
-                           "success_records": success_records,
-                           "fail_no_fact_records": fail_no_fact_records,
-                           "fail_multi_concl_records": fail_multi_concl_records}, f, ensure_ascii=False, indent=2)
+                        fail_multi_concl_records.append(
+                            {
+                                "problem_id": sub_pid,
+                                "n_conclusions": len(concl_ids),
+                                "conclusion_labels": concl_labels[:5],
+                            }
+                        )
+            with open(
+                intermediates_dir / "step3_propositions.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(
+                    {
+                        "input": len(out_results),
+                        "has_proposition": has_prop,
+                        "has_rule": has_rule,
+                        "fail_no_fact_nodes": no_fact,
+                        "fail_multi_conclusion": multi_concl,
+                        "success_records": success_records,
+                        "fail_no_fact_records": fail_no_fact_records,
+                        "fail_multi_concl_records": fail_multi_concl_records,
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         out_obj = {k: v for k, v in normalized_obj.items() if k != "results"}
         out_obj["results"] = out_results
@@ -1715,18 +1961,26 @@ class FilterAndPruneEngine:
             simplified_rule, was_simplified = self._simplify_trivial_predicates(rule)
             if was_simplified:
                 simplified_count += 1
-                simplification_records.append({
-                    "pid": rec.get("problem_id"),
-                    "original": rule,
-                    "simplified": simplified_rule,
-                })
+                simplification_records.append(
+                    {
+                        "pid": rec.get("problem_id"),
+                        "original": rule,
+                        "simplified": simplified_rule,
+                    }
+                )
                 rec["proposition_rule"] = simplified_rule
                 rec["was_simplified"] = True
 
-        print(f"[Step 3.5a: simplify predicates] simplified={simplified_count}/{len(out_results)}")
+        print(
+            f"[Step 3.5a: simplify predicates] simplified={simplified_count}/{len(out_results)}"
+        )
 
         if intermediates_dir and simplification_records:
-            with open(intermediates_dir / "step3.5a_simplified_predicates.json", "w", encoding="utf-8") as f:
+            with open(
+                intermediates_dir / "step3.5a_simplified_predicates.json",
+                "w",
+                encoding="utf-8",
+            ) as f:
                 json.dump(simplification_records, f, ensure_ascii=False, indent=2)
 
         # ================================================================
@@ -1761,39 +2015,57 @@ class FilterAndPruneEngine:
             rec["proposition_rule_merged"] = merged_rule
 
             eqpoint_count += 1
-            eqpoint_records.append({
-                "pid": rec.get("problem_id"),
-                "eqpoint_original": eqpoint_original,
-                "eqpoint_mapped": eqpoint_mapped,
-                "rule": rule,
-                "rule_merged": merged_rule,
-            })
+            eqpoint_records.append(
+                {
+                    "pid": rec.get("problem_id"),
+                    "eqpoint_original": eqpoint_original,
+                    "eqpoint_mapped": eqpoint_mapped,
+                    "rule": rule,
+                    "rule_merged": merged_rule,
+                }
+            )
 
-        print(f"[Step 3.5b: eqpoint analysis] rules_with_eqpoint={eqpoint_count}/{len(out_results)}")
+        print(
+            f"[Step 3.5b: eqpoint analysis] rules_with_eqpoint={eqpoint_count}/{len(out_results)}"
+        )
 
         if intermediates_dir and eqpoint_records:
-            with open(intermediates_dir / "step3.5b_eqpoint_analysis.json", "w", encoding="utf-8") as f:
+            with open(
+                intermediates_dir / "step3.5b_eqpoint_analysis.json",
+                "w",
+                encoding="utf-8",
+            ) as f:
                 json.dump(eqpoint_records, f, ensure_ascii=False, indent=2)
 
         # ================================================================
         # Step 4: Normalization
         # ================================================================
-        normalized_rules, skipped_rules, skipped_entries = self._normalize_rules(out_results)
+        normalized_rules, skipped_rules, skipped_entries = self._normalize_rules(
+            out_results
+        )
 
         # Save intermediate: step 4
         if intermediates_dir:
-            all_rules_raw = [r.get("proposition_rule", "") for r in out_results if r.get("proposition_rule")]
+            all_rules_raw = [
+                r.get("proposition_rule", "")
+                for r in out_results
+                if r.get("proposition_rule")
+            ]
 
             # Normalized rules JSON
             normalized_rules_json = []
             for item in normalized_rules:
-                normalized_rules_json.append({
-                    "pid": item["pid"],
-                    "original": item["original"],
-                    "normalized": item["normalized"],
-                    "signature": item.get("signature", ""),
-                })
-            with open(intermediates_dir / "step4_normalized_rules.json", "w", encoding="utf-8") as f:
+                normalized_rules_json.append(
+                    {
+                        "pid": item["pid"],
+                        "original": item["original"],
+                        "normalized": item["normalized"],
+                        "signature": item.get("signature", ""),
+                    }
+                )
+            with open(
+                intermediates_dir / "step4_normalized_rules.json", "w", encoding="utf-8"
+            ) as f:
                 json.dump(normalized_rules_json, f, ensure_ascii=False, indent=2)
 
             # Signature distribution
@@ -1801,7 +2073,11 @@ class FilterAndPruneEngine:
             for item in normalized_rules:
                 sig = item.get("signature", "")
                 sig_dist[sig] = sig_dist.get(sig, 0) + 1
-            with open(intermediates_dir / "step4_signature_distribution.json", "w", encoding="utf-8") as f:
+            with open(
+                intermediates_dir / "step4_signature_distribution.json",
+                "w",
+                encoding="utf-8",
+            ) as f:
                 json.dump(sig_dist, f, indent=2)
 
             # Predicate normalization samples
@@ -1813,21 +2089,34 @@ class FilterAndPruneEngine:
                     continue
                 left_parsed, right_parsed = _split_rule_text(rule)
                 for pred_name, pred_args in left_parsed:
-                    if not pred_name or pred_name in pred_samples and len(pred_samples[pred_name]) >= sample_limit:
+                    if (
+                        not pred_name
+                        or pred_name in pred_samples
+                        and len(pred_samples[pred_name]) >= sample_limit
+                    ):
                         continue
-                    _, norm_args = self._normalize_clause_by_symmetry(pred_name, list(pred_args))
+                    _, norm_args = self._normalize_clause_by_symmetry(
+                        pred_name, list(pred_args)
+                    )
                     if list(pred_args) != list(norm_args):
-                        pred_samples.setdefault(pred_name, []).append({
-                            "input": list(pred_args), "output": list(norm_args)
-                        })
+                        pred_samples.setdefault(pred_name, []).append(
+                            {"input": list(pred_args), "output": list(norm_args)}
+                        )
                 rn, ra = right_parsed
-                if rn and (rn not in pred_samples or len(pred_samples.get(rn, [])) < sample_limit):
+                if rn and (
+                    rn not in pred_samples
+                    or len(pred_samples.get(rn, [])) < sample_limit
+                ):
                     _, norm_args = self._normalize_clause_by_symmetry(rn, list(ra))
                     if list(ra) != list(norm_args):
-                        pred_samples.setdefault(rn, []).append({
-                            "input": list(ra), "output": list(norm_args)
-                        })
-            with open(intermediates_dir / "step4_predicate_normalization_samples.json", "w", encoding="utf-8") as f:
+                        pred_samples.setdefault(rn, []).append(
+                            {"input": list(ra), "output": list(norm_args)}
+                        )
+            with open(
+                intermediates_dir / "step4_predicate_normalization_samples.json",
+                "w",
+                encoding="utf-8",
+            ) as f:
                 json.dump(pred_samples, f, ensure_ascii=False, indent=2)
 
         # ================================================================
@@ -1843,33 +2132,49 @@ class FilterAndPruneEngine:
                 # Find the normalized form from the first entry
                 norm_form = ""
                 for e in rule_entries:
-                    h = hashlib.sha256(e.get("norm_rule", "").encode("utf-8")).hexdigest()
+                    h = hashlib.sha256(
+                        e.get("norm_rule", "").encode("utf-8")
+                    ).hexdigest()
                     if h == norm_hash:
                         norm_form = e.get("norm_rule", "")
                         break
-                dedup_groups.append({
-                    "hash": norm_hash[:16],
-                    "normalized": norm_form,
-                    "count": len(lst),
-                    "rules": [{"pid": pid, "original": rule} for pid, rule in lst]
-                })
-            with open(intermediates_dir / "step5_dedup.json", "w", encoding="utf-8") as f:
-                json.dump({
-                    "input": len(normalized_rules),
-                    "unique": len(rule_entries),
-                    "duplicates": len(normalized_rules) - len(rule_entries),
-                    "dedup_groups": dedup_groups,
-                }, f, ensure_ascii=False, indent=2)
+                dedup_groups.append(
+                    {
+                        "hash": norm_hash[:16],
+                        "normalized": norm_form,
+                        "count": len(lst),
+                        "rules": [{"pid": pid, "original": rule} for pid, rule in lst],
+                    }
+                )
+            with open(
+                intermediates_dir / "step5_dedup.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(
+                    {
+                        "input": len(normalized_rules),
+                        "unique": len(rule_entries),
+                        "duplicates": len(normalized_rules) - len(rule_entries),
+                        "dedup_groups": dedup_groups,
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         # ================================================================
         # Step 6: Rule dump
         # ================================================================
         n_rules, n_skipped_pred, rule_entries = self._dump_rules(
-            rule_entries, norm_dup_map, skipped_entries, pruned_json)
+            rule_entries, norm_dup_map, skipped_entries, pruned_json
+        )
 
         # Save intermediate: step 6
         if intermediates_dir:
-            all_rules_raw = [r.get("proposition_rule", "") for r in out_results if r.get("proposition_rule")]
+            all_rules_raw = [
+                r.get("proposition_rule", "")
+                for r in out_results
+                if r.get("proposition_rule")
+            ]
             skipped_entries_json = []
             for rec in out_results:
                 rule = rec.get("proposition_rule")
@@ -1880,31 +2185,44 @@ class FilterAndPruneEngine:
                 right_points = set(_collect_point_list(right_parsed[1]))
                 missing = right_points - left_points
                 if missing:
-                    skipped_entries_json.append({
-                        "pid": str(rec.get("problem_id", "")),
-                        "missing_points": sorted(missing),
-                        "rule": rule,
-                    })
+                    skipped_entries_json.append(
+                        {
+                            "pid": str(rec.get("problem_id", "")),
+                            "missing_points": sorted(missing),
+                            "rule": rule,
+                        }
+                    )
 
-            with open(intermediates_dir / "step6_rules_stats.json", "w", encoding="utf-8") as f:
-                json.dump({
-                    "input_rules_raw": len(all_rules_raw),
-                    "output_rules_deduped": n_rules,
-                    "skipped_rules_missing_points": skipped_rules,
-                    "skipped_rules_predicates": n_skipped_pred,
-                    "rule_skip_predicates": sorted(self.rule_skip_predicates) if self.rule_skip_predicates else [],
-                    "skipped_entries": skipped_entries_json,
-                    "entries": [{
-                        "rid": e.get("rid"),
-                        "pid": e.get("pid"),
-                        "seed": e.get("seed"),
-                        "rule": e.get("norm_rule"),
-                        "rule_original": e.get("rule"),
-                        "llm_input_renamed": e.get("llm_input_renamed", ""),
-                        "llm_output_renamed": e.get("llm_output_renamed", ""),
-                        "point_coords": e.get("point_coords", {}),
-                    } for e in rule_entries]
-                }, f, indent=2)
+            with open(
+                intermediates_dir / "step6_rules_stats.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(
+                    {
+                        "input_rules_raw": len(all_rules_raw),
+                        "output_rules_deduped": n_rules,
+                        "skipped_rules_missing_points": skipped_rules,
+                        "skipped_rules_predicates": n_skipped_pred,
+                        "rule_skip_predicates": sorted(self.rule_skip_predicates)
+                        if self.rule_skip_predicates
+                        else [],
+                        "skipped_entries": skipped_entries_json,
+                        "entries": [
+                            {
+                                "rid": e.get("rid"),
+                                "pid": e.get("pid"),
+                                "seed": e.get("seed"),
+                                "rule": e.get("norm_rule"),
+                                "rule_original": e.get("rule"),
+                                "llm_input_renamed": e.get("llm_input_renamed", ""),
+                                "llm_output_renamed": e.get("llm_output_renamed", ""),
+                                "point_coords": e.get("point_coords", {}),
+                            }
+                            for e in rule_entries
+                        ],
+                    },
+                    f,
+                    indent=2,
+                )
 
         # 合并图渲染输出目录
         combo_stem = in_path.stem + "_aux"
@@ -1927,13 +2245,17 @@ class FilterAndPruneEngine:
                     out_png = out_base_dir / f"proof_{sub_pid}.png"
                     if out_png.exists() and not self.overwrite:
                         if self.print_render_skipped:
-                            skipped_render_entries.append((sub_pid, "exists_overwrite_false"))
+                            skipped_render_entries.append(
+                                (sub_pid, "exists_overwrite_false")
+                            )
                         yield (sub_pid, "skipped")
                         continue
                     rendered = flat_rendered_map.get(sub_pid)
                     if not isinstance(rendered, dict):
                         if self.print_render_skipped:
-                            skipped_render_entries.append((sub_pid, "no_pruned_rendered"))
+                            skipped_render_entries.append(
+                                (sub_pid, "no_pruned_rendered")
+                            )
                         yield (sub_pid, "skipped")
                         continue
                     rec = idx_src.get(orig_pid)
@@ -1983,7 +2305,9 @@ class FilterAndPruneEngine:
                         else:
                             pid_failed += 1
                         if self.progress_every and (idx % self.progress_every == 0):
-                            print(f"[filter+prune] (pid) {idx}/{total} done={pid_done} skipped={pid_skipped} failed={pid_failed}")
+                            print(
+                                f"[filter+prune] (pid) {idx}/{total} done={pid_done} skipped={pid_skipped} failed={pid_failed}"
+                            )
             else:
                 print("[filter+prune] sequential rendering by pid")
                 for idx, (pid, st) in enumerate(submit_all(None), start=1):
@@ -1994,7 +2318,9 @@ class FilterAndPruneEngine:
                     else:
                         pid_failed += 1
                     if self.progress_every and (idx % self.progress_every == 0):
-                        print(f"[filter+prune] (pid) {idx}/{total} done={pid_done} skipped={pid_skipped} failed={pid_failed}")
+                        print(
+                            f"[filter+prune] (pid) {idx}/{total} done={pid_done} skipped={pid_skipped} failed={pid_failed}"
+                        )
 
             if self.print_render_skipped and (pid_skipped > 0):
                 skipped_render_path = out_base_dir / "render_skipped.txt"
@@ -2065,7 +2391,9 @@ class FilterAndPruneEngine:
 
             mw = int(self.max_workers or 0)
             if mw > 1:
-                print(f"[filter+prune] parallel rendering by rule with max_workers={mw}")
+                print(
+                    f"[filter+prune] parallel rendering by rule with max_workers={mw}"
+                )
                 with ProcessPoolExecutor(max_workers=mw) as ex:
                     for idx, (rid, st) in enumerate(submit_rules_all(ex), start=1):
                         if st == "ok":
@@ -2075,7 +2403,9 @@ class FilterAndPruneEngine:
                         else:
                             rid_failed += 1
                         if self.progress_every and (idx % self.progress_every == 0):
-                            print(f"[filter+prune] (rule) {idx}/{rid_total} done={rid_done} skipped={rid_skipped} failed={rid_failed}")
+                            print(
+                                f"[filter+prune] (rule) {idx}/{rid_total} done={rid_done} skipped={rid_skipped} failed={rid_failed}"
+                            )
             else:
                 print("[filter+prune] sequential rendering by rule")
                 for idx, (rid, st) in enumerate(submit_rules_all(None), start=1):
@@ -2086,7 +2416,9 @@ class FilterAndPruneEngine:
                     else:
                         rid_failed += 1
                     if self.progress_every and (idx % self.progress_every == 0):
-                        print(f"[filter+prune] (rule) {idx}/{rid_total} done={rid_done} skipped={rid_skipped} failed={rid_failed}")
+                        print(
+                            f"[filter+prune] (rule) {idx}/{rid_total} done={rid_done} skipped={rid_skipped} failed={rid_failed}"
+                        )
 
             # 保存 rid_map.txt（rid -> pid 与规则文本）
             rid_map_path = out_base_dir / "rid_map.txt"
@@ -2109,8 +2441,12 @@ class FilterAndPruneEngine:
         print("-" * 30)
         print(f"Total problems: {len(pids)}")
         if self.keep_pid_images:
-            print(f"Combined images (by pid): {pid_done}, Skipped: {pid_skipped}, Failed: {pid_failed}")
-        print(f"Combined images (by rule): {rid_done}, Skipped: {rid_skipped}, Failed: {rid_failed}")
+            print(
+                f"Combined images (by pid): {pid_done}, Skipped: {pid_skipped}, Failed: {pid_failed}"
+            )
+        print(
+            f"Combined images (by rule): {rid_done}, Skipped: {rid_skipped}, Failed: {rid_failed}"
+        )
         print(f"Output directory: {out_base_dir}")
         print(f"JSON saved: {pruned_json}")
 
@@ -2120,8 +2456,14 @@ class FilterAndPruneEngine:
             with open(pid_inputs_path, "w", encoding="utf-8") as f:
                 for pid in pids:
                     src_rec = idx_src.get(pid, {})
-                    llm_input = src_rec.get("llm_input_renamed", "") if isinstance(src_rec, dict) else ""
-                    problem_body = _extract_tag_content(llm_input, "problem") or llm_input
+                    llm_input = (
+                        src_rec.get("llm_input_renamed", "")
+                        if isinstance(src_rec, dict)
+                        else ""
+                    )
+                    problem_body = (
+                        _extract_tag_content(llm_input, "problem") or llm_input
+                    )
                     problem_text = _norm_text_basic(problem_body)
                     json.dump({"pid": pid, "text": problem_text}, f, ensure_ascii=False)
                     f.write("\n")
@@ -2171,8 +2513,10 @@ class FilterAndPruneEngine:
         n_no_aux = 0
         n_pred = 0
 
-        with open(input_jsonl, "r", encoding="utf-8") as fin, \
-             open(output_jsonl, "w", encoding="utf-8") as fout:
+        with (
+            open(input_jsonl, "r", encoding="utf-8") as fin,
+            open(output_jsonl, "w", encoding="utf-8") as fout,
+        ):
             for idx, line in enumerate(fin):
                 line = line.strip()
                 if not line:
@@ -2207,7 +2551,11 @@ class FilterAndPruneEngine:
         print(
             f"[Part 1: input filter] total={total} kept={n_kept} "
             f"dropped_no_aux={n_no_aux} dropped_predicate={n_pred}"
-            + (f" skip_predicates={sorted(self.skip_predicates)}" if self.skip_predicates else "")
+            + (
+                f" skip_predicates={sorted(self.skip_predicates)}"
+                if self.skip_predicates
+                else ""
+            )
         )
         return {
             "total": total,
@@ -2282,7 +2630,9 @@ class FilterAndPruneEngine:
         pruned_map: Dict[str, List[Dict[str, Any]]] = {}
         mw = int(self.max_workers or 0)
         if mw > 1:
-            print(f"[Part 2 / Step 2: graph prune] parallel pruning with max_workers={mw}")
+            print(
+                f"[Part 2 / Step 2: graph prune] parallel pruning with max_workers={mw}"
+            )
             with ProcessPoolExecutor(max_workers=mw) as ex:
                 futs = [
                     ex.submit(_worker_prune, rec)
@@ -2335,7 +2685,9 @@ class FilterAndPruneEngine:
                 for k in ("aux_points", "point_lines", "points", "point_rely_on"):
                     if k in src:
                         base_rec[k] = src[k]
-                if "aux_points" not in base_rec and isinstance(src.get("aux_points"), list):
+                if "aux_points" not in base_rec and isinstance(
+                    src.get("aux_points"), list
+                ):
                     base_rec["aux_points"] = src["aux_points"]
                 base_rec["llm_input_renamed"] = src.get("llm_input_renamed", "")
                 base_rec["llm_output_renamed"] = src.get("llm_output_renamed", "")
@@ -2370,7 +2722,9 @@ class FilterAndPruneEngine:
                 simplified_count += 1
                 rec["proposition_rule"] = simplified_rule
                 rec["was_simplified"] = True
-        print(f"[Part 2 / Step 3.5a: simplify predicates] simplified={simplified_count}/{len(out_results)}")
+        print(
+            f"[Part 2 / Step 3.5a: simplify predicates] simplified={simplified_count}/{len(out_results)}"
+        )
 
         # Step 3.5b: Extract eqpoint
         eqpoint_count = 0
@@ -2391,7 +2745,9 @@ class FilterAndPruneEngine:
             rec["eqpoint_mapped"] = eqpoint_mapped
             rec["proposition_rule_merged"] = merged_rule
             eqpoint_count += 1
-        print(f"[Part 2 / Step 3.5b: eqpoint analysis] rules_with_eqpoint={eqpoint_count}/{len(out_results)}")
+        print(
+            f"[Part 2 / Step 3.5b: eqpoint analysis] rules_with_eqpoint={eqpoint_count}/{len(out_results)}"
+        )
 
         # Write pruned json (needed by _dump_rules)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -2403,7 +2759,9 @@ class FilterAndPruneEngine:
         # ================================================================
         # Step 4: Normalization
         # ================================================================
-        normalized_rules, skipped_rules, skipped_entries = self._normalize_rules(out_results)
+        normalized_rules, skipped_rules, skipped_entries = self._normalize_rules(
+            out_results
+        )
 
         # ================================================================
         # Step 5: Deduplication
@@ -2424,23 +2782,33 @@ class FilterAndPruneEngine:
             source_data_file = intermediates_dir / "step6_rules_stats.json"
             # Save step6 stats for Part 4 consumption
             with open(source_data_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "input_rules_raw": len(normalized_rules),
-                    "output_rules_deduped": n_rules,
-                    "skipped_rules_missing_points": skipped_rules,
-                    "skipped_rules_predicates": n_skipped_pred,
-                    "rule_skip_predicates": sorted(self.rule_skip_predicates) if self.rule_skip_predicates else [],
-                    "entries": [{
-                        "rid": e.get("rid"),
-                        "pid": e.get("pid"),
-                        "seed": e.get("seed"),
-                        "rule": e.get("norm_rule"),
-                        "rule_original": e.get("rule"),
-                        "llm_input_renamed": e.get("llm_input_renamed", ""),
-                        "llm_output_renamed": e.get("llm_output_renamed", ""),
-                        "point_coords": e.get("point_coords", {}),
-                    } for e in rule_entries],
-                }, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    {
+                        "input_rules_raw": len(normalized_rules),
+                        "output_rules_deduped": n_rules,
+                        "skipped_rules_missing_points": skipped_rules,
+                        "skipped_rules_predicates": n_skipped_pred,
+                        "rule_skip_predicates": sorted(self.rule_skip_predicates)
+                        if self.rule_skip_predicates
+                        else [],
+                        "entries": [
+                            {
+                                "rid": e.get("rid"),
+                                "pid": e.get("pid"),
+                                "seed": e.get("seed"),
+                                "rule": e.get("norm_rule"),
+                                "rule_original": e.get("rule"),
+                                "llm_input_renamed": e.get("llm_input_renamed", ""),
+                                "llm_output_renamed": e.get("llm_output_renamed", ""),
+                                "point_coords": e.get("point_coords", {}),
+                            }
+                            for e in rule_entries
+                        ],
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         print(f"[Part 2: extract] done — {n_rules} rules written to {rules_file}")
         return {
@@ -2496,14 +2864,18 @@ class FilterAndPruneEngine:
                 for k in ("aux_points", "point_lines", "points", "point_rely_on"):
                     if k in src:
                         base_rec[k] = src[k]
-                if "aux_points" not in base_rec and isinstance(src.get("aux_points"), list):
+                if "aux_points" not in base_rec and isinstance(
+                    src.get("aux_points"), list
+                ):
                     base_rec["aux_points"] = src["aux_points"]
                 base_rec["llm_input_renamed"] = src.get("llm_input_renamed", "")
                 base_rec["llm_output_renamed"] = src.get("llm_output_renamed", "")
                 base_rec["point_coords"] = src.get("point_coords", {})
                 base_rec["seed"] = src.get("seed")
 
-                prop = _build_proposition_no_aux(rendered, list(base_rec.get("aux_points", []) or []))
+                prop = _build_proposition_no_aux(
+                    rendered, list(base_rec.get("aux_points", []) or [])
+                )
                 if prop:
                     base_rec["proposition_no_aux"] = prop
                     try:
@@ -2614,7 +2986,6 @@ class FilterAndPruneEngine:
 
         # Global state across chunks
         global_seen_hashes: Set[str] = set()
-        global_rid_counter = 0
         global_total = 0
         global_kept = 0
         global_dropped_no_aux = 0
@@ -2635,16 +3006,18 @@ class FilterAndPruneEngine:
 
         t_start = time.time()
 
-        print(f"\n{'='*60}")
-        print(f"Stage 1: Rule Extraction (STREAMING)")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print("Stage 1: Rule Extraction (STREAMING)")
+        print(f"{'=' * 60}")
         print(f"  Input: {in_path}")
         print(f"  Output: {out_dir}")
         print(f"  chunk_size={chunk_size}, inflight_limit={inflight_limit}")
         print(f"  max_workers={mw}")
 
         # Per-step cumulative timing accumulators
-        t_step1_total = t_step2_total = t_step3_total = t_step4_total = t_step5_total = t_step6_total = 0.0
+        t_step1_total = t_step2_total = t_step3_total = t_step4_total = (
+            t_step5_total
+        ) = t_step6_total = 0.0
 
         with open(rules_path, "w", encoding="utf-8") as rules_fh:
             for chunk_idx, chunk in _stream_jsonl_chunks(in_path, chunk_size):
@@ -2661,7 +3034,9 @@ class FilterAndPruneEngine:
                 global_dropped_predicate += n_pred
 
                 if not kept_records:
-                    print(f"  [chunk {chunk_idx}] {chunk_total} records, 0 kept, skipping")
+                    print(
+                        f"  [chunk {chunk_idx}] {chunk_total} records, 0 kept, skipping"
+                    )
                     continue
 
                 # Build idx_src for this chunk
@@ -2680,7 +3055,9 @@ class FilterAndPruneEngine:
                 global_prune_failed += n_failed
 
                 if not pruned_map:
-                    print(f"  [chunk {chunk_idx}] {chunk_total} records, {len(kept_records)} kept, 0 pruned")
+                    print(
+                        f"  [chunk {chunk_idx}] {chunk_total} records, {len(kept_records)} kept, 0 pruned"
+                    )
                     continue
 
                 # Steps 3 + 3.5a + 3.5b: Proposition extraction
@@ -2696,7 +3073,9 @@ class FilterAndPruneEngine:
                 global_skipped_missing += n_skipped
 
                 if not normalized_rules:
-                    print(f"  [chunk {chunk_idx}] {chunk_total} records, 0 normalized rules")
+                    print(
+                        f"  [chunk {chunk_idx}] {chunk_total} records, 0 normalized rules"
+                    )
                     continue
 
                 # Step 5: Dedup (incremental with global hash set)
@@ -2707,7 +3086,9 @@ class FilterAndPruneEngine:
                 t_step5_total += time.time() - t0
 
                 if not entries:
-                    print(f"  [chunk {chunk_idx}] {chunk_total} records, 0 unique rules")
+                    print(
+                        f"  [chunk {chunk_idx}] {chunk_total} records, 0 unique rules"
+                    )
                     continue
 
                 # Step 6: Predicate filter + incremental append to rules.txt
@@ -2735,7 +3116,11 @@ class FilterAndPruneEngine:
                             # Seed boundary detected
                             if current_seed in seed_accumulator:
                                 seed_reducer_queue.put(
-                                    ("seed_done", current_seed, seed_accumulator.pop(current_seed))
+                                    (
+                                        "seed_done",
+                                        current_seed,
+                                        seed_accumulator.pop(current_seed),
+                                    )
                                 )
                         current_seed = seed_val
                         seed_accumulator.setdefault(seed_val, []).append(e)
@@ -2759,29 +3144,38 @@ class FilterAndPruneEngine:
         if save_intermediates and intermediates_dir:
             stats_path = intermediates_dir / "step6_rules_stats.json"
             with open(stats_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "input_rules_raw": global_propositions,
-                    "output_rules_deduped": global_rules_written,
-                    "skipped_rules_missing_points": global_skipped_missing,
-                    "skipped_rules_predicates": global_skipped_pred,
-                    "rule_skip_predicates": sorted(self.rule_skip_predicates) if self.rule_skip_predicates else [],
-                    "entries": [{
-                        "rid": e.get("rid"),
-                        "pid": e.get("pid"),
-                        "seed": e.get("seed"),
-                        "rule": e.get("norm_rule"),
-                        "rule_original": e.get("rule"),
-                        "llm_input_renamed": e.get("llm_input_renamed", ""),
-                        "llm_output_renamed": e.get("llm_output_renamed", ""),
-                        "point_coords": e.get("point_coords", {}),
-                    } for e in all_entries_for_stats]
-                }, f, indent=2)
+                json.dump(
+                    {
+                        "input_rules_raw": global_propositions,
+                        "output_rules_deduped": global_rules_written,
+                        "skipped_rules_missing_points": global_skipped_missing,
+                        "skipped_rules_predicates": global_skipped_pred,
+                        "rule_skip_predicates": sorted(self.rule_skip_predicates)
+                        if self.rule_skip_predicates
+                        else [],
+                        "entries": [
+                            {
+                                "rid": e.get("rid"),
+                                "pid": e.get("pid"),
+                                "seed": e.get("seed"),
+                                "rule": e.get("norm_rule"),
+                                "rule_original": e.get("rule"),
+                                "llm_input_renamed": e.get("llm_input_renamed", ""),
+                                "llm_output_renamed": e.get("llm_output_renamed", ""),
+                                "point_coords": e.get("point_coords", {}),
+                            }
+                            for e in all_entries_for_stats
+                        ],
+                    },
+                    f,
+                    indent=2,
+                )
             print(f"[streaming] step6_rules_stats.json saved to {stats_path}")
 
         ray.shutdown()
 
         total_elapsed = time.time() - t_start
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Stage 1 (STREAMING) complete in {total_elapsed:.1f}s")
         print(f"  Total records: {global_total}")
         print(f"  Kept after filter: {global_kept}")
@@ -2790,15 +3184,17 @@ class FilterAndPruneEngine:
         print(f"  Pruned: {global_pruned}, Failed: {global_prune_failed}")
         print(f"  Rules written: {global_rules_written}")
         print(f"  Global unique hashes: {len(global_seen_hashes)}")
-        print(f"  Step timing breakdown:")
+        print("  Step timing breakdown:")
         print(f"    Step 1 (filter):      {t_step1_total:6.1f}s")
         print(f"    Step 2 (prune/Ray):   {t_step2_total:6.1f}s")
         print(f"    Step 3 (propositions):{t_step3_total:6.1f}s")
         print(f"    Step 4 (normalize):   {t_step4_total:6.1f}s")
         print(f"    Step 5 (dedup):       {t_step5_total:6.1f}s")
         print(f"    Step 6 (dump):        {t_step6_total:6.1f}s")
-        print(f"    Other (Ray init/IO):  {total_elapsed - t_step1_total - t_step2_total - t_step3_total - t_step4_total - t_step5_total - t_step6_total:6.1f}s")
-        print(f"{'='*60}")
+        print(
+            f"    Other (Ray init/IO):  {total_elapsed - t_step1_total - t_step2_total - t_step3_total - t_step4_total - t_step5_total - t_step6_total:6.1f}s"
+        )
+        print(f"{'=' * 60}")
 
         return {
             "total": global_total,
@@ -2817,17 +3213,27 @@ class FilterAndPruneEngine:
                 "step5_dedup": round(t_step5_total, 2),
                 "step6_dump": round(t_step6_total, 2),
             },
-            "source_data_file": str(intermediates_dir / "step6_rules_stats.json") if intermediates_dir else None,
+            "source_data_file": str(intermediates_dir / "step6_rules_stats.json")
+            if intermediates_dir
+            else None,
         }
 
 
 __all__ = ["FilterAndPruneEngine"]
 
 
-def _combine_pngs_h(left_png: Path, right_png: Path, out_png: Path, *, title: Optional[str] = None, subtitle: Optional[str] = None) -> str:
+def _combine_pngs_h(
+    left_png: Path,
+    right_png: Path,
+    out_png: Path,
+    *,
+    title: Optional[str] = None,
+    subtitle: Optional[str] = None,
+) -> str:
     """将两张 PNG 水平合并为一张，并在子图上方标注标题与副标题。"""
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.image as mpimg
@@ -2852,11 +3258,18 @@ def _combine_pngs_h(left_png: Path, right_png: Path, out_png: Path, *, title: Op
         fig.suptitle(title, fontsize=12)
     if subtitle:
         sub = subtitle if len(subtitle) <= 220 else (subtitle[:217] + "...")
-        fig.text(0.5, 0.015, "proposition w/o aux: " + sub, ha='center', va='bottom', fontsize=11, bbox=dict(boxstyle='round', fc='white', ec='#999999', alpha=0.85))
+        fig.text(
+            0.5,
+            0.015,
+            "proposition w/o aux: " + sub,
+            ha="center",
+            va="bottom",
+            fontsize=11,
+            bbox=dict(boxstyle="round", fc="white", ec="#999999", alpha=0.85),
+        )
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout(rect=(0, 0.03, 1, 0.96))
     fig.savefig(str(out_png), dpi=200)
     plt.close(fig)
     return str(out_png)
-

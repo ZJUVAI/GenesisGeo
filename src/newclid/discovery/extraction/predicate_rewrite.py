@@ -23,14 +23,14 @@ Coord = dict[str, tuple[float, float]]
 # ---------------------------------------------------------------------------
 # 参数分 4 段（角的 4 条线）：seg1=(0,1) seg2=(2,3) seg3=(4,5) seg4=(6,7)。
 _EQANGLE_GENERATORS: tuple[tuple[int, ...], ...] = (
-    (1, 0, 2, 3, 4, 5, 6, 7),   # seg1 内部交换
-    (0, 1, 3, 2, 4, 5, 6, 7),   # seg2 内部
-    (0, 1, 2, 3, 5, 4, 6, 7),   # seg3 内部
-    (0, 1, 2, 3, 4, 5, 7, 6),   # seg4 内部
-    (2, 3, 0, 1, 6, 7, 4, 5),   # (ab,cd)->(cd,ab),(ef,gh)->(gh,ef)
-    (4, 5, 6, 7, 0, 1, 2, 3),   # 两个角整体交换 seg12 <-> seg34
-    (0, 1, 4, 5, 2, 3, 6, 7),   # 转置: seg2 <-> seg3 (cd<->ef)
-    (6, 7, 2, 3, 4, 5, 0, 1),   # seg1 <-> seg4 (ab<->gh)
+    (1, 0, 2, 3, 4, 5, 6, 7),  # seg1 内部交换
+    (0, 1, 3, 2, 4, 5, 6, 7),  # seg2 内部
+    (0, 1, 2, 3, 5, 4, 6, 7),  # seg3 内部
+    (0, 1, 2, 3, 4, 5, 7, 6),  # seg4 内部
+    (2, 3, 0, 1, 6, 7, 4, 5),  # (ab,cd)->(cd,ab),(ef,gh)->(gh,ef)
+    (4, 5, 6, 7, 0, 1, 2, 3),  # 两个角整体交换 seg12 <-> seg34
+    (0, 1, 4, 5, 2, 3, 6, 7),  # 转置: seg2 <-> seg3 (cd<->ef)
+    (6, 7, 2, 3, 4, 5, 0, 1),  # seg1 <-> seg4 (ab<->gh)
 )
 
 
@@ -38,7 +38,9 @@ def _apply(perm: tuple[int, ...], args: Args) -> Args:
     return tuple(args[perm[i]] for i in range(len(perm)))
 
 
-def _build_group(generators: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
+def _build_group(
+    generators: tuple[tuple[int, ...], ...],
+) -> tuple[tuple[int, ...], ...]:
     """由生成元求出对称群的全部置换（闭包，只算一次）。"""
     identity = tuple(range(8))
     group: set[tuple[int, ...]] = {identity}
@@ -65,6 +67,7 @@ def _eqangle_orbit(args: Args) -> set[Args]:
 # ---------------------------------------------------------------------------
 # 各转化规则
 # ---------------------------------------------------------------------------
+
 
 def _rewrite_para(args: Args) -> Pred | None:
     """para w x y z，若两线段共点则转 coll（三个不同点）。"""
@@ -113,6 +116,7 @@ def _dist(coord: Coord, p: str, q: str) -> float | None:
 # 对外 API
 # ---------------------------------------------------------------------------
 
+
 def rewrite_predicate(name: str, args: Args, coord: Coord) -> Pred:
     """对单个谓词尝试转化；未命中则原样返回 (name, args)。"""
     if name == "para":
@@ -128,8 +132,10 @@ def rewrite_predicate(name: str, args: Args, coord: Coord) -> Pred:
         if shape is not None:
             a, b, c = shape
             dab, dac = _dist(coord, a, b), _dist(coord, a, c)
-            if dab is not None and dac is not None and math.isclose(
-                dab, dac, rel_tol=1e-6, abs_tol=1e-9
+            if (
+                dab is not None
+                and dac is not None
+                and math.isclose(dab, dac, rel_tol=1e-6, abs_tol=1e-9)
             ):
                 return ("cong", (a, b, a, c))
     return (name, tuple(args))

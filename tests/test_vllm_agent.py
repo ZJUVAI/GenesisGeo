@@ -87,6 +87,7 @@ class VLLMHelperTests(unittest.TestCase):
         self.assertEqual(aux_dsl_thinks["<aux> x00 z : free z"], "useful reasoning")
         self.assertEqual(_extract_aux_dsl("x <aux> y </aux> z"), "<aux> y")
 
+
 class Qwen3AgentTests(unittest.TestCase):
     def test_request_completions_uses_chat_endpoint_not_completions(self):
         with patch("newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()):
@@ -202,7 +203,12 @@ class Qwen3AgentTests(unittest.TestCase):
             agent.request_completions(
                 {
                     "request_id": "r0",
-                    "messages": [{"role": "assistant", "content": "<think>\n\n</think>\n\n<aux> x00 a :"}],
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "<think>\n\n</think>\n\n<aux> x00 a :",
+                        }
+                    ],
                     "response_prefix": "<aux> x00",
                     "new_point_name": "a",
                 }
@@ -216,7 +222,9 @@ class Qwen3AgentTests(unittest.TestCase):
         self.assertEqual(payload["stop"], [" ;"])
         self.assertEqual(payload["stop_token_ids"], [99])
 
-    def test_hybrid_search_falls_back_to_v2_after_v1_failure_with_cumulative_counts(self):
+    def test_hybrid_search_falls_back_to_v2_after_v1_failure_with_cumulative_counts(
+        self,
+    ):
         with patch("newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()):
             agent = Qwen3Agent(**_agent_kwargs(), search_version="hybrid")
         agent.problemJGEX = object()
@@ -299,10 +307,22 @@ class Qwen3AgentTests(unittest.TestCase):
                 {"bad": {"request": {}}, "good": {"request": {}}},
             ),
         ):
-            with patch.object(agent, "request_completions", side_effect=fake_request_completions):
+            with patch.object(
+                agent, "request_completions", side_effect=fake_request_completions
+            ):
                 with patch.object(agent, "_submit", return_value=False):
-                    with patch.object(agent, "_trace", side_effect=lambda event, **payload: trace_events.append((event, payload))):
-                        solved, error = agent._search("v1", proof=types.SimpleNamespace(), deadline=time.time() + 30)
+                    with patch.object(
+                        agent,
+                        "_trace",
+                        side_effect=lambda event, **payload: trace_events.append(
+                            (event, payload)
+                        ),
+                    ):
+                        solved, error = agent._search(
+                            "v1",
+                            proof=types.SimpleNamespace(),
+                            deadline=time.time() + 30,
+                        )
 
         self.assertFalse(solved)
         self.assertEqual(error, "Tried but failed.")
@@ -338,7 +358,10 @@ class Qwen3AgentTests(unittest.TestCase):
         with patch("newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()):
             agent = Qwen3Agent(**_agent_kwargs(), think=True)
         agent.problemJGEX = object()
-        with patch("newclid.agent.vllm.problem_to_dsl", return_value="<problem> text </problem>") as mock_dsl:
+        with patch(
+            "newclid.agent.vllm.problem_to_dsl",
+            return_value="<problem> text </problem>",
+        ) as mock_dsl:
             with patch("newclid.agent.vllm.get_new_point_name", return_value="a"):
                 request = agent.build_request(
                     mode="v2",
@@ -385,12 +408,14 @@ class Qwen3AgentTests(unittest.TestCase):
 class Qwen3VLAgentTests(unittest.TestCase):
     def test_build_requests_skips_frontier_entries_that_fail_to_render_remotely(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()):
+            with patch(
+                "newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()
+            ):
                 agent = Qwen3VLAgent(
                     **_agent_kwargs(),
                     search_version="v1",
                     render_root=Path(tmpdir),
-            )
+                )
             traces = []
             with patch("newclid.agent.base.ray.is_initialized", return_value=True):
                 with patch(
@@ -412,7 +437,10 @@ class Qwen3VLAgentTests(unittest.TestCase):
                         with patch.object(
                             agent,
                             "build_request_remote_kwargs",
-                            side_effect=[{"request_id": "d1_p0"}, {"request_id": "d1_p1"}],
+                            side_effect=[
+                                {"request_id": "d1_p0"},
+                                {"request_id": "d1_p1"},
+                            ],
                         ):
                             with patch.object(
                                 agent,
@@ -440,7 +468,10 @@ class Qwen3VLAgentTests(unittest.TestCase):
         with patch("newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()):
             agent = Qwen3VLTextAgent(**_agent_kwargs(), search_version="v1")
         agent.problemJGEX = object()
-        with patch("newclid.agent.vllm.problem_to_dsl", return_value="<problem> text only </problem>"):
+        with patch(
+            "newclid.agent.vllm.problem_to_dsl",
+            return_value="<problem> text only </problem>",
+        ):
             with patch("newclid.agent.vllm.get_new_point_name", return_value="c"):
                 request = agent.build_request(
                     mode="v1",
@@ -466,7 +497,9 @@ class Qwen3VLAgentTests(unittest.TestCase):
     def test_prepare_request_rebuilds_proof_and_embeds_png_as_data_url(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             render_root = Path(tmpdir)
-            with patch("newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()):
+            with patch(
+                "newclid.agent.vllm._load_tokenizer", return_value=_FakeTokenizer()
+            ):
                 agent = Qwen3VLAgent(
                     **_agent_kwargs(),
                     search_version="v1",
@@ -475,14 +508,23 @@ class Qwen3VLAgentTests(unittest.TestCase):
             agent.problemJGEX = object()
             rebuilt_proof = types.SimpleNamespace(defs={}, rng=object())
             problem = object()
-            with patch("newclid.agent.vllm.problem_to_dsl", return_value="<problem> visual </problem>"):
+            with patch(
+                "newclid.agent.vllm.problem_to_dsl",
+                return_value="<problem> visual </problem>",
+            ):
                 with patch("newclid.agent.vllm.get_new_point_name", return_value="c"):
                     with patch(
                         "newclid.agent.vllm.build_problem_proof",
                         return_value=rebuilt_proof,
                     ) as mock_build_proof:
-                        with patch("newclid.agent.vllm.draw_clause_figure", return_value=object()):
-                            with patch("newclid.agent.vllm.save_figure_as_png") as mock_save:
+                        with patch(
+                            "newclid.agent.vllm.draw_clause_figure",
+                            return_value=object(),
+                        ):
+                            with patch(
+                                "newclid.agent.vllm.save_figure_as_png"
+                            ) as mock_save:
+
                                 def _write_png(fig, png_path, img_pixels, direct_png):
                                     del fig, img_pixels, direct_png
                                     Path(png_path).write_bytes(b"\x89PNG\r\n\x1a\nfake")

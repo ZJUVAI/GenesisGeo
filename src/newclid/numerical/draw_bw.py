@@ -5,19 +5,19 @@ geometric primitives (segments, circles) without color annotations.
 All strokes use a uniform line width. Infinite lines/rays are replaced
 by segments between known points wherever possible.
 """
+
 from __future__ import annotations
 
 import sys
-from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Union
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.patches as patches
 from matplotlib.figure import Figure
 import numpy as np
-from adjustText import adjust_text
 
 from newclid.dependencies.symbols import Point
 from newclid.formulations.problem import ProblemJGEX
@@ -28,8 +28,8 @@ from newclid.numerical.geometries import CircleNum, PointNum
 # Style constants — single source of truth for line width
 # ---------------------------------------------------------------------------
 
-LW = 0.8          # uniform stroke width for all elements
-SOLID  = {"color": "black", "lw": LW}
+LW = 0.8  # uniform stroke width for all elements
+SOLID = {"color": "black", "lw": LW}
 DASHED = {"color": "black", "lw": LW, "ls": "dashed", "alpha": 0.55}
 DOTTED = {"color": "black", "lw": LW, "ls": "dotted", "alpha": 0.55}
 
@@ -71,17 +71,28 @@ def _angle_arc(ax, vertex: PointNum, p1: PointNum, p2: PointNum):
     a2 = np.degrees(np.arctan2(d2[1], d2[0]))
     if (a2 - a1) % 360 > 180:
         a1, a2 = a2, a1
-    ax.add_patch(patches.Arc(
-        (vertex.x, vertex.y), 2*r, 2*r,
-        angle=0, theta1=a1, theta2=a2,
-        color="black", lw=LW))
+    ax.add_patch(
+        patches.Arc(
+            (vertex.x, vertex.y),
+            2 * r,
+            2 * r,
+            angle=0,
+            theta1=a1,
+            theta2=a2,
+            color="black",
+            lw=LW,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Per-construction drawing dispatch
 # ---------------------------------------------------------------------------
 
-def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "black") -> None:
+
+def _handle_construction(
+    ax, cname: str, args: list[str], sg, color: str = "black"
+) -> None:
     pts = [_num(sg, a) for a in args]
 
     def p(i):
@@ -102,19 +113,36 @@ def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "blac
     elif cname == "segment":
         seg(p(0), p(1))
 
-    elif cname in ("triangle", "triangle12", "r_triangle", "iso_triangle",
-                   "iso_triangle0", "ieq_triangle", "eq_triangle", "risos"):
+    elif cname in (
+        "triangle",
+        "triangle12",
+        "r_triangle",
+        "iso_triangle",
+        "iso_triangle0",
+        "ieq_triangle",
+        "eq_triangle",
+        "risos",
+    ):
         tri(p(0), p(1), p(2))
 
-    elif cname in ("quadrangle", "eq_quadrangle",
-                   "trapezoid", "iso_trapezoid", "r_trapezoid",
-                   "rectangle", "parallelogram", "square", "isquare", "eqangle2"):
+    elif cname in (
+        "quadrangle",
+        "eq_quadrangle",
+        "trapezoid",
+        "iso_trapezoid",
+        "r_trapezoid",
+        "rectangle",
+        "parallelogram",
+        "square",
+        "isquare",
+        "eqangle2",
+    ):
         for i in range(4):
-            seg(pts[i], pts[(i+1) % 4])
+            seg(pts[i], pts[(i + 1) % 4])
 
     elif cname == "eqdia_quadrangle":
         for i in range(4):
-            seg(pts[i], pts[(i+1) % 4])
+            seg(pts[i], pts[(i + 1) % 4])
         seg(p(0), p(2))
         seg(p(1), p(3))
 
@@ -124,7 +152,7 @@ def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "blac
 
     elif cname == "pentagon":
         for i in range(5):
-            seg(pts[i], pts[(i+1) % 5])
+            seg(pts[i], pts[(i + 1) % 5])
 
     elif cname in ("circle", "circumcenter"):
         circ(CircleNum(p1=p(1), p2=p(2), p3=p(3)))
@@ -262,7 +290,7 @@ def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "blac
         seg(p(1), p(3))
         seg(p(2), p(3))
         seg(p(0), p(2))
-        
+
     elif cname == "trisect":
         tri(p(2), p(3), p(4))
         seg(p(0), p(3))
@@ -277,32 +305,30 @@ def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "blac
 
     elif cname in ("iso_triangle_vertex", "iso_triangle_vertex_angle"):
         tri(p(0), p(1), p(2))
-    
+
     elif cname == "eqangle3":
         seg(p(0), p(1))
         seg(p(0), p(2))
         seg(p(3), p(4))
         seg(p(3), p(5))
-    
+
     elif cname in ("rconst", "aconst"):
         seg(p(0), p(1))
         seg(p(2), p(3))
-    
+
     elif cname == "rconst2":
         seg(p(0), p(1))
         seg(p(0), p(2))
-    
+
     elif cname == "s_angle":
         seg(p(0), p(1))
         seg(p(1), p(2))
-    
+
     elif cname == "lconst":
         seg(p(0), p(1))
 
     elif cname == "between_bound":
         seg(p(1), p(2))
-        
-
 
     else:
         pass  # silently skip unrecognized constructions
@@ -311,6 +337,7 @@ def _handle_construction(ax, cname: str, args: list[str], sg, color: str = "blac
 # ---------------------------------------------------------------------------
 # Main drawing entry point
 # ---------------------------------------------------------------------------
+
 
 def _handle_predicate(ax, pred_str: str, sg, color: str = "red") -> bool:
     """Draw geometric elements for a concrete predicate instance.
@@ -498,10 +525,12 @@ def draw_bw(
 
     # Render geometry (no labels yet) to pixel array for occupancy detection.
     import io
+
     buf_io = io.BytesIO()
     fig.savefig(buf_io, format="png", dpi=dpi, facecolor="white", bbox_inches=None)
     buf_io.seek(0)
     from PIL import Image as _PILImage
+
     pil_img = _PILImage.open(buf_io).convert("RGB")
     render = np.array(pil_img)  # (H, W, 3) uint8 RGB
     h_px, w_px = render.shape[:2]
@@ -513,13 +542,13 @@ def draw_bw(
     pos = ax.get_position()
     xl, xr = ax.get_xlim()
     yb, yt = ax.get_ylim()
-    ax_left_px   = pos.x0 * w_px
-    ax_right_px  = pos.x1 * w_px
-    ax_bottom_px = (1.0 - pos.y0) * h_px   # row (top-origin)
-    ax_top_px    = (1.0 - pos.y1) * h_px
+    ax_left_px = pos.x0 * w_px
+    ax_right_px = pos.x1 * w_px
+    ax_bottom_px = (1.0 - pos.y0) * h_px  # row (top-origin)
+    ax_top_px = (1.0 - pos.y1) * h_px
 
     def _pixel_xy(dx: float, dy: float):
-        col = ax_left_px  + (dx - xl) / (xr - xl) * (ax_right_px - ax_left_px)
+        col = ax_left_px + (dx - xl) / (xr - xl) * (ax_right_px - ax_left_px)
         row = ax_bottom_px + (dy - yb) / (yt - yb) * (ax_top_px - ax_bottom_px)
         return int(round(col)), int(round(row))
 
@@ -604,19 +633,29 @@ def draw_bw(
         ox, oy = _pixel_to_data(text_cx_px, text_cy_px)
 
         ax.annotate(
-            label, (pt.num.x, pt.num.y),
+            label,
+            (pt.num.x, pt.num.y),
             xytext=(ox, oy),
             textcoords="data",
-            fontsize=9, color=color, fontweight="bold",
+            fontsize=9,
+            color=color,
+            fontweight="bold",
             annotation_clip=False,
-            ha="center", va="center",
+            ha="center",
+            va="center",
         )
 
     if save_to is not None:
         path = Path(save_to)
         fmt = path.suffix.lstrip(".").lower() or "svg"
-        fig.savefig(path, format=fmt, dpi=dpi,
-                    facecolor="white", edgecolor="none", bbox_inches="tight")
+        fig.savefig(
+            path,
+            format=fmt,
+            dpi=dpi,
+            facecolor="white",
+            edgecolor="none",
+            bbox_inches="tight",
+        )
     return fig
 
 
@@ -624,8 +663,10 @@ def draw_bw(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     from newclid.api import GeometricSolverBuilder
+
     problem_str = "a b c = triangle a b c; o = circle o a b c"
     out = Path("out_bw.svg")
     if len(sys.argv) >= 2:

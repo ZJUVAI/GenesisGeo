@@ -38,7 +38,9 @@ def normalize_problem(problem: ProblemJGEX) -> str:
 
 def normalize_aux(base_problem: ProblemJGEX, augmented_problem: ProblemJGEX) -> str:
     # Only hash the newly added constructions, not the whole augmented problem.
-    aux_constructions = augmented_problem.constructions[len(base_problem.constructions):]
+    aux_constructions = augmented_problem.constructions[
+        len(base_problem.constructions) :
+    ]
     return "; ".join(str(clause) for clause in aux_constructions)
 
 
@@ -85,7 +87,9 @@ def classify_build_exception(exc: Exception) -> str:
     return "build_definition_error"
 
 
-def summarize_problem_db_runtime(runtime: ProblemDBRuntime | None) -> dict[str, Any] | None:
+def summarize_problem_db_runtime(
+    runtime: ProblemDBRuntime | None,
+) -> dict[str, Any] | None:
     if runtime is None:
         return None
     return {
@@ -211,7 +215,9 @@ class ProblemDBRuntime:
                 return category
         return None
 
-    def record_ddar_result(self, lookup: ProblemDBLookup, ddar_result: dict[str, Any]) -> None:
+    def record_ddar_result(
+        self, lookup: ProblemDBLookup, ddar_result: dict[str, Any]
+    ) -> None:
         if not lookup.is_enabled:
             return
 
@@ -222,7 +228,9 @@ class ProblemDBRuntime:
             "normalized_aux": lookup.normalized_aux,
         }
         if category == "invalid":
-            record["error_type"] = ddar_result.get("error_type", "build_definition_error")
+            record["error_type"] = ddar_result.get(
+                "error_type", "build_definition_error"
+            )
             if ddar_result.get("error_message"):
                 record["error_message"] = ddar_result["error_message"]
         else:
@@ -305,7 +313,9 @@ class ProblemDBWriter:
             index.setdefault(category, {})
         _write_json(index_path, index)
 
-    def _write_records(self, problem_dir: Path, records_by_category: dict[str, list[dict[str, Any]]]) -> None:
+    def _write_records(
+        self, problem_dir: Path, records_by_category: dict[str, list[dict[str, Any]]]
+    ) -> None:
         index_path = problem_dir / "index.json"
         index = _load_json(index_path, _default_index())
         loaded_records = {
@@ -320,7 +330,9 @@ class ProblemDBWriter:
                 # through DDAR, so category transitions should be rare. We still enforce this
                 # invariant defensively to keep the on-disk database consistent if old data,
                 # manual edits, or future pipeline changes introduce conflicting states.
-                self._remove_conflicting_records(strict_key, category, index, loaded_records)
+                self._remove_conflicting_records(
+                    strict_key, category, index, loaded_records
+                )
                 loaded_records[category][strict_key] = self._merge_record(
                     loaded_records[category].get(strict_key),
                     record,

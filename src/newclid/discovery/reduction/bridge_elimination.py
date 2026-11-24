@@ -43,6 +43,7 @@ from newclid.discovery.utils.rule_parser import split_rule_text
 # (they are 3-point relations) and are handled separately.
 LINE_PREDICATES = {"perp", "nperp", "para", "npara", "eqangle"}
 
+
 def _parse_preds(text: str) -> list[list[str]]:
     """Parse comma-separated predicates into [[pred, arg, ...], ...]."""
     result: list[list[str]] = []
@@ -85,13 +86,13 @@ def _build_coll_map(premises: list[list[str]]) -> dict[str, set[str]]:
             # Only extract collinearity when the two segments share a point
             # (otherwise para just means two distinct parallel lines).
             if p11 == p21 and p12 != p22:
-                _add_coll(p11, p12, p22)       # para A B A C → coll A B C
+                _add_coll(p11, p12, p22)  # para A B A C → coll A B C
             elif p11 == p22 and p12 != p21:
-                _add_coll(p11, p12, p21)       # para A B C A → coll A B C
+                _add_coll(p11, p12, p21)  # para A B C A → coll A B C
             elif p12 == p21 and p11 != p22:
-                _add_coll(p12, p11, p22)       # para A B B C → coll B A C
+                _add_coll(p12, p11, p22)  # para A B B C → coll B A C
             elif p12 == p22 and p11 != p21:
-                _add_coll(p12, p11, p21)       # para A B C B → coll B A C
+                _add_coll(p12, p11, p21)  # para A B C B → coll B A C
 
     return dict(coll_map)
 
@@ -182,7 +183,7 @@ def bridge_point_eliminate(rule_text: str) -> str | None:
     # it in ALL conclusions via segment substitution.  If the point is
     # eliminated from all conclusions, remove its coll premise and restart
     # (because eliminating one bridge may expose another).
-    remaining_prem_indices: set[int] = set(range(len(premises)))
+    set(range(len(premises)))
     remaining_conclusions: list[list[str]] = [list(concl) for concl in conclusions]
     bridge_queue: list[tuple[str, int]] = list(bridge_candidates)
     prem_indices_to_remove: set[int] = set()
@@ -213,7 +214,7 @@ def bridge_point_eliminate(rule_text: str) -> str | None:
                     # ---- segment-based predicates (perp, para, eqangle) ----
                     # Each consecutive pair of args forms a segment; replace
                     # the segment containing bp with a collinear-partner segment.
-                    seg_positions = [(i, i+1) for i in range(0, len(args), 2)]
+                    seg_positions = [(i, i + 1) for i in range(0, len(args), 2)]
                     replaced = False
                     for seg_start, seg_end in seg_positions:
                         if seg_end >= len(args):
@@ -242,7 +243,9 @@ def bridge_point_eliminate(rule_text: str) -> str | None:
                             best_new = next(iter(bp_partners - {bp}), None)
 
                         if best_new is not None and best_new != other_pt:
-                            args[seg_start if args[seg_start] == bp else seg_end] = best_new
+                            args[seg_start if args[seg_start] == bp else seg_end] = (
+                                best_new
+                            )
                             replaced = True
                             # Continue checking remaining segments — bridge
                             # point may appear in multiple segments within one
@@ -285,7 +288,8 @@ def bridge_point_eliminate(rule_text: str) -> str | None:
             # Restart: rebuild bridge candidates (some may now be redundant)
             # Re-check which bridges remain valid
             bridge_queue = [
-                (bp2, pidx2) for bp2, pidx2 in bridge_candidates
+                (bp2, pidx2)
+                for bp2, pidx2 in bridge_candidates
                 if pidx2 not in prem_indices_to_remove
                 and any(bp2 in c[1:] for c in remaining_conclusions)
             ]

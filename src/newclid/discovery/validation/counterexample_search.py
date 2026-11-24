@@ -14,24 +14,22 @@ Approach:
 from __future__ import annotations
 
 import math
-import random
 import time
 from typing import Any, Callable
 
 import numpy as np
 
-from newclid.numerical import close_enough, nearly_zero
-from newclid.numerical.geometries import PointNum, LineNum, CircleNum
+from newclid.numerical.geometries import PointNum
 
 # ============================================================================
 # Constants
 # ============================================================================
 
-SATISFY_EPS = 1e-8       # threshold for "exact" satisfaction (legacy, unused)
-SATISFY_MARGIN = 1e-6    # margin for conclusion penalty in optimization
-DEFAULT_LAMBDA = 0.1     # weight of conclusion penalty relative to premise loss
-MAX_RESTARTS = 100       # number of random restarts (60% local + 40% global)
-LBFGS_MAXITER = 800      # max iterations for L-BFGS-B per restart
+SATISFY_EPS = 1e-8  # threshold for "exact" satisfaction (legacy, unused)
+SATISFY_MARGIN = 1e-6  # margin for conclusion penalty in optimization
+DEFAULT_LAMBDA = 0.1  # weight of conclusion penalty relative to premise loss
+MAX_RESTARTS = 100  # number of random restarts (60% local + 40% global)
+LBFGS_MAXITER = 800  # max iterations for L-BFGS-B per restart
 
 # DDAR matching tolerances (from DDAR numerical.cpp and matcher.hpp)
 _DDAR_ATOM = 1e-9
@@ -47,8 +45,10 @@ def _ddar_close(a: float, b: float) -> bool:
 
     abs(a-b) < 4*ATOM  OR  abs(a-b)/max(|a|,|b|) < _DDAR_REL_TOL
     """
-    return (abs(a - b) < 4 * _DDAR_ATOM or
-            abs(a - b) / max(abs(a), abs(b), 1e-32) < _DDAR_REL_TOL)
+    return (
+        abs(a - b) < 4 * _DDAR_ATOM
+        or abs(a - b) / max(abs(a), abs(b), 1e-32) < _DDAR_REL_TOL
+    )
 
 
 def _relative_violation(a: float, b: float) -> float:
@@ -78,10 +78,14 @@ def _dot(v1: PointNum, v2: PointNum) -> float:
 
 
 def _angle_equal_ddar(
-    a: PointNum, b: PointNum,  # slope 1: from a to b
-    c: PointNum, d: PointNum,  # slope 2: from c to d
-    e: PointNum, f: PointNum,  # slope 3: from e to f
-    g: PointNum, h: PointNum,  # slope 4: from g to h
+    a: PointNum,
+    b: PointNum,  # slope 1: from a to b
+    c: PointNum,
+    d: PointNum,  # slope 2: from c to d
+    e: PointNum,
+    f: PointNum,  # slope 3: from e to f
+    g: PointNum,
+    h: PointNum,  # slope 4: from g to h
 ) -> tuple[bool, float]:
     """Check if angle(slope1, slope2) == angle(slope3, slope4) using DDAR's method.
 
@@ -107,6 +111,7 @@ def _angle_equal_ddar(
     viol = _relative_violation(lhs, rhs)
     return satisfied, viol
 
+
 # ============================================================================
 # Numerical predicate evaluation — returns (is_satisfied: bool, violation: float)
 # violation = 0 means predicate is perfectly satisfied
@@ -124,7 +129,7 @@ def _eval_coll(args: list[PointNum]) -> tuple[bool, float]:
 
     # Sort by x, use median as reference (DDAR approach)
     sorted_pts = sorted(args[:3], key=lambda p: p.x)
-    ref = sorted_pts[1]      # median x
+    ref = sorted_pts[1]  # median x
     a, c = sorted_pts[0], sorted_pts[2]
 
     # Cross product: (a-ref) × (c-ref)
@@ -178,13 +183,13 @@ def _eval_cong(args: list[PointNum]) -> tuple[bool, float]:
     all_ok, max_viol = True, 0.0
     for i in range(0, len(args), 2):
         a, b = args[i], args[i + 1]
-        l = math.sqrt(max(a.distance2(b), 1e-16))
+        segment_length = math.sqrt(max(a.distance2(b), 1e-16))
         if length is not None:
-            ok = _ddar_close(length, l)
-            v = _relative_violation(length, l)
+            ok = _ddar_close(length, segment_length)
+            v = _relative_violation(length, segment_length)
             all_ok = all_ok and ok
             max_viol = max(max_viol, v)
-        length = l
+        length = segment_length
     return all_ok, max_viol
 
 
@@ -276,7 +281,7 @@ def _eval_eqangle(args: list[PointNum]) -> tuple[bool, float]:
     # Compare each angle group to the first
     a1, b1, c1, d1 = args[0], args[1], args[2], args[3]
     for i in range(0, len(args), 4):
-        a2, b2, c2, d2 = args[i], args[i+1], args[i+2], args[i+3]
+        a2, b2, c2, d2 = args[i], args[i + 1], args[i + 2], args[i + 3]
         sat, viol = _angle_equal_ddar(a1, b1, c1, d1, a2, b2, c2, d2)
         max_viol = max(max_viol, viol)
         if not sat:
@@ -309,13 +314,13 @@ def _det4x4(m: list[list[float]]) -> float:
     """Compute 4x4 determinant via Laplace expansion on first row."""
     a, b, c, d = m[0]
     e, f, g, h = m[1]
-    i, j, k, l = m[2]
+    i, j, k, l_val = m[2]
     M, n, o, p = m[3]
 
     # 3x3 minors (cofactor expansion, first row)
-    m0 = f * (k * p - l * o) - g * (j * p - l * n) + h * (j * o - k * n)
-    m1 = e * (k * p - l * o) - g * (i * p - l * M) + h * (i * o - k * M)
-    m2 = e * (j * p - l * n) - f * (i * p - l * M) + h * (i * n - j * M)
+    m0 = f * (k * p - l_val * o) - g * (j * p - l_val * n) + h * (j * o - k * n)
+    m1 = e * (k * p - l_val * o) - g * (i * p - l_val * M) + h * (i * o - k * M)
+    m2 = e * (j * p - l_val * n) - f * (i * p - l_val * M) + h * (i * n - j * M)
     m3 = e * (j * o - k * n) - f * (i * o - k * M) + g * (i * n - j * M)
 
     return a * m0 - b * m1 + c * m2 - d * m3
@@ -394,9 +399,15 @@ def _eval_simtri(args: list[PointNum]) -> tuple[bool, float]:
     if len(args) < 6:
         return True, 0.0
     a, b, c, d, e, f = args[0], args[1], args[2], args[3], args[4], args[5]
-    r1 = math.sqrt(max(a.distance2(b), 1e-16)) / max(math.sqrt(max(d.distance2(e), 1e-16)), 1e-16)
-    r2 = math.sqrt(max(b.distance2(c), 1e-16)) / max(math.sqrt(max(e.distance2(f), 1e-16)), 1e-16)
-    r3 = math.sqrt(max(c.distance2(a), 1e-16)) / max(math.sqrt(max(f.distance2(d), 1e-16)), 1e-16)
+    r1 = math.sqrt(max(a.distance2(b), 1e-16)) / max(
+        math.sqrt(max(d.distance2(e), 1e-16)), 1e-16
+    )
+    r2 = math.sqrt(max(b.distance2(c), 1e-16)) / max(
+        math.sqrt(max(e.distance2(f), 1e-16)), 1e-16
+    )
+    r3 = math.sqrt(max(c.distance2(a), 1e-16)) / max(
+        math.sqrt(max(f.distance2(d), 1e-16)), 1e-16
+    )
     v12 = _relative_violation(r1, r2)
     v23 = _relative_violation(r2, r3)
     viol = max(v12, v23)
@@ -497,7 +508,8 @@ def supported_predicate(name: str) -> bool:
 
 
 def evaluate_predicate(
-    name: str, args: list[str],
+    name: str,
+    args: list[str],
     points: dict[str, PointNum],
 ) -> tuple[bool, float]:
     """Evaluate a geometric predicate numerically.
@@ -633,7 +645,7 @@ class CounterexampleFinder:
         if restart_idx < total * 0.6:
             # Local phase
             frac = restart_idx / (total * 0.6)
-            return 0.001 * (500 ** frac)
+            return 0.001 * (500**frac)
         else:
             # Global phase: jump to entirely different configurations
             frac = (restart_idx - total * 0.6) / (total * 0.4)
@@ -749,7 +761,7 @@ def validate_rule(
             "counterexample_found": None,  # unknown
             "skipped": True,
             "reason": f"unsupported predicates: premises={unsupported_prem}, "
-                      f"conclusions={unsupported_concl}",
+            f"conclusions={unsupported_concl}",
         }
 
     finder = CounterexampleFinder(premises, conclusions, nominal)

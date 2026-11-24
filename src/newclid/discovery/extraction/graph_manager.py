@@ -25,6 +25,7 @@ from newclid.discovery.extraction import parsing
 # 证明图
 # ---------------------------------------------------------------------------
 
+
 class SingleProofGraph:
     """从一条 result record 构建的有向证明图（DAG）。
 
@@ -68,17 +69,27 @@ class SingleProofGraph:
         if exist is not None:
             return  # 首次登记优先，重复 id 忽略
         self.facts[id_local] = FactNode(
-            id=id_local, predicate=pred, args=args, produced_by=None,
+            id=id_local,
+            predicate=pred,
+            args=args,
+            produced_by=None,
         )
 
     def _ensure_conclusion_fact(
-        self, pred: str, args: tuple[str, ...], id_local: str, rule_id: str,
+        self,
+        pred: str,
+        args: tuple[str, ...],
+        id_local: str,
+        rule_id: str,
     ) -> None:
         """登记 / 回填由 rule 生成的结论 fact。"""
         exist = self.facts.get(id_local)
         if exist is None:
             self.facts[id_local] = FactNode(
-                id=id_local, predicate=pred, args=args, produced_by=rule_id,
+                id=id_local,
+                predicate=pred,
+                args=args,
+                produced_by=rule_id,
             )
         elif exist.produced_by is None:
             # 已作为前提登记过，补记生成者
@@ -162,8 +173,7 @@ class SingleProofGraph:
 
             # 去除trivial前提
             filtered_premise_ids = [
-                pid for pid in premise_ids
-                if pid not in trivial_fact_ids
+                pid for pid in premise_ids if pid not in trivial_fact_ids
             ]
 
             for pid in filtered_premise_ids:
@@ -195,11 +205,14 @@ class SingleProofGraph:
         goal = self.goal
         if goal is not None:
             for fid, fact in self.facts.items():
-                if fact.predicate == goal.predicate and tuple(fact.args) == tuple(goal.args):
+                if fact.predicate == goal.predicate and tuple(fact.args) == tuple(
+                    goal.args
+                ):
                     return fid
         used_as_premise = {u for (u, _v) in self.edges}
         candidates = [
-            fid for fid, f in self.facts.items()
+            fid
+            for fid, f in self.facts.items()
             if f.produced_by is not None and fid not in used_as_premise
         ]
         return candidates[-1] if candidates else None
@@ -223,9 +236,13 @@ class SingleProofGraph:
         collapsed = 0
         while True:
             r = next(
-                (r for r in self.rules
-                 if len(r.premises) == 1 and r.premises[0] != r.conclusion
-                 and r.conclusion != goal_id),
+                (
+                    r
+                    for r in self.rules
+                    if len(r.premises) == 1
+                    and r.premises[0] != r.conclusion
+                    and r.conclusion != goal_id
+                ),
                 None,
             )
             if r is None:
@@ -238,7 +255,8 @@ class SingleProofGraph:
                         dict.fromkeys(a if p == b else p for p in consumer.premises)
                     )
                     self.rules[self.rules.index(consumer)] = dataclasses.replace(
-                        consumer, premises=new_premises,
+                        consumer,
+                        premises=new_premises,
                     )
             self.facts.pop(b, None)
             collapsed += 1
@@ -266,7 +284,9 @@ class SingleProofGraph:
             "n_facts": len(self.facts),
             "n_rules": len(self.rules),
             "n_edges": len(self.edges),
-            "n_given_facts": sum(1 for f in self.facts.values() if f.produced_by is None),
+            "n_given_facts": sum(
+                1 for f in self.facts.values() if f.produced_by is None
+            ),
             "goal": None if self.goal is None else self.goal.predicate,
         }
 
@@ -274,6 +294,7 @@ class SingleProofGraph:
 # ---------------------------------------------------------------------------
 # 输入读取 + 批量构图
 # ---------------------------------------------------------------------------
+
 
 def _iter_jsonl(input_path: str) -> Iterator[dict[str, Any]]:
     """逐行流式读取 JSONL，跳过空行。"""
@@ -354,7 +375,10 @@ def build_proof_graphs(
         failures: 构建失败记录 [{seed, index_in_seed, line, error}, ...]。
     """
     chosen = select_records(
-        input_path, limit=limit, sample=sample, random_seed=random_seed,
+        input_path,
+        limit=limit,
+        sample=sample,
+        random_seed=random_seed,
     )
 
     graphs: list[SingleProofGraph] = []
@@ -364,7 +388,9 @@ def build_proof_graphs(
     ):
         try:
             graph = SingleProofGraph.build_from_result_record(
-                record, seed=seed, index_in_seed=index_in_seed,
+                record,
+                seed=seed,
+                index_in_seed=index_in_seed,
             )
             graphs.append(graph)
         except Exception as exc:  # 单条失败不影响整批
@@ -380,7 +406,9 @@ def build_proof_graphs(
     return graphs, failures
 
 
-def graph_contains_predicates(graph: SingleProofGraph, skip_predicates: set[str]) -> bool:
+def graph_contains_predicates(
+    graph: SingleProofGraph, skip_predicates: set[str]
+) -> bool:
     """判断该图（或子图）的 fact 节点中是否出现 skip_predicates 中的任一谓词。
 
     用于 Part 1 提取后按 rule_skip_predicates 整图丢弃：只要子证明图中任意一个

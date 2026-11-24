@@ -142,7 +142,11 @@ def resolve_construction_config(
     raw_weights = config.get("construction_weights", {})
     if isinstance(raw_weights, dict):
         for k, v in raw_weights.items():
-            if isinstance(k, str) and not k.startswith("_") and isinstance(v, (int, float)):
+            if (
+                isinstance(k, str)
+                and not k.startswith("_")
+                and isinstance(v, (int, float))
+            ):
                 weights[k] = float(v)
 
     # Load optional compatibility matrix
@@ -150,7 +154,11 @@ def resolve_construction_config(
     raw_compat = config.get("construction_compatibility", {})
     if isinstance(raw_compat, dict):
         for src, targets in raw_compat.items():
-            if isinstance(src, str) and not src.startswith("_") and isinstance(targets, dict):
+            if (
+                isinstance(src, str)
+                and not src.startswith("_")
+                and isinstance(targets, dict)
+            ):
                 compatibility[src] = {}
                 for tgt, factor in targets.items():
                     if isinstance(tgt, str) and isinstance(factor, (int, float)):

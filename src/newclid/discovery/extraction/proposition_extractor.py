@@ -65,18 +65,20 @@ def extract_proposition(graph: "SingleProofGraph") -> PropositionRecord | None:
     # 用 eqpoint_merge._is_degenerate 按谓词类型区分, 而不是对所有谓词一概
     # 放行同名参数(那是过滤 2 的职责, 处理的是不同名但数值重合的退化)。
     from newclid.discovery.extraction.eqpoint_merge import _is_degenerate
+
     if any(_is_degenerate(pi) for pi in [*premises, conclusion]):
         return None
 
     # ---- 过滤 2: 结论中不同名的两个点坐标重合 → 退化（如 a 和 g 是同一个点）----
     coord = {p.name: p for p in graph.points}
     for i, a1 in enumerate(conclusion.args):
-        for a2 in conclusion.args[i + 1:]:
+        for a2 in conclusion.args[i + 1 :]:
             if a1 == a2:
                 continue  # 同名点（如 cong A B A C 中的两个 A）不是退化
             if a1 in coord and a2 in coord:
                 p1, p2 = coord[a1], coord[a2]
                 from newclid.numerical import close_enough
+
                 if close_enough(p1.x, p2.x) and close_enough(p1.y, p2.y):
                     return None  # 不同名的两个点坐标一致 → 退化 → 弃掉
 
@@ -144,13 +146,9 @@ def output_to_proposition(record: dict) -> PropositionRecord:
     恢复内存对象，跳过重新读原始数据集 + 重新构图/拆解/提取命题的开销。
     """
     lhs, rhs = record["rule_text"].split("=>", 1)
-    premises = tuple(
-        _parse_predicate_text(p) for p in lhs.split(",") if p.strip()
-    )
+    premises = tuple(_parse_predicate_text(p) for p in lhs.split(",") if p.strip())
     conclusion = _parse_predicate_text(rhs)
-    points = tuple(
-        Point(name=p["name"], x=p["x"], y=p["y"]) for p in record["points"]
-    )
+    points = tuple(Point(name=p["name"], x=p["x"], y=p["y"]) for p in record["points"])
     return PropositionRecord(
         proposition_id=record["proposition_id"],
         seed=record.get("seed"),

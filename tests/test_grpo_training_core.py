@@ -101,8 +101,7 @@ class TestGRPOTrainingCore(unittest.TestCase):
             mocked_from_text.return_value = problem
 
             result = evaluator.evaluate(
-                "<aux> x00 e : coll a b e [002] ; "
-                "x00 f : perp e f a b [003] ; </aux>",
+                "<aux> x00 e : coll a b e [002] ; x00 f : perp e f a b [003] ; </aux>",
                 SAMPLE_FL_PROBLEM,
             )
 

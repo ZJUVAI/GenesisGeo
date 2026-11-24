@@ -20,10 +20,10 @@ try:
     from solver_utils import solve_single_problem  # type: ignore
 except Exception:
     _here = os.path.dirname(__file__)
-    _mod_path = os.path.join(_here, 'solver_utils.py')
-    _spec = importlib.util.spec_from_file_location('solver_utils', _mod_path)
+    _mod_path = os.path.join(_here, "solver_utils.py")
+    _spec = importlib.util.spec_from_file_location("solver_utils", _mod_path)
     if _spec is None or _spec.loader is None:
-        raise ImportError('无法加载 solver_utils')
+        raise ImportError("无法加载 solver_utils")
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)  # type: ignore[attr-defined]
     solve_problems_batch = _mod.solve_problems_batch  # type: ignore[attr-defined]
@@ -35,8 +35,8 @@ try:
 except Exception:
     # 退回到基于路径的动态加载
     _here = os.path.dirname(__file__)
-    _pw_path = os.path.abspath(os.path.join(_here, os.pardir, 'proof_writing.py'))
-    _spec_pw = importlib.util.spec_from_file_location('proof_writing', _pw_path)
+    _pw_path = os.path.abspath(os.path.join(_here, os.pardir, "proof_writing.py"))
+    _spec_pw = importlib.util.spec_from_file_location("proof_writing", _pw_path)
     if _spec_pw is None or _spec_pw.loader is None:
         get_structured_proof = None  # type: ignore
     else:
@@ -59,24 +59,26 @@ def _extract_point_rely_on_transitive(proof_state):
         # 动态路径加载兜底
         try:
             _here = os.path.dirname(__file__)
-            _sym_path = os.path.abspath(os.path.join(_here, os.pardir, 'dependencies', 'symbols.py'))
-            _spec_sym = importlib.util.spec_from_file_location('symbols', _sym_path)
+            _sym_path = os.path.abspath(
+                os.path.join(_here, os.pardir, "dependencies", "symbols.py")
+            )
+            _spec_sym = importlib.util.spec_from_file_location("symbols", _sym_path)
             if _spec_sym is None or _spec_sym.loader is None:
                 return {}
             _sym_mod = importlib.util.module_from_spec(_spec_sym)
             _spec_sym.loader.exec_module(_sym_mod)  # type: ignore[attr-defined]
-            Point = getattr(_sym_mod, 'Point', None)  # type: ignore
+            Point = getattr(_sym_mod, "Point", None)  # type: ignore
             if Point is None:
                 return {}
         except Exception:
             return {}
 
     try:
-        dg = getattr(proof_state, 'dep_graph', None)
-        if dg is None or not hasattr(dg, 'symbols_graph'):
+        dg = getattr(proof_state, "dep_graph", None)
+        if dg is None or not hasattr(dg, "symbols_graph"):
             return {}
         sg = dg.symbols_graph
-        if not hasattr(sg, 'nodes_of_type'):
+        if not hasattr(sg, "nodes_of_type"):
             return {}
         points = sg.nodes_of_type(Point)
     except Exception:
@@ -89,7 +91,7 @@ def _extract_point_rely_on_transitive(proof_state):
         try:
             name2point[p.name] = p
             parents = []
-            for q in getattr(p, 'rely_on', []) or []:
+            for q in getattr(p, "rely_on", []) or []:
                 try:
                     parents.append(q)
                 except Exception:
@@ -97,7 +99,7 @@ def _extract_point_rely_on_transitive(proof_state):
             direct_deps[p.name] = parents
         except Exception:
             # 某个点异常时跳过
-            direct_deps[p.name if hasattr(p, 'name') else str(p)] = []
+            direct_deps[p.name if hasattr(p, "name") else str(p)] = []
 
     # 计算传递闭包: DFS 防环
     def ancestors(name: str, visiting: set[str] | None = None) -> set[str]:
@@ -141,7 +143,7 @@ def _to_jsonable(obj):
 
     # 尝试识别 ProofState（鸭子类型判定以避免强依赖）
     try:
-        is_proof_state_like = hasattr(obj, 'goals') and hasattr(obj, 'dep_graph')
+        is_proof_state_like = hasattr(obj, "goals") and hasattr(obj, "dep_graph")
     except Exception:
         is_proof_state_like = False
 
@@ -163,7 +165,7 @@ def _to_jsonable(obj):
         proof_state_obj = None
         try:
             for vv in obj.values():
-                if hasattr(vv, 'goals') and hasattr(vv, 'dep_graph'):
+                if hasattr(vv, "goals") and hasattr(vv, "dep_graph"):
                     proof_state_obj = vv
                     break
         except Exception:
@@ -173,7 +175,9 @@ def _to_jsonable(obj):
         injected_point_rely_on = None
         if proof_state_obj is not None:
             try:
-                injected_point_rely_on = _extract_point_rely_on_transitive(proof_state_obj)
+                injected_point_rely_on = _extract_point_rely_on_transitive(
+                    proof_state_obj
+                )
             except Exception:
                 injected_point_rely_on = None
 
@@ -187,11 +191,13 @@ def _to_jsonable(obj):
         if injected_point_rely_on is not None:
             # 压缩为 name -> "a,b,c" 的字典，减少 JSON 换行
             try:
-                compact_map = {k: ",".join(v) if isinstance(v, list) else str(v)
-                               for k, v in injected_point_rely_on.items()}
+                compact_map = {
+                    k: ",".join(v) if isinstance(v, list) else str(v)
+                    for k, v in injected_point_rely_on.items()
+                }
             except Exception:
                 compact_map = injected_point_rely_on
-            new_dict['point_rely_on'] = _to_jsonable(compact_map)
+            new_dict["point_rely_on"] = _to_jsonable(compact_map)
         return new_dict
 
     # 序列/集合
@@ -219,7 +225,7 @@ def _load_dev_jgex_problems(file_path: str):
     if not os.path.exists(file_path):
         print(f"警告: 问题文件 {file_path} 不存在")
         return problems
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     for i in range(0, len(lines), 2):
         if i + 1 < len(lines):
@@ -241,10 +247,10 @@ def _solve_and_pack(args):
             from solver_utils import solve_single_problem  # type: ignore
         except Exception:
             _here = os.path.dirname(__file__)
-            _mod_path = os.path.join(_here, 'solver_utils.py')
-            _spec = importlib.util.spec_from_file_location('solver_utils', _mod_path)
+            _mod_path = os.path.join(_here, "solver_utils.py")
+            _spec = importlib.util.spec_from_file_location("solver_utils", _mod_path)
             if _spec is None or _spec.loader is None:
-                raise ImportError('无法加载 solver_utils')
+                raise ImportError("无法加载 solver_utils")
             _mod = importlib.util.module_from_spec(_spec)
             _spec.loader.exec_module(_mod)  # type: ignore[attr-defined]
             solve_single_problem = _mod.solve_single_problem  # type: ignore[attr-defined]
@@ -255,9 +261,15 @@ def _solve_and_pack(args):
             max_attempts=max_attempts,
             timeout_sec=timeout_sec,
         )
-        res['problem_id'] = problem_id
+        res["problem_id"] = problem_id
     except Exception as e:
-        res = {"success": False, "proof": None, "run_info": None, "error": str(e), "problem_id": problem_id}
+        res = {
+            "success": False,
+            "proof": None,
+            "run_info": None,
+            "error": str(e),
+            "problem_id": problem_id,
+        }
 
     # 转为可 JSON 序列化，避免返回主进程时的 pickle/JSON 问题
     return _to_jsonable(res)
@@ -266,11 +278,23 @@ def _solve_and_pack(args):
 def main():
     parser = argparse.ArgumentParser(description="批量调用几何求解器")
     parser.add_argument("problems_file", help="问题文件路径 (两行一题的 dev_jgex 格式)")
-    parser.add_argument("--max-attempts", type=int, default=100, help="构建状态时的最大尝试次数")
+    parser.add_argument(
+        "--max-attempts", type=int, default=100, help="构建状态时的最大尝试次数"
+    )
     parser.add_argument("--timeout", type=int, default=60, help="单题求解超时时间(秒)")
-    parser.add_argument("--limit", type=int, default=None, help="仅求解前 N 题用于快速排查")
-    parser.add_argument("--workers", type=int, default=1, help="并行工作数(>1 启用并行)")
-    parser.add_argument("--backend", type=str, choices=["thread", "process"], default="process", help="并行后端：thread 或 process（默认 process 更稳定）")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="仅求解前 N 题用于快速排查"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=1, help="并行工作数(>1 启用并行)"
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["thread", "process"],
+        default="process",
+        help="并行后端：thread 或 process（默认 process 更稳定）",
+    )
     args = parser.parse_args()
 
     problems_file = args.problems_file
@@ -295,7 +319,9 @@ def main():
         if args.limit is not None:
             problems = problems[: max(args.limit, 0)]
         total = len(problems)
-        print(f"开始并行求解(线程) {total} 个问题... workers={args.workers}, max_attempts={args.max_attempts}, timeout={args.timeout}s")
+        print(
+            f"开始并行求解(线程) {total} 个问题... workers={args.workers}, max_attempts={args.max_attempts}, timeout={args.timeout}s"
+        )
 
         results = []
         solved_count = 0
@@ -308,12 +334,12 @@ def main():
                 st = time.time()
                 fut = ex.submit(
                     solve_single_problem,
-                    p['problem_text'],
+                    p["problem_text"],
                     "",  # 规则文件当前未使用
                     args.max_attempts,
                     args.timeout,
                 )
-                future_map[fut] = (p['problem_id'], st)
+                future_map[fut] = (p["problem_id"], st)
 
             processed = 0
             for fut in as_completed(future_map):
@@ -321,28 +347,41 @@ def main():
                 try:
                     res = fut.result()
                 except Exception as e:
-                    res = {"success": False, "proof": None, "run_info": None, "error": str(e)}
-                res['problem_id'] = pid
+                    res = {
+                        "success": False,
+                        "proof": None,
+                        "run_info": None,
+                        "error": str(e),
+                    }
+                res["problem_id"] = pid
                 results.append(_to_jsonable(res))
                 processed += 1
                 dur = time.time() - st
-                if res.get('success'):
+                if res.get("success"):
                     solved_count += 1
                     print(f"[完成] {processed}/{total} 成功: {pid} 用时 {dur:.1f}s")
                 else:
-                    err = res.get('error')
+                    err = res.get("error")
                     err_msg = f" 失败: {err}" if err else " 失败"
                     print(f"[完成] {processed}/{total}{err_msg}: {pid} 用时 {dur:.1f}s")
 
         solve_rate = (solved_count / total) if total > 0 else 0.0
-        stats = {"total": total, "solved": solved_count, "solve_rate": solve_rate, "results": results, "realtime_sec": time.time() - start_real}
+        stats = {
+            "total": total,
+            "solved": solved_count,
+            "solve_rate": solve_rate,
+            "results": results,
+            "realtime_sec": time.time() - start_real,
+        }
     else:
         # 进程并行：更适合计算密集或线程不安全的库
         problems = _load_dev_jgex_problems(problems_file)
         if args.limit is not None:
             problems = problems[: max(args.limit, 0)]
         total = len(problems)
-        print(f"开始并行求解(进程) {total} 个问题... workers={args.workers}, max_attempts={args.max_attempts}, timeout={args.timeout}s")
+        print(
+            f"开始并行求解(进程) {total} 个问题... workers={args.workers}, max_attempts={args.max_attempts}, timeout={args.timeout}s"
+        )
 
         results = []
         solved_count = 0
@@ -350,7 +389,7 @@ def main():
 
         # Linux/CUDA 更推荐 spawn，避免 fork 后 GPU/线程状态问题
         try:
-            mp.set_start_method('spawn', force=True)
+            mp.set_start_method("spawn", force=True)
         except RuntimeError:
             pass
 
@@ -360,9 +399,15 @@ def main():
                 st = time.time()
                 fut = ex.submit(
                     _solve_and_pack,
-                    (p['problem_id'], p['problem_text'], "", args.max_attempts, args.timeout)
+                    (
+                        p["problem_id"],
+                        p["problem_text"],
+                        "",
+                        args.max_attempts,
+                        args.timeout,
+                    ),
                 )
-                future_map[fut] = (p['problem_id'], st)
+                future_map[fut] = (p["problem_id"], st)
 
             processed = 0
             for fut in as_completed(future_map):
@@ -370,28 +415,44 @@ def main():
                 try:
                     res = fut.result()
                 except Exception as e:
-                    res = _to_jsonable({"success": False, "proof": None, "run_info": None, "error": str(e), "problem_id": pid})
+                    res = _to_jsonable(
+                        {
+                            "success": False,
+                            "proof": None,
+                            "run_info": None,
+                            "error": str(e),
+                            "problem_id": pid,
+                        }
+                    )
                 # res 已经是 JSON-safe
                 results.append(res)
                 processed += 1
                 dur = time.time() - st
                 success = False
                 try:
-                    success = bool(res.get('success'))  # type: ignore[attr-defined]
+                    success = bool(res.get("success"))  # type: ignore[attr-defined]
                 except Exception:
                     success = False
                 if success:
                     solved_count += 1
                     print(f"[完成] {processed}/{total} 成功: {pid} 用时 {dur:.1f}s")
                 else:
-                    err = res.get('error') if isinstance(res, dict) else None
+                    err = res.get("error") if isinstance(res, dict) else None
                     err_msg = f" 失败: {err}" if err else " 失败"
                     print(f"[完成] {processed}/{total}{err_msg}: {pid} 用时 {dur:.1f}s")
 
         solve_rate = (solved_count / total) if total > 0 else 0.0
-        stats = {"total": total, "solved": solved_count, "solve_rate": solve_rate, "results": results, "realtime_sec": time.time() - start_real}
+        stats = {
+            "total": total,
+            "solved": solved_count,
+            "solve_rate": solve_rate,
+            "results": results,
+            "realtime_sec": time.time() - start_real,
+        }
 
-    print(f"总数: {stats['total']}, 解决: {stats['solved']}, 成功率: {stats['solve_rate']:.2%}")
+    print(
+        f"总数: {stats['total']}, 解决: {stats['solved']}, 成功率: {stats['solve_rate']:.2%}"
+    )
 
     # 保存完整结果
     out_json = os.path.splitext(problems_file)[0] + "_results.json"

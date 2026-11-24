@@ -59,7 +59,7 @@ def filter_records(
     # construction, so we only need to rebuild once per seed group.
     groups: dict[int, list[dict]] = defaultdict(list)
     for rec in records:
-        groups[rec['seed']].append(rec)
+        groups[rec["seed"]].append(rec)
 
     # Lazy imports — avoid dragging in heavy deps at module level
     from newclid.api import GeometricSolverBuilder
@@ -79,8 +79,9 @@ def filter_records(
 
         # Rebuild once for this seed group
         try:
-            builder = (GeometricSolverBuilder(seed=rebuild_seed)
-                       .load_problem_from_txt(constr))
+            builder = GeometricSolverBuilder(seed=rebuild_seed).load_problem_from_txt(
+                constr
+            )
             solver = builder.build(max_attempts=max_attempts)
         except Exception:
             stats["build_fail"] += len(group)
@@ -152,7 +153,7 @@ def filter_file(
     else:
         # Ray parallel: split by seed groups across workers
         import ray
-        from newclid.discovery.reduction.parallel import ensure_ray, run_bounded
+        from newclid.discovery.reduction.parallel import ensure_ray
 
         ensure_ray(n_workers)
         if not ray.is_initialized():
@@ -165,7 +166,9 @@ def filter_file(
 
         seed_list = list(groups.items())
         chunk_size = max(1, len(seed_list) // n_workers)
-        chunks = [seed_list[i:i + chunk_size] for i in range(0, len(seed_list), chunk_size)]
+        chunks = [
+            seed_list[i : i + chunk_size] for i in range(0, len(seed_list), chunk_size)
+        ]
 
         @ray.remote(num_cpus=1)
         def _filter_chunk(chunk, _rebuild_seed, _max_attempts):

@@ -127,9 +127,7 @@ def pick_best_builds(
             {
                 "build_seed": build_seed,
                 "score": score_points(point_coords),
-                "point_coords": {
-                    name: list(xy) for name, xy in point_coords.items()
-                },
+                "point_coords": {name: list(xy) for name, xy in point_coords.items()},
             }
         )
         if len(candidates) >= stop_after_successes:

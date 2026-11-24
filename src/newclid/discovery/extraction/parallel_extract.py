@@ -50,11 +50,18 @@ def _process_chunk(
     for line_no, seed, index_in_seed, record in records:
         try:
             graph = SingleProofGraph.build_from_result_record(
-                record, seed=seed, index_in_seed=index_in_seed,
+                record,
+                seed=seed,
+                index_in_seed=index_in_seed,
             )
         except Exception as exc:  # 单条失败不影响整批
             failures.append(
-                {"seed": seed, "index_in_seed": index_in_seed, "line": line_no, "error": str(exc)}
+                {
+                    "seed": seed,
+                    "index_in_seed": index_in_seed,
+                    "line": line_no,
+                    "error": str(exc),
+                }
             )
             continue
         built += 1
@@ -142,30 +149,51 @@ def extract_propositions_parallel(
     from newclid.discovery.extraction.graph_manager import select_records
     from newclid.discovery.reduction.parallel import ensure_ray, run_bounded
 
-    chosen = select_records(input_path, limit=limit, sample=sample, random_seed=random_seed)
-    chunks = [chosen[i:i + chunk_size] for i in range(0, len(chosen), chunk_size)]
+    chosen = select_records(
+        input_path, limit=limit, sample=sample, random_seed=random_seed
+    )
+    chunks = [chosen[i : i + chunk_size] for i in range(0, len(chosen), chunk_size)]
 
     if not chunks:
-        return [], [], {
-            "built": 0, "failures": 0, "collapsed_steps": 0,
-            "subgraphs": 0, "skipped_by_predicate": 0, "skipped_by_eqpoint": 0,
-            "eqpoint_merged": 0, "eqpoint_dropped_trivial": 0,
-        }
+        return (
+            [],
+            [],
+            {
+                "built": 0,
+                "failures": 0,
+                "collapsed_steps": 0,
+                "subgraphs": 0,
+                "skipped_by_predicate": 0,
+                "skipped_by_eqpoint": 0,
+                "eqpoint_merged": 0,
+                "eqpoint_dropped_trivial": 0,
+            },
+        )
 
     ensure_ray(n_workers)
     remote = ray.remote(_process_chunk)
-    args = [(c, simplify, decompose, merge_eqpoints_flag, rule_skip_predicates) for c in chunks]
+    args = [
+        (c, simplify, decompose, merge_eqpoints_flag, rule_skip_predicates)
+        for c in chunks
+    ]
 
     propositions: list[PropositionRecord] = []
     failures: list[dict[str, Any]] = []
     agg: dict[str, int] = {
-        "built": 0, "failures": 0, "collapsed_steps": 0,
-        "subgraphs": 0, "skipped_by_predicate": 0, "skipped_by_eqpoint": 0,
-        "eqpoint_merged": 0, "eqpoint_dropped_trivial": 0,
+        "built": 0,
+        "failures": 0,
+        "collapsed_steps": 0,
+        "subgraphs": 0,
+        "skipped_by_predicate": 0,
+        "skipped_by_eqpoint": 0,
+        "eqpoint_merged": 0,
+        "eqpoint_dropped_trivial": 0,
     }
     for props, fails, stats in tqdm(
         run_bounded(remote, args, inflight=n_workers),
-        total=len(chunks), desc="[part1] 构图+命题提取(并行)", unit="块",
+        total=len(chunks),
+        desc="[part1] 构图+命题提取(并行)",
+        unit="块",
     ):
         propositions.extend(props)
         failures.extend(fails)

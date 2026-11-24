@@ -27,7 +27,9 @@ def get_git_commit(repo_root: str | Path | None = None) -> str:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=Path(repo_root or "."),
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout.strip() or "unknown"
     except Exception:
@@ -67,29 +69,48 @@ class AttemptAggregator:
 
     def _resolve_key(self, record: dict[str, Any]) -> str:
         key = record.get("attempt_key") or build_attempt_key(
-            record.get("request_id"), record.get("candidate_rank"), record.get("node_id")
+            record.get("request_id"),
+            record.get("candidate_rank"),
+            record.get("node_id"),
         )
         return key
 
     def _common(self, record: dict[str, Any]) -> dict[str, Any]:
-        return {k: record.get(k) for k in
-                ("run_id", "route", "agent", "problem_name", "problem_index", "ts_utc", "elapsed_s")}
+        return {
+            k: record.get(k)
+            for k in (
+                "run_id",
+                "route",
+                "agent",
+                "problem_name",
+                "problem_index",
+                "ts_utc",
+                "elapsed_s",
+            )
+        }
 
     def _base_attempt(self, record: dict[str, Any]) -> dict[str, Any]:
         return {
             **self._common(record),
             "attempt_type": "base_ddar",
-            "attempt_key": record.get("attempt_key") or build_attempt_key(None, None, record.get("node_id")),
+            "attempt_key": record.get("attempt_key")
+            or build_attempt_key(None, None, record.get("node_id")),
             "attempt_id": record.get("node_id"),
             "node_id": record.get("node_id"),
             "parent_node_id": record.get("parent_node_id"),
             "depth": record.get("depth"),
-            "request_id": None, "candidate_rank": None,
-            "beam_score_before": None, "beam_score_after": None,
-            "status": None, "decision": None,
-            "ddar_status": None, "ddar_elapsed_time": None,
-            "ddar_build_work_time_s": None, "ddar_engine_work_time_s": None,
-            "raw_aux_text": None, "construction_text": None,
+            "request_id": None,
+            "candidate_rank": None,
+            "beam_score_before": None,
+            "beam_score_after": None,
+            "status": None,
+            "decision": None,
+            "ddar_status": None,
+            "ddar_elapsed_time": None,
+            "ddar_build_work_time_s": None,
+            "ddar_engine_work_time_s": None,
+            "raw_aux_text": None,
+            "construction_text": None,
             "model_think": None,
             "error_type": record.get("error_type"),
             "error_message": record.get("error_message"),
@@ -102,16 +123,22 @@ class AttemptAggregator:
         return {
             **self._common(record),
             "attempt_type": "candidate",
-            "attempt_key": record.get("attempt_key") or build_attempt_key(request_id, candidate_rank, node_id),
-            "attempt_id": node_id, "node_id": node_id,
+            "attempt_key": record.get("attempt_key")
+            or build_attempt_key(request_id, candidate_rank, node_id),
+            "attempt_id": node_id,
+            "node_id": node_id,
             "parent_node_id": record.get("parent_node_id"),
             "depth": record.get("depth"),
-            "request_id": request_id, "candidate_rank": candidate_rank,
+            "request_id": request_id,
+            "candidate_rank": candidate_rank,
             "beam_score_before": record.get("beam_score_before"),
             "beam_score_after": record.get("beam_score_after"),
-            "status": record.get("decision"), "decision": record.get("decision"),
-            "ddar_status": None, "ddar_elapsed_time": None,
-            "ddar_build_work_time_s": None, "ddar_engine_work_time_s": None,
+            "status": record.get("decision"),
+            "decision": record.get("decision"),
+            "ddar_status": None,
+            "ddar_elapsed_time": None,
+            "ddar_build_work_time_s": None,
+            "ddar_engine_work_time_s": None,
             "raw_aux_text": record.get("raw_aux_text"),
             "construction_text": record.get("construction_text"),
             "model_think": record.get("model_think"),
@@ -141,16 +168,24 @@ class AttemptAggregator:
             if attempt is None:
                 attempt = self._candidate_attempt(record)
             else:
-                attempt.update({
-                    **self._candidate_attempt(record),
-                    "ddar_status": attempt.get("ddar_status"),
-                    "ddar_elapsed_time": attempt.get("ddar_elapsed_time"),
-                    "raw_aux_text": record.get("raw_aux_text", attempt.get("raw_aux_text")),
-                    "construction_text": record.get("construction_text", attempt.get("construction_text")),
-                    "model_think": record.get("model_think", attempt.get("model_think")),
-                    "error_type": attempt.get("error_type"),
-                    "error_message": attempt.get("error_message"),
-                })
+                attempt.update(
+                    {
+                        **self._candidate_attempt(record),
+                        "ddar_status": attempt.get("ddar_status"),
+                        "ddar_elapsed_time": attempt.get("ddar_elapsed_time"),
+                        "raw_aux_text": record.get(
+                            "raw_aux_text", attempt.get("raw_aux_text")
+                        ),
+                        "construction_text": record.get(
+                            "construction_text", attempt.get("construction_text")
+                        ),
+                        "model_think": record.get(
+                            "model_think", attempt.get("model_think")
+                        ),
+                        "error_type": attempt.get("error_type"),
+                        "error_message": attempt.get("error_message"),
+                    }
+                )
             self._register_node(record, attempt["attempt_key"])
             if record.get("decision") == "ddar_submitted":
                 self.pending[attempt["attempt_key"]] = attempt
@@ -166,8 +201,14 @@ class AttemptAggregator:
                 key = build_attempt_key(None, None, record.get("node_id"))
             attempt = self.pending.pop(key, self._base_attempt(record))
             attempt["attempt_key"] = key
-            for field in ("ddar_status", "ddar_elapsed_time", "ddar_build_work_time_s",
-                          "ddar_engine_work_time_s", "error_type", "error_message"):
+            for field in (
+                "ddar_status",
+                "ddar_elapsed_time",
+                "ddar_build_work_time_s",
+                "ddar_engine_work_time_s",
+                "error_type",
+                "error_message",
+            ):
                 src = {"ddar_status": "status"}.get(field, field)
                 attempt[field] = record.get(src)
             attempt["status"] = record.get("status")
@@ -213,7 +254,9 @@ class TraceWriter:
         self.start_time = start_time
         self._fp = open(self.path, "a", encoding="utf-8")
         self._attempt_aggregator = (
-            AttemptAggregator(AttemptWriter(attempts_path)) if attempts_path is not None else None
+            AttemptAggregator(AttemptWriter(attempts_path))
+            if attempts_path is not None
+            else None
         )
 
     def log(self, event: str, **payload: Any) -> None:
@@ -255,7 +298,11 @@ class TraceRun:
         repo_root: str | Path | None = None,
     ) -> None:
         dataset_slug = sanitize_filename(Path(dataset_path).stem)
-        model_repr = "__".join(str(x) for x in model_path) if isinstance(model_path, list) else str(model_path)
+        model_repr = (
+            "__".join(str(x) for x in model_path)
+            if isinstance(model_path, list)
+            else str(model_path)
+        )
         model_slug = sanitize_filename(Path(model_repr).name or model_repr)
         if run_name is None:
             run_name = f"{sanitize_filename(route)}_{dataset_slug}_{model_slug}"
@@ -267,10 +314,14 @@ class TraceRun:
         self.problem_dir.mkdir(parents=True, exist_ok=True)
         self.attempts_dir.mkdir(parents=True, exist_ok=True)
         meta = {
-            "run_id": self.run_id, "route": route, "agent": agent,
-            "dataset_path": str(dataset_path), "model_path": model_path,
+            "run_id": self.run_id,
+            "route": route,
+            "agent": agent,
+            "dataset_path": str(dataset_path),
+            "model_path": model_path,
             "git_commit": get_git_commit(repo_root),
-            "argv": sys.argv, "trace_outputs": ["raw_events"],
+            "argv": sys.argv,
+            "trace_outputs": ["raw_events"],
             **params,
         }
         with open(self.run_dir / "run_meta.json", "w", encoding="utf-8") as fp:
@@ -289,7 +340,11 @@ class TraceRun:
         filename = f"{problem_index:04d}_{sanitize_filename(problem_name)}.jsonl"
         return TraceWriter(
             self.problem_dir / filename,
-            run_id=self.run_id, route=route, agent=agent,
-            problem_name=problem_name, problem_index=problem_index,
-            start_time=start_time, attempts_path=None,
+            run_id=self.run_id,
+            route=route,
+            agent=agent,
+            problem_name=problem_name,
+            problem_index=problem_index,
+            start_time=start_time,
+            attempts_path=None,
         )

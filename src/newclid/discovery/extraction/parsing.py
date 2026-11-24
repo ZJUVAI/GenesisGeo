@@ -31,17 +31,18 @@ _BRACKET_ID_RE = re.compile(r"\[(\d+)\]")
 
 # fl_problem 中的 point@x_y（坐标可为负数 / 科学计数法）
 _COORD_RE = re.compile(
-    r"\b([A-Za-z][A-Za-z0-9]*)"                       # 点名
+    r"\b([A-Za-z][A-Za-z0-9]*)"  # 点名
     r"@"
-    r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"    # x
+    r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"  # x
     r"_"
-    r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"    # y
+    r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"  # y
 )
 
 
 # ---------------------------------------------------------------------------
 # 标签处理
 # ---------------------------------------------------------------------------
+
 
 def strip_tags(text: str) -> str:
     """去掉形如 <tag> / </tag> 的标签。"""
@@ -60,6 +61,7 @@ def extract_tag_content(text: str, tag: str) -> str:
 # ---------------------------------------------------------------------------
 # fact / proof 解析
 # ---------------------------------------------------------------------------
+
 
 def parse_fact_segments(section: str) -> list[tuple[str, tuple[str, ...], str]]:
     """从一段文本中解析所有 ``pred args [id]`` 事实片段。
@@ -100,7 +102,7 @@ def parse_proof_step(
         return None
     concl_id = first.group(1)
     left = s[: first.start()].strip()
-    right = s[first.end():].strip()
+    right = s[first.end() :].strip()
     if not left or not right:
         return None
 
@@ -118,6 +120,7 @@ def parse_proof_step(
 # ---------------------------------------------------------------------------
 # 坐标 / goal / aux 点
 # ---------------------------------------------------------------------------
+
 
 def extract_points(fl_problem: str) -> tuple[Point, ...]:
     """从 fl_problem 解析点坐标（重命名后点名）。按出现顺序去重。"""
@@ -142,6 +145,7 @@ def extract_goal(problem_section: str) -> PredicateInstance | None:
     if not tokens:
         return None
     return PredicateInstance(predicate=tokens[0], args=tuple(tokens[1:]))
+
 
 def extract_aux_points(aux_section: str) -> tuple[str, ...]:
     """从 <aux> 内容中提取辅助构造点名。

@@ -9,7 +9,6 @@ from typing import Any
 
 import requests
 import ray
-from transformers import AutoTokenizer
 
 from newclid.agent.base import BaseAgent, RESPONSE_PREFIX
 from newclid.evaluation.search_runtime import (
@@ -33,6 +32,8 @@ HTTP_WORKERS = max(1, int(os.environ.get("EVAL_HTTP_WORKERS", "16")))
 
 @lru_cache(maxsize=8)
 def _load_tokenizer(tokenizer_name: str):
+    from transformers import AutoTokenizer
+
     return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
 
 
@@ -77,7 +78,8 @@ def _parse_scored_choices(
         model_think, text_without_think = _split_model_think(text)
         token_ids = choice.get("token_ids", [])
         token_logprobs = [
-            item.get("logprob") for item in choice.get("logprobs", {}).get("content", [])
+            item.get("logprob")
+            for item in choice.get("logprobs", {}).get("content", [])
         ]
         stop_idx = next(
             (i for i, tid in enumerate(token_ids) if tid == stop_token_id),
@@ -251,8 +253,12 @@ def _build_vl_request_payload(
     png_path = render_root / f"d{depth}_{request_id}.png"
     save_figure_as_png(
         draw_clause_figure(
-            current_proof, problem, None, current_proof.rng,
-            draw_annotations=True, theme=None,
+            current_proof,
+            problem,
+            None,
+            current_proof.rng,
+            draw_annotations=True,
+            theme=None,
         ),
         png_path=str(png_path),
         img_pixels=512,
@@ -315,7 +321,9 @@ class _BaseQwen3Agent(BaseAgent):
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
         if served_model_name is None:
-            self.served_model_name, self.server_models = discover_served_model(self.base_url)
+            self.served_model_name, self.server_models = discover_served_model(
+                self.base_url
+            )
         else:
             self.served_model_name = served_model_name
             self.server_models: list[str | None] = [served_model_name]
@@ -351,7 +359,9 @@ class _BaseQwen3Agent(BaseAgent):
         request_timeout_s = HTTP_TIMEOUT_S
         deadline = request.get("_deadline_unix_s")
         if deadline is not None:
-            request_timeout_s = max(1.0, min(HTTP_TIMEOUT_S, float(deadline) - time.time()))
+            request_timeout_s = max(
+                1.0, min(HTTP_TIMEOUT_S, float(deadline) - time.time())
+            )
         payload = {
             "model": self.served_model_name,
             "messages": request["messages"],
@@ -383,7 +393,9 @@ class _BaseQwen3Agent(BaseAgent):
         response.raise_for_status()
         choices = list(response.json().get("choices", []))
         if len(choices) != self.decoding_size:
-            raise ValueError(f"Expected {self.decoding_size} choices, got {len(choices)}.")
+            raise ValueError(
+                f"Expected {self.decoding_size} choices, got {len(choices)}."
+            )
         aux_dsl_scores, aux_dsl_thinks = _parse_scored_choices(
             choices=choices,
             request=request,

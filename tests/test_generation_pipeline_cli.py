@@ -91,11 +91,17 @@ def test_problem_worker_passes_csolver_equation_flags(monkeypatch):
             captured["solver"] = solver
             captured["kwargs"] = kwargs
 
-        def run(self, max_level=500):
+        def run(self, max_level=500, custom_rules=None):
             captured["max_level"] = max_level
             return True
 
-    dummy_solver = SimpleNamespace(run_infos={"runtime": 0.0}, proof=None)
+    dep_graph = DependencyGraph(AlgebraicManipulator())
+    dummy_solver = SimpleNamespace(
+        run_infos={"runtime": 0.0},
+        proof=SimpleNamespace(
+            dep_graph=dep_graph, symbols_graph=dep_graph.symbols_graph
+        ),
+    )
     dummy_builder = SimpleNamespace(problemJGEX=SimpleNamespace(constructions=[]))
 
     monkeypatch.setattr("newclid.generation.worker.CSolver", DummyCSolver)
@@ -150,14 +156,21 @@ def test_minimal_aux_search_passes_csolver_equation_flags(monkeypatch):
         def to_str(self):
             return "goal"
 
-        def check(self):
+        def check(self, explain=True):
             return False
 
     class DummyCSolver:
         def __init__(self, problem, seed=None, solver=None, **kwargs):
             captured_kwargs.append(kwargs)
 
-        def run(self, max_level=500):
+        def run(
+            self,
+            max_level=500,
+            *,
+            custom_rules=None,
+            goal_checks_only=False,
+            goal_proofs_only=False,
+        ):
             return False
 
     class DummyGeometricSolver:
@@ -174,9 +187,6 @@ def test_minimal_aux_search_passes_csolver_equation_flags(monkeypatch):
     )
 
     _, timings = ProblemWorker._find_minimal_aux_clauses_new(
-        pointstr2basicstrs={},
-        basicstr2pointstrs={},
-        solver=SimpleNamespace(),
         solver_builder=SimpleNamespace(defs={}, rules=[], seed=123),
         goals_str=["goal"],
         expanded_premises=[],

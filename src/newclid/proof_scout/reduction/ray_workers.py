@@ -7,8 +7,8 @@ This module provides Ray remote functions for parallelizing rule reduction tasks
 - Seed group reduction: parallel processing of seed groups
 - Subsumption testing: parallel subsumption tests across multiple rules
 """
+
 from typing import List, Dict, Any, Optional
-from pathlib import Path
 
 try:
     import ray
@@ -58,13 +58,17 @@ def _reduce_seed_group_worker(
     )
 
     if verbose:
-        print(f"[Ray Worker] Processing seed group {seed_val}: {len(group_rules)} rules")
+        print(
+            f"[Ray Worker] Processing seed group {seed_val}: {len(group_rules)} rules"
+        )
 
     result = reducer.reduce(group_rules)
 
     if verbose:
-        print(f"[Ray Worker] Seed group {seed_val} done: "
-              f"{len(group_rules)} → {result['stats']['basis_count']} rules")
+        print(
+            f"[Ray Worker] Seed group {seed_val} done: "
+            f"{len(group_rules)} → {result['stats']['basis_count']} rules"
+        )
 
     # Add seed_val to result for tracking
     result["seed_val"] = seed_val
@@ -112,10 +116,16 @@ def _test_subsumption_batch_worker_ray(
 
     # Use the existing subsumption tester
     if solver_type == "csolver":
-        from newclid.proof_scout.reduction.subsumption_tester import SubsumptionTesterCSolver
-        tester = SubsumptionTesterCSolver(timeout=timeout, seed=seed, config_path=config_path)
+        from newclid.proof_scout.reduction.subsumption_tester import (
+            SubsumptionTesterCSolver,
+        )
+
+        tester = SubsumptionTesterCSolver(
+            timeout=timeout, seed=seed, config_path=config_path
+        )
     else:
         from newclid.proof_scout.reduction.subsumption_tester import SubsumptionTester
+
         tester = SubsumptionTester(timeout=timeout, seed=seed)
 
     eliminated = []

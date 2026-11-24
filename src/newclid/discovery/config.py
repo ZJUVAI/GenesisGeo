@@ -17,23 +17,23 @@ from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "global": {
-        "output_dir": None,            # 必填，无默认值
+        "output_dir": None,  # 必填，无默认值
         "n_workers": 30,
         "save_intermediates": True,
     },
     "part1_extract": {
         "enabled": False,
         "input": None,
-        "output": None,                # 默认 {output_dir}/part1/extracted_rules.jsonl
+        "output": None,  # 默认 {output_dir}/part1/extracted_rules.jsonl
         "rule_skip_predicates": ["aconst", "rconst"],
     },
     "part2_reduction": {
         "enabled": False,
         "input": None,
-        "output": None,                # 默认 {output_dir}/part2/extracted_rules.txt
+        "output": None,  # 默认 {output_dir}/part2/extracted_rules.txt
         "max_premises": None,
-        "max_perp_premises": None,     # 阶段0: perp 前提数 > 该值则丢弃; null = 不过滤
-        "extra_rules_path": None,      # 额外 sources 规则(如上一轮已验证规则库), 不参与本轮规约/NDG
+        "max_perp_premises": None,  # 阶段0: perp 前提数 > 该值则丢弃; null = 不过滤
+        "extra_rules_path": None,  # 额外 sources 规则(如上一轮已验证规则库), 不参与本轮规约/NDG
         "engine": "full",
         "timeout": 3600,
         "seed_reduction": {
@@ -54,10 +54,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "n_workers": 8,
             "degeneracy_threshold": 0.001,
             "rule_timeout_seconds": 120.0,
-            "min_good_ratio": 0.0,           # good/(good+bad) 采样占比低于该值直接丢弃; 0 = 不检查
-            "normalized_rules_path": None,   # 默认 {output_dir}/part1/normalized_rules.jsonl
-            "occurrences_path": None,        # 默认 {output_dir}/part1/rule_seed_occurrences_all.json
-            "source_dataset_path": None,     # 默认取 part1_extract.input
+            "min_good_ratio": 0.0,  # good/(good+bad) 采样占比低于该值直接丢弃; 0 = 不检查
+            "normalized_rules_path": None,  # 默认 {output_dir}/part1/normalized_rules.jsonl
+            "occurrences_path": None,  # 默认 {output_dir}/part1/rule_seed_occurrences_all.json
+            "source_dataset_path": None,  # 默认取 part1_extract.input
         },
     },
 }
@@ -66,6 +66,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 # 配置加载
 # ---------------------------------------------------------------------------
+
 
 def load_config(config_path: str) -> dict[str, Any]:
     """加载 JSON 配置文件并填充默认值。
@@ -123,11 +124,7 @@ def _merge_configs(default: dict, user: dict) -> dict:
     """递归合并 user 配置到 default 上（user 优先）。"""
     merged = dict(default)
     for key, value in user.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
             merged[key] = _merge_configs(merged[key], value)
         else:
             merged[key] = value

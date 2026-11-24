@@ -10,13 +10,6 @@ This compatibility layer will be removed in a future version.
 
 import warnings
 
-warnings.warn(
-    "newclid.data_discovery is deprecated and will be removed in a future version. "
-    "Please use newclid.proof_scout instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
-
 # Re-export from new locations for backward compatibility
 from newclid.proof_scout.core import (
     ProofGraph,
@@ -26,12 +19,22 @@ from newclid.proof_scout.core import (
     AuxExtractor,
 )
 
+warnings.warn(
+    "newclid.data_discovery is deprecated and will be removed in a future version. "
+    "Please use newclid.proof_scout instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+
 # Lazy import for ProofGraphVisualizer to avoid visualization dependencies
 def __getattr__(name):
     if name == "ProofGraphVisualizer":
         from newclid.proof_scout.core import ProofGraphVisualizer
+
         return ProofGraphVisualizer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ProofGraph",

@@ -26,14 +26,15 @@ import json
 import math
 import os
 import re
-import sys
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
-from itertools import combinations, permutations, product
-from typing import Any, Optional
+from dataclasses import dataclass
+from itertools import combinations
+from typing import Any
 
 import numpy as np
+
+from newclid.numerical.geometries import PointNum as _AlgPointNum
 
 # ---------------------------------------------------------------------------
 # Predicate symmetry groups (permutations that preserve truth value)
@@ -45,14 +46,14 @@ import numpy as np
 
 PRED_SYMMETRY = {
     "cong": [
-        {"swap": [(0, 1)]},           # AB = BA
-        {"swap": [(2, 3)]},           # CD = DC
-        {"swap": [(0, 2), (1, 3)]},   # AB=CD -> CD=AB
+        {"swap": [(0, 1)]},  # AB = BA
+        {"swap": [(2, 3)]},  # CD = DC
+        {"swap": [(0, 2), (1, 3)]},  # AB=CD -> CD=AB
     ],
     "para": [
-        {"swap": [(0, 1)]},           # AB ∥ CD -> BA ∥ CD
-        {"swap": [(2, 3)]},           # AB ∥ CD -> AB ∥ DC
-        {"swap": [(0, 2), (1, 3)]},   # AB ∥ CD -> CD ∥ AB
+        {"swap": [(0, 1)]},  # AB ∥ CD -> BA ∥ CD
+        {"swap": [(2, 3)]},  # AB ∥ CD -> AB ∥ DC
+        {"swap": [(0, 2), (1, 3)]},  # AB ∥ CD -> CD ∥ AB
     ],
     "perp": [
         {"swap": [(0, 1)]},
@@ -71,8 +72,8 @@ PRED_SYMMETRY = {
     ],
     "cyclic": [
         # 8 valid orderings: 4 forward cyclic + 4 reverse cyclic
-        {"rotate": [1, 2, 3, 0]},       # ABCD -> BCDA
-        {"swap": [(0, 3), (1, 2)]},   # reverse (DCBA from ABCD)
+        {"rotate": [1, 2, 3, 0]},  # ABCD -> BCDA
+        {"swap": [(0, 3), (1, 2)]},  # reverse (DCBA from ABCD)
     ],
     "coll": [
         # All 6 permutations of 3 collinear points via adjacent swaps
@@ -85,18 +86,18 @@ PRED_SYMMETRY = {
     ],
     "eqangle": [
         # Reverse each ray independently (valid because cross & dot both flip sign)
-        {"swap": [(0, 1)]},           # reverse first ray of first angle
-        {"swap": [(2, 3)]},           # reverse second ray of first angle
-        {"swap": [(4, 5)]},           # reverse first ray of second angle
-        {"swap": [(6, 7)]},           # reverse second ray of second angle
+        {"swap": [(0, 1)]},  # reverse first ray of first angle
+        {"swap": [(2, 3)]},  # reverse second ray of first angle
+        {"swap": [(4, 5)]},  # reverse first ray of second angle
+        {"swap": [(6, 7)]},  # reverse second ray of second angle
         # Swap the two angles: eqangle(a,b,c,d,e,f,g,h) = eqangle(e,f,g,h,a,b,c,d)
         {"swap": [(0, 4), (1, 5), (2, 6), (3, 7)]},
     ],
     "eqratio": [
-        {"swap": [(0, 1)]},           # AB = BA
-        {"swap": [(2, 3)]},           # CD = DC
-        {"swap": [(4, 5)]},           # EF = FE
-        {"swap": [(6, 7)]},           # GH = HG
+        {"swap": [(0, 1)]},  # AB = BA
+        {"swap": [(2, 3)]},  # CD = DC
+        {"swap": [(4, 5)]},  # EF = FE
+        {"swap": [(6, 7)]},  # GH = HG
         {"swap": [(0, 4), (1, 5), (2, 6), (3, 7)]},  # swap ratios
     ],
     "midp": [
@@ -120,9 +121,7 @@ PRED_SYMMETRY = {
 }
 
 
-def _apply_symmetry(
-    args: list[str], sym: dict
-) -> list[str]:
+def _apply_symmetry(args: list[str], sym: dict) -> list[str]:
     """Apply one symmetry operation to argument list, return new list."""
     result = list(args)
     if "swap" in sym:
@@ -140,9 +139,7 @@ def _apply_symmetry(
     return result
 
 
-def predicate_variants(
-    pred_name: str, args: list[str]
-) -> list[list[str]]:
+def predicate_variants(pred_name: str, args: list[str]) -> list[list[str]]:
     """Generate all argument-permuted variants of a predicate.
 
     Returns list of arg-lists that are semantically equivalent.
@@ -172,15 +169,19 @@ def predicate_variants(
 # defs.txt parser
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ConstructionDef:
     """One construction definition from defs.txt."""
-    name: str                          # e.g. "angle_bisector"
-    new_points: list[str]              # e.g. ["x"]
-    existing_points: list[str]         # e.g. ["a", "b", "c"]
-    all_var_names: list[str]           # e.g. ["x", "a", "b", "c"]
+
+    name: str  # e.g. "angle_bisector"
+    new_points: list[str]  # e.g. ["x"]
+    existing_points: list[str]  # e.g. ["a", "b", "c"]
+    all_var_names: list[str]  # e.g. ["x", "a", "b", "c"]
     requires: list[tuple[str, list[str]]]  # e.g. [("ncoll", ["a","b","c"])]
-    basics: list[tuple[str, list[str]]]    # e.g. [("eqangle", ["b","a","b","x","b","x","b","c"])]
+    basics: list[
+        tuple[str, list[str]]
+    ]  # e.g. [("eqangle", ["b","a","b","x","b","x","b","c"])]
 
     @property
     def is_multi_point(self) -> bool:
@@ -254,9 +255,7 @@ def parse_defs(defs_path: str) -> dict[str, ConstructionDef]:
     # Pattern for a construction header: name followed by space-separated
     # single-letter variable names.  e.g. "angle_bisector x a b c"
     # We distinguish from declare/require/basics lines which contain ':' or '='.
-    HEADER_RE = re.compile(
-        r"^([a-z_][a-z0-9_]*)\s+((?:[a-z]\s*)+)$"
-    )
+    HEADER_RE = re.compile(r"^([a-z_][a-z0-9_]*)\s+((?:[a-z]\s*)+)$")
 
     # Find all header line indices.
     # A valid header is a line matching the construction-name pattern that is
@@ -299,9 +298,9 @@ def parse_defs(defs_path: str) -> dict[str, ConstructionDef]:
 
     for idx, start_line in enumerate(header_indices):
         # Determine end of this block: next header, or EOF
-        end_line = (header_indices[idx + 1]
-                    if idx + 1 < len(header_indices)
-                    else len(all_lines))
+        end_line = (
+            header_indices[idx + 1] if idx + 1 < len(header_indices) else len(all_lines)
+        )
 
         # Collect non-empty lines from this block
         block_lines = []
@@ -323,7 +322,7 @@ def parse_defs(defs_path: str) -> dict[str, ConstructionDef]:
         declare_str = ""
         require_str = ""
         basics_str = ""
-        numerics_str = block_lines[-1]
+        block_lines[-1]
 
         # Line 1 is header, remaining lines can be in various orders.
         # Heuristic: the line with '=' is require, the first line with ':'
@@ -353,7 +352,9 @@ def parse_defs(defs_path: str) -> dict[str, ConstructionDef]:
             # For single-new-point: first var is new, rest are existing
             # For multi-new-point (triangle, segment): all vars might be new
             # Check basics: points on left of ':' are new
-            basics_clauses_init = [c.strip() for c in basics_str.split(";") if c.strip()]
+            basics_clauses_init = [
+                c.strip() for c in basics_str.split(";") if c.strip()
+            ]
             for clause in basics_clauses_init:
                 left_pts, _, _ = _parse_clause_points_preds(clause)
                 for pt in left_pts:
@@ -361,7 +362,9 @@ def parse_defs(defs_path: str) -> dict[str, ConstructionDef]:
                         new_points.append(pt)
             # If still empty, check require
             if not new_points:
-                require_clauses_init = [c.strip() for c in require_str.split(";") if c.strip()]
+                require_clauses_init = [
+                    c.strip() for c in require_str.split(";") if c.strip()
+                ]
                 for clause in require_clauses_init:
                     if "=" in clause:
                         left_str = clause.split("=")[0].strip()
@@ -404,13 +407,15 @@ def parse_defs(defs_path: str) -> dict[str, ConstructionDef]:
 # Reverse index: predicate -> constructions that produce it
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ReverseMatch:
     """A record linking a premise predicate back to a construction."""
+
     construction: ConstructionDef
-    new_point_var: str          # which construction var is the "output"
+    new_point_var: str  # which construction var is the "output"
     basic_pred: tuple[str, list[str]]  # the basics predicate matched
-    arg_map: dict[str, str]     # construction var -> premise point name
+    arg_map: dict[str, str]  # construction var -> premise point name
     require: list[tuple[str, list[str]]]  # require predicates (with construction vars)
 
 
@@ -465,13 +470,17 @@ def match_premise_to_constructions(
                         # "constrained" point (the new_point).
                         # For single-new-point constructions, exactly one
                         # new_point exists.
-                        matches.append(ReverseMatch(
-                            construction=cdef,
-                            new_point_var=cdef.new_points[0] if cdef.new_points else "",
-                            basic_pred=(basic_pred[0], list(basic_pred[1])),
-                            arg_map=arg_map,
-                            require=list(cdef.requires),
-                        ))
+                        matches.append(
+                            ReverseMatch(
+                                construction=cdef,
+                                new_point_var=cdef.new_points[0]
+                                if cdef.new_points
+                                else "",
+                                basic_pred=(basic_pred[0], list(basic_pred[1])),
+                                arg_map=arg_map,
+                                require=list(cdef.requires),
+                            )
+                        )
                         break  # Found a match for this basic_pred
 
     # Deduplicate by (construction.name, frozenset of arg_map items)
@@ -517,12 +526,12 @@ def _try_match_args(
         existing_mapped.add(arg_map[ep])
 
     # The new point must NOT also be an existing point (no self-construction)
-    for np in cdef.new_points:
-        if np in arg_map and arg_map[np] in existing_mapped:
+    for new_point in cdef.new_points:
+        if new_point in arg_map and arg_map[new_point] in existing_mapped:
             return None
 
     # At least one new_point must be mapped
-    if not any(np in arg_map for np in cdef.new_points):
+    if not any(new_point in arg_map for new_point in cdef.new_points):
         return None
 
     return arg_map
@@ -536,18 +545,19 @@ def _try_match_args(
 @dataclass
 class ConstructionSequence:
     """One valid construction ordering."""
+
     steps: list["ConstructionStep"]  # in order
-    base_points: list[str]           # points constructed via free/triangle/segment
-    score: int = 0                   # higher = more likely to produce branches
+    base_points: list[str]  # points constructed via free/triangle/segment
+    score: int = 0  # higher = more likely to produce branches
 
 
 @dataclass
 class ConstructionStep:
-    point: str                       # point being constructed
-    construction_name: str            # e.g. "angle_mirror"
+    point: str  # point being constructed
+    construction_name: str  # e.g. "angle_mirror"
     construction_def: ConstructionDef
-    arg_map: dict[str, str]          # construction vars -> actual point names
-    premise_index: int | None        # which premise this covers (None for base)
+    arg_map: dict[str, str]  # construction vars -> actual point names
+    premise_index: int | None  # which premise this covers (None for base)
 
 
 def generate_construction_sequences(
@@ -590,33 +600,40 @@ def generate_construction_sequences(
     point_steps: dict[str, list[ConstructionStep]] = defaultdict(list)
 
     # Free construction for all points (as fallback)
-    free_defs = [c for c in constructions.values()
-                 if c.is_base and not c.is_multi_point and c.name == "free"]
+    free_defs = [
+        c
+        for c in constructions.values()
+        if c.is_base and not c.is_multi_point and c.name == "free"
+    ]
     free_def = free_defs[0] if free_defs else None
 
     # For "free-only" points, only free construction is available
     for pt in free_points:
         if free_def:
-            point_steps[pt].append(ConstructionStep(
-                point=pt,
-                construction_name="free",
-                construction_def=free_def,
-                arg_map={free_def.new_points[0]: pt},
-                premise_index=None,
-            ))
+            point_steps[pt].append(
+                ConstructionStep(
+                    point=pt,
+                    construction_name="free",
+                    construction_def=free_def,
+                    arg_map={free_def.new_points[0]: pt},
+                    premise_index=None,
+                )
+            )
 
     # For constrained points, add matched constructions.
     # ONLY use constructions where the new point is the FIRST variable
     # (the solver requires this for fl_problem syntax).
     for pt, match_list in constrained_points.items():
         if free_def:
-            point_steps[pt].append(ConstructionStep(
-                point=pt,
-                construction_name="free",
-                construction_def=free_def,
-                arg_map={free_def.new_points[0]: pt},
-                premise_index=None,
-            ))
+            point_steps[pt].append(
+                ConstructionStep(
+                    point=pt,
+                    construction_name="free",
+                    construction_def=free_def,
+                    arg_map={free_def.new_points[0]: pt},
+                    premise_index=None,
+                )
+            )
         for prem_idx, match in match_list:
             cdef = match.construction
             # Filter 1: blacklist (constructions we never want to use)
@@ -658,8 +675,10 @@ def generate_construction_sequences(
                 premise_index=prem_idx,
             )
             # Avoid duplicates
-            existing = {(s.construction_name, frozenset(s.arg_map.items()))
-                        for s in point_steps[pt]}
+            existing = {
+                (s.construction_name, frozenset(s.arg_map.items()))
+                for s in point_steps[pt]
+            }
             key = (step.construction_name, frozenset(step.arg_map.items()))
             if key not in existing:
                 point_steps[pt].append(step)
@@ -706,7 +725,11 @@ def generate_construction_sequences(
             cdef = c.construction_def
             # Construction is comma-compatible iff the new point is the FIRST var
             new_var = cdef.new_points[0] if cdef.new_points else None
-            new_pos = cdef.all_var_names.index(new_var) if new_var and new_var in cdef.all_var_names else -1
+            new_pos = (
+                cdef.all_var_names.index(new_var)
+                if new_var and new_var in cdef.all_var_names
+                else -1
+            )
             if new_pos == 0:
                 comma_ok.append(c)
             else:
@@ -724,14 +747,18 @@ def generate_construction_sequences(
             for indices in combinations(range(len(comma_ok)), 2):
                 s0, s1 = comma_ok[indices[0]], comma_ok[indices[1]]
                 # Skip if both cover the same premise
-                if (s0.premise_index is not None and
-                    s1.premise_index is not None and
-                    s0.premise_index == s1.premise_index):
+                if (
+                    s0.premise_index is not None
+                    and s1.premise_index is not None
+                    and s0.premise_index == s1.premise_index
+                ):
                     continue
                 subset = [s0, s1]
                 if not _inputs_available(subset):
                     continue
-                prem_set = set(s.premise_index for s in subset if s.premise_index is not None)
+                prem_set = set(
+                    s.premise_index for s in subset if s.premise_index is not None
+                )
                 # Penalty for extra basics beyond matched premises
                 extra = sum(len(s.construction_def.basics) - 1 for s in subset)
                 score = len(prem_set) * 100 + 2 - extra * 5
@@ -743,7 +770,9 @@ def generate_construction_sequences(
                 prem_set = {c.premise_index} if c.premise_index is not None else set()
                 # Strong penalty for unmatched basics: each extra constraint not
                 # covered by any premise adds significant geometric burden
-                extra_basics = len(c.construction_def.basics) - 1  # one matches current premise
+                extra_basics = (
+                    len(c.construction_def.basics) - 1
+                )  # one matches current premise
                 score = len(prem_set) * 100 + 1 - extra_basics * 5
                 subset_scores.append((score, [c]))
 
@@ -777,31 +806,40 @@ def generate_construction_sequences(
 
         all_pts_done = all(p in constructed for p in point_list)
         if covered_premises == set(premise_matches.keys()) and all_pts_done:
-            n_non_base = len([s for s in current_steps if not s.construction_def.is_base])
-            n_points_non_base = len(set(
-                s.point for s in current_steps if not s.construction_def.is_base
-            ))
+            n_non_base = len(
+                [s for s in current_steps if not s.construction_def.is_base]
+            )
+            n_points_non_base = len(
+                set(s.point for s in current_steps if not s.construction_def.is_base)
+            )
             score = sum(
-                10 if s.construction_def.is_intersection else
-                5 if not s.construction_def.is_base else
-                0
+                10
+                if s.construction_def.is_intersection
+                else 5
+                if not s.construction_def.is_base
+                else 0
                 for s in current_steps
             )
             if n_non_base > n_points_non_base:
                 score += 15
-            sequences.append(ConstructionSequence(
-                steps=list(current_steps),
-                base_points=sorted(free_points),
-                score=score,
-            ))
+            sequences.append(
+                ConstructionSequence(
+                    steps=list(current_steps),
+                    base_points=sorted(free_points),
+                    score=score,
+                )
+            )
             return
 
         # Try to construct points with available non-free candidates first
         for pt in point_list:
             if pt in constructed:
                 continue
-            candidates = [s for s in point_steps[pt]
-                          if not s.construction_def.is_base and _inputs_available([s])]
+            candidates = [
+                s
+                for s in point_steps[pt]
+                if not s.construction_def.is_base and _inputs_available([s])
+            ]
             if candidates:
                 _try_subsets(pt, candidates, depth)
                 return
@@ -830,6 +868,7 @@ def generate_construction_sequences(
 # ---------------------------------------------------------------------------
 # fl_problem builder
 # ---------------------------------------------------------------------------
+
 
 def _construction_to_fl_clause(
     steps: list[ConstructionStep],
@@ -875,13 +914,15 @@ def build_fl_problem(
     # Remap all steps through rename_map
     remapped_steps = []
     for step in seq.steps:
-        remapped_steps.append(ConstructionStep(
-            point=rename_map.get(step.point, step.point),
-            construction_name=step.construction_name,
-            construction_def=step.construction_def,
-            arg_map={k: rename_map.get(v, v) for k, v in step.arg_map.items()},
-            premise_index=step.premise_index,
-        ))
+        remapped_steps.append(
+            ConstructionStep(
+                point=rename_map.get(step.point, step.point),
+                construction_name=step.construction_name,
+                construction_def=step.construction_def,
+                arg_map={k: rename_map.get(v, v) for k, v in step.arg_map.items()},
+                premise_index=step.premise_index,
+            )
+        )
 
     # Group by point (preserving order of first appearance)
     point_order = []
@@ -911,7 +952,6 @@ def build_all_fl_problems(
 # Algebraic branch enumerator — solves constructions directly, no randomness
 # ---------------------------------------------------------------------------
 
-from newclid.numerical.geometries import PointNum as _AlgPointNum
 
 def _line_circle_intersections(line_pt, line_dir, center, radius):
     """Return 0, 1, or 2 intersection points of a line and circle.
@@ -999,7 +1039,9 @@ def _solve_single_construction(name, args, pts, rng):
         axis_len2 = max(axis.x * axis.x + axis.y * axis.y, 1e-16)
         proj = (v.x * axis.x + v.y * axis.y) / axis_len2
         proj_pt = _AlgPointNum(vertex.x + proj * axis.x, vertex.y + proj * axis.y)
-        return [_AlgPointNum(2 * proj_pt.x - to_reflect.x, 2 * proj_pt.y - to_reflect.y)]
+        return [
+            _AlgPointNum(2 * proj_pt.x - to_reflect.x, 2 * proj_pt.y - to_reflect.y)
+        ]
     elif name == "angle_bisector":
         # x on angle bisector: infinite on a line
         return None
@@ -1121,8 +1163,9 @@ def _get_line_from_construction(name, args, pts):
         bc_dir = c_pt - b_pt
         ba_len = math.sqrt(max(ba.x * ba.x + ba.y * ba.y, 1e-16))
         bc_len = math.sqrt(max(bc_dir.x * bc_dir.x + bc_dir.y * bc_dir.y, 1e-16))
-        d = _AlgPointNum(ba.x / ba_len + bc_dir.x / bc_len,
-                     ba.y / ba_len + bc_dir.y / bc_len)
+        d = _AlgPointNum(
+            ba.x / ba_len + bc_dir.x / bc_len, ba.y / ba_len + bc_dir.y / bc_len
+        )
         return (b_pt, d)
     elif name == "external_bisector":
         a_pt, b_pt, c_pt = pts[args[1]], pts[args[2]], pts[args[3]]
@@ -1130,8 +1173,9 @@ def _get_line_from_construction(name, args, pts):
         bc_dir = c_pt - b_pt
         ba_len = math.sqrt(max(ba.x * ba.x + ba.y * ba.y, 1e-16))
         bc_len = math.sqrt(max(bc_dir.x * bc_dir.x + bc_dir.y * bc_dir.y, 1e-16))
-        d = _AlgPointNum(-ba.x / ba_len + bc_dir.x / bc_len,
-                     -ba.y / ba_len + bc_dir.y / bc_len)
+        d = _AlgPointNum(
+            -ba.x / ba_len + bc_dir.x / bc_len, -ba.y / ba_len + bc_dir.y / bc_len
+        )
         return (b_pt, d)
     elif name == "on_aline":
         # on_aline x a b c d e: eqangle a x a b d c d e.
@@ -1139,10 +1183,17 @@ def _get_line_from_construction(name, args, pts):
         # line through 'a' (here the anchor/args[1]) with direction angle
         # ang(b-a) + ang(c-d) - ang(e-d).
         a_pt, b_pt, c_pt, d_pt, e_pt = (
-            pts[args[1]], pts[args[2]], pts[args[3]], pts[args[4]], pts[args[5]])
-        ang = (math.atan2(b_pt.y - a_pt.y, b_pt.x - a_pt.x)
-               + math.atan2(c_pt.y - d_pt.y, c_pt.x - d_pt.x)
-               - math.atan2(e_pt.y - d_pt.y, e_pt.x - d_pt.x))
+            pts[args[1]],
+            pts[args[2]],
+            pts[args[3]],
+            pts[args[4]],
+            pts[args[5]],
+        )
+        ang = (
+            math.atan2(b_pt.y - a_pt.y, b_pt.x - a_pt.x)
+            + math.atan2(c_pt.y - d_pt.y, c_pt.x - d_pt.x)
+            - math.atan2(e_pt.y - d_pt.y, e_pt.x - d_pt.x)
+        )
         return (a_pt, _AlgPointNum(math.cos(ang), math.sin(ang)))
     elif name == "on_aline0":
         # on_aline0 x a b c d e f g: eqangle a b c d e f g x.
@@ -1150,11 +1201,19 @@ def _get_line_from_construction(name, args, pts):
         # line through 'g' (the anchor/args[7]) with direction angle
         # ang(e-f) + ang(c-d) - ang(a-b).
         a_pt, b_pt, c_pt, d_pt, e_pt, f_pt, g_pt = (
-            pts[args[1]], pts[args[2]], pts[args[3]], pts[args[4]],
-            pts[args[5]], pts[args[6]], pts[args[7]])
-        ang = (math.atan2(e_pt.y - f_pt.y, e_pt.x - f_pt.x)
-               + math.atan2(c_pt.y - d_pt.y, c_pt.x - d_pt.x)
-               - math.atan2(b_pt.y - a_pt.y, b_pt.x - a_pt.x))
+            pts[args[1]],
+            pts[args[2]],
+            pts[args[3]],
+            pts[args[4]],
+            pts[args[5]],
+            pts[args[6]],
+            pts[args[7]],
+        )
+        ang = (
+            math.atan2(e_pt.y - f_pt.y, e_pt.x - f_pt.x)
+            + math.atan2(c_pt.y - d_pt.y, c_pt.x - d_pt.x)
+            - math.atan2(b_pt.y - a_pt.y, b_pt.x - a_pt.x)
+        )
         return (g_pt, _AlgPointNum(math.cos(ang), math.sin(ang)))
     elif name == "lc_tangent":
         a_pt, o_pt = pts[args[1]], pts[args[2]]
@@ -1165,11 +1224,11 @@ def _get_line_from_construction(name, args, pts):
         # b=args[2] is the vertex (A); a=args[1] is point to reflect (B);
         # c=args[3] is on mirror axis (D); x=args[0] is output E
         # E is reflection of B across line AD
-        vertex = pts[args[2]]       # b = A
-        to_reflect = pts[args[1]]   # a = B
-        axis_pt = pts[args[3]]      # c = D
-        axis = axis_pt - vertex     # AD
-        v = to_reflect - vertex     # AB
+        vertex = pts[args[2]]  # b = A
+        to_reflect = pts[args[1]]  # a = B
+        axis_pt = pts[args[3]]  # c = D
+        axis = axis_pt - vertex  # AD
+        v = to_reflect - vertex  # AB
         axis_len2 = max(axis.x * axis.x + axis.y * axis.y, 1e-16)
         proj = (v.x * axis.x + v.y * axis.y) / axis_len2
         refl = _AlgPointNum(2 * proj * axis.x - v.x, 2 * proj * axis.y - v.y)
@@ -1195,21 +1254,31 @@ def _get_circle_from_construction(name, args, pts):
     elif name == "on_circum":
         a_pt, b_pt, c_pt = pts[args[1]], pts[args[2]], pts[args[3]]
         # Circumcenter + radius
-        d = 2 * (a_pt.x * (b_pt.y - c_pt.y) + b_pt.x * (c_pt.y - a_pt.y) + c_pt.x * (a_pt.y - b_pt.y))
+        d = 2 * (
+            a_pt.x * (b_pt.y - c_pt.y)
+            + b_pt.x * (c_pt.y - a_pt.y)
+            + c_pt.x * (a_pt.y - b_pt.y)
+        )
         if abs(d) < 1e-12:
             return None
         a2 = a_pt.x * a_pt.x + a_pt.y * a_pt.y
         b2 = b_pt.x * b_pt.x + b_pt.y * b_pt.y
         c2 = c_pt.x * c_pt.x + c_pt.y * c_pt.y
-        ux = (a2 * (b_pt.y - c_pt.y) + b2 * (c_pt.y - a_pt.y) + c2 * (a_pt.y - b_pt.y)) / d
-        uy = (a2 * (c_pt.x - b_pt.x) + b2 * (a_pt.x - c_pt.x) + c2 * (b_pt.x - a_pt.x)) / d
+        ux = (
+            a2 * (b_pt.y - c_pt.y) + b2 * (c_pt.y - a_pt.y) + c2 * (a_pt.y - b_pt.y)
+        ) / d
+        uy = (
+            a2 * (c_pt.x - b_pt.x) + b2 * (a_pt.x - c_pt.x) + c2 * (b_pt.x - a_pt.x)
+        ) / d
         center = _AlgPointNum(ux, uy)
         r = math.sqrt(max(center.distance2(a_pt), 1e-16))
         return (center, r)
     return None
 
 
-def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_log=None):
+def solve_sequence_algebraic(
+    seq, rename_map, free_points_samples=5, degeneracy_log=None
+):
     """Algebraically enumerate all branches of a construction sequence.
 
     For free points, tries a grid of sample coordinates.
@@ -1224,7 +1293,6 @@ def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_
     rule relying on this step may be numerically unsafe even where it
     nominally checks out.
     """
-    from newclid.numerical.geometries import PointNum
     # Collect steps by point
     pt_steps = {}
     pt_order = []
@@ -1264,7 +1332,10 @@ def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_
                 circles = []
                 for step in steps:
                     cname = step.construction_name
-                    cargs = [step.arg_map.get(v, v) for v in step.construction_def.all_var_names]
+                    cargs = [
+                        step.arg_map.get(v, v)
+                        for v in step.construction_def.all_var_names
+                    ]
                     line = _get_line_from_construction(cname, cargs, sol)
                     if line:
                         # Tag whether this line is a plain "coll" constraint
@@ -1282,11 +1353,17 @@ def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_
                     step = steps[0]
                     det = _solve_single_construction(
                         step.construction_name,
-                        [step.arg_map.get(v, v) for v in step.construction_def.all_var_names],
-                        sol, rng)
+                        [
+                            step.arg_map.get(v, v)
+                            for v in step.construction_def.all_var_names
+                        ],
+                        sol,
+                        rng,
+                    )
                     if det is not None:
                         for r in det:
-                            s2 = dict(sol); s2[pt] = r
+                            s2 = dict(sol)
+                            s2[pt] = r
                             new_solutions.append(s2)
                     continue
 
@@ -1301,10 +1378,12 @@ def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_
                     candidates = _line_line_intersection(lp0, ld0, lp1, ld1)
                 elif len(lines) == 1 and len(circles) == 1:
                     candidates = _line_circle_intersections(
-                        lines[0][0], lines[0][1], circles[0][0], circles[0][1])
+                        lines[0][0], lines[0][1], circles[0][0], circles[0][1]
+                    )
                 elif len(circles) == 2:
                     candidates = _circle_circle_intersections(
-                        circles[0][0], circles[0][1], circles[1][0], circles[1][1])
+                        circles[0][0], circles[0][1], circles[1][0], circles[1][1]
+                    )
                 elif len(lines) == 1 and len(circles) == 0:
                     lp, ld, is_coll = lines[0]
                     if is_coll:
@@ -1336,15 +1415,19 @@ def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_
                     # Single circle: pick a random point on it
                     ctr, r = circles[0]
                     angle = rng.uniform(0, 2 * math.pi)
-                    candidates = [_AlgPointNum(ctr.x + r * math.cos(angle), ctr.y + r * math.sin(angle))]
+                    candidates = [
+                        _AlgPointNum(
+                            ctr.x + r * math.cos(angle), ctr.y + r * math.sin(angle)
+                        )
+                    ]
                 elif len(lines) == 0 and len(circles) == 0:
                     # No constraint at all — shouldn't happen, skip
                     continue
 
                 for c in candidates:
-                        s2 = dict(sol)
-                        s2[pt] = c
-                        new_solutions.append(s2)
+                    s2 = dict(sol)
+                    s2[pt] = c
+                    new_solutions.append(s2)
 
             solutions = new_solutions
             if not solutions:
@@ -1374,9 +1457,11 @@ def solve_sequence_algebraic(seq, rename_map, free_points_samples=5, degeneracy_
 # gives a witness with genuinely near-zero premise violation.
 
 
-def _build_up_to_step(seq: "ConstructionSequence", free_values: dict[str, tuple[float, float]],
-                       stop_at_point: str) -> tuple[dict[str, "_AlgPointNum"] | None,
-                                                     tuple | None, tuple | None]:
+def _build_up_to_step(
+    seq: "ConstructionSequence",
+    free_values: dict[str, tuple[float, float]],
+    stop_at_point: str,
+) -> tuple[dict[str, "_AlgPointNum"] | None, tuple | None, tuple | None]:
     """Deterministically place every point up to (not including) `stop_at_point`,
     then return the two lines that would jointly determine it.
 
@@ -1417,7 +1502,9 @@ def _build_up_to_step(seq: "ConstructionSequence", free_values: dict[str, tuple[
         circles = []
         for step in steps:
             cname = step.construction_name
-            cargs = [step.arg_map.get(v, v) for v in step.construction_def.all_var_names]
+            cargs = [
+                step.arg_map.get(v, v) for v in step.construction_def.all_var_names
+            ]
             line = _get_line_from_construction(cname, cargs, sol)
             if line:
                 lines.append((line[0], line[1]))
@@ -1432,11 +1519,17 @@ def _build_up_to_step(seq: "ConstructionSequence", free_values: dict[str, tuple[
         # only needs to be *some* valid point satisfying this step's
         # constraints, since we're just building context for a later step.
         if len(lines) == 2:
-            cand = _line_line_intersection(lines[0][0], lines[0][1], lines[1][0], lines[1][1])
+            cand = _line_line_intersection(
+                lines[0][0], lines[0][1], lines[1][0], lines[1][1]
+            )
         elif len(lines) == 1 and len(circles) == 1:
-            cand = _line_circle_intersections(lines[0][0], lines[0][1], circles[0][0], circles[0][1])
+            cand = _line_circle_intersections(
+                lines[0][0], lines[0][1], circles[0][0], circles[0][1]
+            )
         elif len(circles) == 2:
-            cand = _circle_circle_intersections(circles[0][0], circles[0][1], circles[1][0], circles[1][1])
+            cand = _circle_circle_intersections(
+                circles[0][0], circles[0][1], circles[1][0], circles[1][1]
+            )
         elif len(lines) == 1 and len(circles) == 0:
             lp, ld = lines[0]
             cand = [_AlgPointNum(lp.x + 1.0 * ld.x, lp.y + 1.0 * ld.y)]
@@ -1495,14 +1588,18 @@ def refine_degenerate_witness(
     best = None
     for attempt in range(4):
         x0 = rng.uniform(-2, 2, size=2 * len(free_point_names))
-        res = minimize(objective, x0, method="Nelder-Mead",
-                       options={"xatol": 1e-12, "fatol": 1e-16, "maxiter": max_iter})
+        res = minimize(
+            objective,
+            x0,
+            method="Nelder-Mead",
+            options={"xatol": 1e-12, "fatol": 1e-16, "maxiter": max_iter},
+        )
         if best is None or res.fun < best.fun:
             best = res
         if best.fun < 1e-20:
             break
 
-    if best is None or best.fun ** 0.5 > 1e-6:
+    if best is None or best.fun**0.5 > 1e-6:
         return None  # didn't find a nearby degenerate configuration
 
     free_values = {
@@ -1525,6 +1622,7 @@ def refine_degenerate_witness(
 # ---------------------------------------------------------------------------
 # DDAR-based counterexample tester
 # ---------------------------------------------------------------------------
+
 
 def test_sequence(
     seq: ConstructionSequence,
@@ -1553,7 +1651,9 @@ def test_sequence(
     # Build fl_problem without goal
     fl = build_fl_problem(seq, rename_map)
 
-    seeds = [42, 123, 456, 789, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072][:n_seeds]
+    seeds = [42, 123, 456, 789, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072][
+        :n_seeds
+    ]
     good_configs = []
     bad_configs = []
 
@@ -1562,9 +1662,11 @@ def test_sequence(
 
     for seed in seeds:
         try:
-            solver = (GeometricSolverBuilder(seed=seed)
-                      .load_problem_from_txt(fl)
-                      .build(max_attempts=max_attempts))
+            solver = (
+                GeometricSolverBuilder(seed=seed)
+                .load_problem_from_txt(fl)
+                .build(max_attempts=max_attempts)
+            )
             sg = solver.proof.symbols_graph
 
             # Extract point coordinates
@@ -1599,15 +1701,15 @@ def test_sequence(
                     break
 
             if concl_ok:
-                good_configs.append({"seed": seed, "points": {
-                    n: (p.x, p.y) for n, p in pts.items()
-                }})
+                good_configs.append(
+                    {"seed": seed, "points": {n: (p.x, p.y) for n, p in pts.items()}}
+                )
             else:
-                bad_configs.append({"seed": seed, "points": {
-                    n: (p.x, p.y) for n, p in pts.items()
-                }})
+                bad_configs.append(
+                    {"seed": seed, "points": {n: (p.x, p.y) for n, p in pts.items()}}
+                )
 
-        except Exception as e:
+        except Exception:
             continue
 
     if bad_configs:
@@ -1641,6 +1743,7 @@ def test_sequence(
 # Main driver
 # ---------------------------------------------------------------------------
 
+
 def discover_counterexamples(
     rule_id: str,
     rule_text: str,
@@ -1667,9 +1770,15 @@ def discover_counterexamples(
     start_time = time.time()
 
     prem_strs, concl_str = split_rule_text(rule_text)
-    premises = [(n, list(a)) for n, a in (parse_predicate(p) for p in prem_strs if p.strip())]
-    conclusions = [(n, list(a)) for c in concl_str.split(",") if c.strip()
-                    for n, a in [parse_predicate(c.strip())]]
+    premises = [
+        (n, list(a)) for n, a in (parse_predicate(p) for p in prem_strs if p.strip())
+    ]
+    conclusions = [
+        (n, list(a))
+        for c in concl_str.split(",")
+        if c.strip()
+        for n, a in [parse_predicate(c.strip())]
+    ]
 
     # Step 1: match premises to constructions
     premise_matches: dict[int, list[ReverseMatch]] = {}
@@ -1691,8 +1800,11 @@ def discover_counterexamples(
 
     # Step 2: generate construction sequences
     sequences = generate_construction_sequences(
-        premises, conclusions[0] if conclusions else ("", []),
-        premise_matches, constructions, max_sequences=max_sequences,
+        premises,
+        conclusions[0] if conclusions else ("", []),
+        premise_matches,
+        constructions,
+        max_sequences=max_sequences,
     )
 
     if verbose:
@@ -1713,16 +1825,16 @@ def discover_counterexamples(
     for i, seq in enumerate(sequences):
         result = test_sequence(seq, premises, conclusions, rename_map, n_seeds=n_seeds)
         result["seq_index"] = i
-        result["seq_steps"] = [
-            f"{s.construction_name}({s.point})" for s in seq.steps
-        ]
+        result["seq_steps"] = [f"{s.construction_name}({s.point})" for s in seq.steps]
         all_results.append(result)
 
         if result["status"] == "ce_found":
             n_ce_found += 1
             if verbose:
-                print(f"  [reverse_construction] seq {i}: CE FOUND! "
-                      f"good={result['n_good']}, bad={result['n_bad']}")
+                print(
+                    f"  [reverse_construction] seq {i}: CE FOUND! "
+                    f"good={result['n_good']}, bad={result['n_bad']}"
+                )
 
     runtime = time.time() - start_time
     return {
@@ -1740,6 +1852,7 @@ def discover_counterexamples(
 # ---------------------------------------------------------------------------
 # Batch driver (compatible with Part 3 pipeline interface)
 # ---------------------------------------------------------------------------
+
 
 def run_reverse_construction_batch(
     rules_file: str,
@@ -1761,6 +1874,7 @@ def run_reverse_construction_batch(
 
     if defs_path is None:
         from newclid.configs import default_defs_path
+
         defs_path = str(default_defs_path())
 
     # Parse defs and build index
@@ -1770,11 +1884,13 @@ def run_reverse_construction_batch(
 
     reverse_index = build_reverse_index(constructions)
     index_size = sum(len(v) for v in reverse_index.values())
-    print(f"[reverse_construction]   reverse index: {len(reverse_index)} keys, "
-          f"{index_size} entries")
+    print(
+        f"[reverse_construction]   reverse index: {len(reverse_index)} keys, "
+        f"{index_size} entries"
+    )
 
     # Build tracer
-    print(f"[reverse_construction] Building tracer indexes...")
+    print("[reverse_construction] Building tracer indexes...")
     tracer = RuleTracer(
         normalized_rules_path=normalized_rules_path,
         occurrences_path=occurrences_path,
@@ -1804,8 +1920,9 @@ def run_reverse_construction_batch(
         # Get rename_map from normalized record
         norm_rec = tracer.get_norm_record(rid)
         if not norm_rec:
-            results.append({"status": "error", "rule_id": rid,
-                            "message": "norm record not found"})
+            results.append(
+                {"status": "error", "rule_id": rid, "message": "norm record not found"}
+            )
             continue
 
         rename_map = norm_rec.get("rename_map", {})
@@ -1813,16 +1930,26 @@ def run_reverse_construction_batch(
             norm_rec.get("seed"), norm_rec.get("index_in_seed", 0)
         )
         if not src:
-            results.append({"status": "error", "rule_id": rid,
-                            "message": "source record not found"})
+            results.append(
+                {
+                    "status": "error",
+                    "rule_id": rid,
+                    "message": "source record not found",
+                }
+            )
             continue
 
         fl_problem = src.get("fl_problem", "")
 
         result = discover_counterexamples(
-            rid, rtext, rename_map, fl_problem,
-            constructions, reverse_index,
-            n_seeds=n_seeds, max_sequences=max_sequences,
+            rid,
+            rtext,
+            rename_map,
+            fl_problem,
+            constructions,
+            reverse_index,
+            n_seeds=n_seeds,
+            max_sequences=max_sequences,
             verbose=verbose,
         )
 
@@ -1832,22 +1959,25 @@ def run_reverse_construction_batch(
         n_ce = result.get("n_ce_found", 0)
         status = result.get("status", "?")
         rt = result.get("runtime", 0)
-        print(f"[reverse_construction] [{i+1}/{len(rules)}] {rid}: {status}, "
-              f"seqs={n_seqs}, ce={n_ce}, t={rt:.1f}s "
-              f"({elapsed:.0f}s, ETA {eta:.0f}s)")
+        print(
+            f"[reverse_construction] [{i + 1}/{len(rules)}] {rid}: {status}, "
+            f"seqs={n_seqs}, ce={n_ce}, t={rt:.1f}s "
+            f"({elapsed:.0f}s, ETA {eta:.0f}s)"
+        )
 
         results.append(result)
 
     # Summary
     n_ce = sum(1 for r in results if r.get("n_ce_found", 0) > 0)
-    n_match = sum(1 for r in results
-                  if r.get("status") not in ("no_construction_match", "error"))
+    n_match = sum(
+        1 for r in results if r.get("status") not in ("no_construction_match", "error")
+    )
     total_runtime = time.time() - t0
-    print(f"\n[reverse_construction] Summary:")
+    print("\n[reverse_construction] Summary:")
     print(f"  Rules with counterexamples: {n_ce}/{len(results)}")
     print(f"  Rules with construction matches: {n_match}/{len(results)}")
     print(f"  Total runtime: {total_runtime:.1f}s")
-    print(f"  Avg per rule: {total_runtime/max(len(results),1):.1f}s")
+    print(f"  Avg per rule: {total_runtime / max(len(results), 1):.1f}s")
 
     return results
 
@@ -1859,27 +1989,32 @@ def run_reverse_construction_batch(
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(
-        description="Reverse Construction NDG Discovery"
+    p = argparse.ArgumentParser(description="Reverse Construction NDG Discovery")
+    p.add_argument(
+        "--rules_file",
+        required=True,
+        help="JSONL rules file (e.g. premise_group_reduced.jsonl)",
     )
-    p.add_argument("--rules_file", required=True,
-                   help="JSONL rules file (e.g. premise_group_reduced.jsonl)")
-    p.add_argument("--normalized_rules", required=True,
-                   help="normalized_rules.jsonl path")
-    p.add_argument("--occurrences", required=True,
-                   help="rule_seed_occurrences_all.json path")
-    p.add_argument("--source_dataset", required=True,
-                   help="Original dataset JSONL path")
-    p.add_argument("--defs", default=None,
-                   help="defs.txt path (default: from configs)")
-    p.add_argument("--limit", type=int, default=10,
-                   help="Max rules to process")
-    p.add_argument("--n_seeds", type=int, default=8,
-                   help="Seeds per sequence")
-    p.add_argument("--max_sequences", type=int, default=30,
-                   help="Max sequences per rule")
-    p.add_argument("--output_dir", default="/tmp/rev_construction_test",
-                   help="Output directory for results")
+    p.add_argument(
+        "--normalized_rules", required=True, help="normalized_rules.jsonl path"
+    )
+    p.add_argument(
+        "--occurrences", required=True, help="rule_seed_occurrences_all.json path"
+    )
+    p.add_argument(
+        "--source_dataset", required=True, help="Original dataset JSONL path"
+    )
+    p.add_argument("--defs", default=None, help="defs.txt path (default: from configs)")
+    p.add_argument("--limit", type=int, default=10, help="Max rules to process")
+    p.add_argument("--n_seeds", type=int, default=8, help="Seeds per sequence")
+    p.add_argument(
+        "--max_sequences", type=int, default=30, help="Max sequences per rule"
+    )
+    p.add_argument(
+        "--output_dir",
+        default="/tmp/rev_construction_test",
+        help="Output directory for results",
+    )
 
     args = p.parse_args()
 
@@ -1903,10 +2038,7 @@ if __name__ == "__main__":
     with open(out_path, "w", encoding="utf-8") as f:
         for r in results:
             # Make serializable
-            serializable = {
-                k: v for k, v in r.items()
-                if k not in ("results",)
-            }
+            serializable = {k: v for k, v in r.items() if k not in ("results",)}
             serializable["n_results"] = len(r.get("results", []))
             f.write(json.dumps(serializable, ensure_ascii=False, default=str) + "\n")
 
@@ -1951,6 +2083,7 @@ def _init_rev():
     global _rev_constructions, _rev_index, _rev_constructible
     if _rev_constructions is None:
         from newclid.configs import default_defs_path
+
         _rev_constructions = parse_defs(str(default_defs_path()))
         _rev_index = build_reverse_index(_rev_constructions)
         _rev_constructible = set(pn for (pn, _) in _rev_index.keys())
@@ -1992,8 +2125,11 @@ def try_reverse_construction(
 
     # Generate sequences (must cover ALL constructible premises)
     seqs = generate_construction_sequences(
-        premises, conclusions[0] if conclusions else ("", []),
-        premise_matches, _rev_constructions, max_sequences=50,
+        premises,
+        conclusions[0] if conclusions else ("", []),
+        premise_matches,
+        _rev_constructions,
+        max_sequences=50,
     )
     if not seqs:
         return None
@@ -2006,8 +2142,10 @@ def try_reverse_construction(
     # Free points are sampled randomly, but combined constructions
     # (comma-separated) are solved via line/circle intersection.
     from newclid.discovery.validation.counterexample_search import (
-        evaluate_predicate, _DDAR_REL_TOL,
+        evaluate_predicate,
+        _DDAR_REL_TOL,
     )
+
     _PREM_MARGIN = _DDAR_REL_TOL * 0.1
 
     # Points whose two-line step showed up as suspiciously close to
@@ -2021,9 +2159,12 @@ def try_reverse_construction(
 
     for seq_idx, seq in enumerate(seqs):
         seq_degeneracy_log: list[tuple[str, float]] = []
-        sols = solve_sequence_algebraic(seq, rename_map,
-                                        free_points_samples=max(n_seeds, 20),
-                                        degeneracy_log=seq_degeneracy_log)
+        sols = solve_sequence_algebraic(
+            seq,
+            rename_map,
+            free_points_samples=max(n_seeds, 20),
+            degeneracy_log=seq_degeneracy_log,
+        )
         degeneracy_log.extend(seq_degeneracy_log)
         for pt, deg in seq_degeneracy_log:
             if deg < _PROBE_THRESHOLD:
@@ -2070,9 +2211,9 @@ def try_reverse_construction(
     # stumble onto it.
     for seq_idx, points in suspects.items():
         seq = seqs[seq_idx]
-        free_point_names = list(dict.fromkeys(
-            s.point for s in seq.steps if s.construction_def.is_base
-        ))
+        free_point_names = list(
+            dict.fromkeys(s.point for s in seq.steps if s.construction_def.is_base)
+        )
         if not free_point_names:
             continue
         for pt in points:
@@ -2092,8 +2233,13 @@ def try_reverse_construction(
             )
             if not concl_ok:
                 pts_dict = {n: (p.x, p.y) for n, p in witness.items()}
-                bad_configs.append({"seed": 0, "points": pts_dict,
-                                    "source": f"degenerate_witness({pt})"})
+                bad_configs.append(
+                    {
+                        "seed": 0,
+                        "points": pts_dict,
+                        "source": f"degenerate_witness({pt})",
+                    }
+                )
 
     if bad_configs or good_configs:
         return {

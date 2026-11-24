@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 
 def run_bounded(

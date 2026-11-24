@@ -11,6 +11,7 @@ This is tested by:
 2. Adding R1 as a custom rule
 3. Running DirectSolver (Python DDARN) to see if the problem is solved
 """
+
 from pathlib import Path
 from typing import Optional
 
@@ -91,11 +92,11 @@ def _to_pipe_format(rule_id: str, rule_text: str) -> str:
     Input:  rule_id="r42", rule_text="cong a b c d, perp e f g h => para i j k l"
     Output: "r42|cong a b c d,perp e f g h|para i j k l"
     """
-    if '=>' not in rule_text:
+    if "=>" not in rule_text:
         return f"{rule_id}||"
-    premise_part, conclusion_part = rule_text.split('=>', 1)
-    premises = ','.join(p.strip() for p in premise_part.split(','))
-    conclusions = ','.join(c.strip() for c in conclusion_part.split(','))
+    premise_part, conclusion_part = rule_text.split("=>", 1)
+    premises = ",".join(p.strip() for p in premise_part.split(","))
+    conclusions = ",".join(c.strip() for c in conclusion_part.split(","))
     return f"{rule_id}|{premises}|{conclusions}"
 
 
@@ -141,4 +142,3 @@ class SubsumptionTesterCSolver(SubsumptionTester):
 
 
 __all__ = ["SubsumptionTester", "SubsumptionTesterCSolver", "_to_pipe_format"]
-
