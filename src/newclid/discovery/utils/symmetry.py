@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from typing import Callable
 from newclid.discovery.data_models import PredicateInstance
 
 
@@ -9,6 +9,7 @@ Args = tuple[str, ...]
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
+
 
 def compare_args(arg1: str, arg2: str) -> int:
     letter1, digits1 = arg1[0], arg1[1:]
@@ -21,12 +22,15 @@ def compare_args(arg1: str, arg2: str) -> int:
         return -1 if letter1 < letter2 else 1
     return 0
 
+
 # ---------------------------------------------------------------------------
 # 谓词 → 对称性类型 查表
 # ---------------------------------------------------------------------------
 
 _UNORDERED: frozenset[str] = frozenset({"coll", "ncoll", "cyclic"})
-_SWAP_PAIRS: frozenset[str] = frozenset({"cong", "para", "npara", "perp", "nperp", "eqpoint"})
+_SWAP_PAIRS: frozenset[str] = frozenset(
+    {"cong", "para", "npara", "perp", "nperp", "eqpoint"}
+)
 _PREPARSE: frozenset[str] = frozenset({"eqangle", "eqratio"})
 _VERTEX_MAP: frozenset[str] = frozenset({"contri", "simtri", "contrir", "simtrir"})
 _HEAD_FIXED: frozenset[str] = frozenset({"midp", "constline", "circle"})
@@ -37,9 +41,11 @@ _NONE: frozenset[str] = frozenset({"aconst", "rconst"})
 # 各对称性类型的规范化实现（待补全）
 # ---------------------------------------------------------------------------
 
+
 def _normalize_unordered(args: Args) -> Args:
     """所有参数按字典序排序。"""
     from functools import cmp_to_key
+
     args = sorted(args, key=cmp_to_key(compare_args))
     return args
 
@@ -47,22 +53,29 @@ def _normalize_unordered(args: Args) -> Args:
 def _normalize_swap_pairs(args: Args) -> Args:
     """参数按 2 个一组分组，组内排序，组间排序。"""
     from functools import cmp_to_key
-    pairs = [(args[i], args[i+1]) for i in range(0, len(args), 2)]
-    normalized_pairs = [tuple(sorted(pair, key=cmp_to_key(compare_args))) for pair in pairs]
-    normalized_pairs.sort(key=cmp_to_key(lambda p1, p2: compare_args(p1[0], p2[0]) or compare_args(p1[1], p2[1])))
+
+    pairs = [(args[i], args[i + 1]) for i in range(0, len(args), 2)]
+    normalized_pairs = [
+        tuple(sorted(pair, key=cmp_to_key(compare_args))) for pair in pairs
+    ]
+    normalized_pairs.sort(
+        key=cmp_to_key(
+            lambda p1, p2: compare_args(p1[0], p2[0]) or compare_args(p1[1], p2[1])
+        )
+    )
     return tuple(arg for pair in normalized_pairs for arg in pair)
 
 
 # eqangle / eqratio 对称群生成元（作用于 8 个参数位置；4 条线段 seg1..seg4）。
 _PREPARSE_GENERATORS: tuple[tuple[int, ...], ...] = (
-    (1, 0, 2, 3, 4, 5, 6, 7),   # seg1 内部交换
-    (0, 1, 3, 2, 4, 5, 6, 7),   # seg2 内部
-    (0, 1, 2, 3, 5, 4, 6, 7),   # seg3 内部
-    (0, 1, 2, 3, 4, 5, 7, 6),   # seg4 内部
-    (2, 3, 0, 1, 6, 7, 4, 5),   # seg1↔seg2 且 seg3↔seg4（两角同时反向）
-    (4, 5, 6, 7, 0, 1, 2, 3),   # (seg1,seg2)↔(seg3,seg4)（两角整体交换）
-    (0, 1, 4, 5, 2, 3, 6, 7),   # seg2↔seg3（转置）
-    (6, 7, 2, 3, 4, 5, 0, 1),   # seg1↔seg4
+    (1, 0, 2, 3, 4, 5, 6, 7),  # seg1 内部交换
+    (0, 1, 3, 2, 4, 5, 6, 7),  # seg2 内部
+    (0, 1, 2, 3, 5, 4, 6, 7),  # seg3 内部
+    (0, 1, 2, 3, 4, 5, 7, 6),  # seg4 内部
+    (2, 3, 0, 1, 6, 7, 4, 5),  # seg1↔seg2 且 seg3↔seg4（两角同时反向）
+    (4, 5, 6, 7, 0, 1, 2, 3),  # (seg1,seg2)↔(seg3,seg4)（两角整体交换）
+    (0, 1, 4, 5, 2, 3, 6, 7),  # seg2↔seg3（转置）
+    (6, 7, 2, 3, 4, 5, 0, 1),  # seg1↔seg4
 )
 
 
@@ -148,13 +161,15 @@ def _normalize_vertex_map(args: Args) -> Args:
             best = cand
     return best
 
+
 def _normalize_head_fixed(args: Args) -> Args:
-    """首参固定，其余参数按字典序排序。
-    """
+    """首参固定，其余参数按字典序排序。"""
     from functools import cmp_to_key
+
     head = args[0]
     rest = tuple(sorted(args[1:], key=cmp_to_key(compare_args)))
     return (head,) + rest
+
 
 def _normalize_sameside(args: Args) -> Args:
     """sameside a b c x y z：a 在 b→c 的同侧如 x 在 y→z 的同侧。
@@ -191,6 +206,7 @@ _SPECIAL_HANDLERS: dict[str, Callable[[Args], Args]] = {
 # ---------------------------------------------------------------------------
 # 对外 API
 # ---------------------------------------------------------------------------
+
 
 def normalize_predicate(predicate: PredicateInstance) -> Args:
     """按谓词 `name` 的对称性类型规范化参数 `args`，返回规范化后的元组。"""
@@ -256,4 +272,3 @@ if __name__ == "__main__":
             print(f"{name:<10} {str(args):<40} -> {out}")
         except Exception as exc:
             print(f"{name:<10} {str(args):<40} -> ERROR: {exc}")
-

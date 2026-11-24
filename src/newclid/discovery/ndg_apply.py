@@ -26,8 +26,12 @@ from typing import Any
 # 优先级：数字越小越优先
 PRIORITY = {
     # Strong NDG candidates (non-degeneracy, orientation)
-    "ncoll": 0, "npara": 0, "nperp": 0, "diff": 0,
-    "obtuse": 2, "acute": 2,
+    "ncoll": 0,
+    "npara": 0,
+    "nperp": 0,
+    "diff": 0,
+    "obtuse": 2,
+    "acute": 2,
     "sameclock": 3,
     # Weak / suspicious: positive predicates that are often construction
     # artifacts.  Only used as a last resort when no better NDG survives.
@@ -37,9 +41,16 @@ PRIORITY = {
 # Positive geometric predicates that are almost never valid NDG guards.
 # (Their negations — ncoll, npara, nperp — ARE valid and handled above.)
 SUBSTANTIVE_PREDICATES = {
-    "para", "cong", "cyclic", "coll",
-    "eqangle", "eqratio",
-    "simtri", "simtrir", "contri", "contrir",
+    "para",
+    "cong",
+    "cyclic",
+    "coll",
+    "eqangle",
+    "eqratio",
+    "simtri",
+    "simtrir",
+    "contri",
+    "contrir",
     "midp",
 }
 
@@ -49,7 +60,7 @@ NEGATION = {
     "nperp": "perp",
     "obtuse": "acute",
     "acute": "obtuse",
-    "ncoll": None,   # 否定是 coll，太泛，不取反
+    "ncoll": None,  # 否定是 coll，太泛，不取反
     "npara": None,
     "sameclock": None,
     "diff": None,
@@ -162,30 +173,37 @@ def select_best_predicate(
         priority = PRIORITY.get(name, 5)
 
         if true_at_good:
-            candidates.append({
-                "predicate": pred_str,
-                "true_at_good": True,
-                "negated": False,
-                "priority": priority,
-                "name": name,
-                "args": args,
-            })
+            candidates.append(
+                {
+                    "predicate": pred_str,
+                    "true_at_good": True,
+                    "negated": False,
+                    "priority": priority,
+                    "name": name,
+                    "args": args,
+                }
+            )
         else:
             # true_at_good=False → 在好配置下不成立，需要取反
             neg_name = NEGATION.get(name)
-            if neg_name is not None and (neg_name, tuple(args)) not in conclusion_predicates:
+            if (
+                neg_name is not None
+                and (neg_name, tuple(args)) not in conclusion_predicates
+            ):
                 # 取反后的谓词同样要排除"恰好是结论本身"的情形——例如结论是
                 # perp A C A E 时，候选 nperp A C A E 本身不在结论集合里，
                 # 取反后却变成 perp A C A E，必须在这里再检查一次。
-                candidates.append({
-                    "predicate": _format_predicate(neg_name, args),
-                    "true_at_good": True,  # 取反后，好配置下应该成立
-                    "negated": True,
-                    "priority": PRIORITY.get(neg_name, 2),
-                    "name": neg_name,
-                    "args": args,
-                    "original_predicate": pred_str,
-                })
+                candidates.append(
+                    {
+                        "predicate": _format_predicate(neg_name, args),
+                        "true_at_good": True,  # 取反后，好配置下应该成立
+                        "negated": True,
+                        "priority": PRIORITY.get(neg_name, 2),
+                        "name": neg_name,
+                        "args": args,
+                        "original_predicate": pred_str,
+                    }
+                )
             # else: 无法取反, 或取反后即结论本身 → 丢弃
 
     # Filter out substantive predicates (perp, para, cong, etc.) that are
@@ -277,56 +295,76 @@ def apply_ndg(
 
         if dist_rec is None:
             stats["dropped_no_dist_data"] += 1
-            dropped.append({"rule_id": rule_id, "rule_text": rule_text,
-                            "reason": "no_dist_data"})
+            dropped.append(
+                {"rule_id": rule_id, "rule_text": rule_text, "reason": "no_dist_data"}
+            )
             continue
 
         status = dist_rec.get("status")
 
         if status == "pass":
             min_deg = dist_rec.get("min_degeneracy")
-            if (degeneracy_threshold > 0 and min_deg is not None
-                    and min_deg < degeneracy_threshold):
+            if (
+                degeneracy_threshold > 0
+                and min_deg is not None
+                and min_deg < degeneracy_threshold
+            ):
                 # 反例搜索未找到反例, 但构造新点时曾撞到近乎平行(退化)的两条
                 # 定义直线 —— 这片退化区域是测度为零的边界, 随机反例搜索几乎
                 # 采不到, 不能当作"恒成立"的证据. 丢弃而不是放行.
                 stats["dropped_degenerate_construction"] += 1
-                dropped.append({"rule_id": rule_id, "rule_text": rule_text,
-                                "reason": "degenerate_construction",
-                                "min_degeneracy": min_deg})
+                dropped.append(
+                    {
+                        "rule_id": rule_id,
+                        "rule_text": rule_text,
+                        "reason": "degenerate_construction",
+                        "min_degeneracy": min_deg,
+                    }
+                )
                 continue
             # 所有 seed 都没找到 bad → 视为恒成立，原样保留
             stats["kept_pass"] += 1
             extra_guards = extra_ncoll_guards_for_disjoint_para(rule_text)
-            kept.append({
-                "rule_id": rule_id,
-                "seed": rule.get("seed"),
-                "index_in_seed": rule.get("index_in_seed", 0),
-                "rule_text": rule_text,
-                "points": rule.get("points", []),
-                "guards": ", ".join(extra_guards) if extra_guards else "",
-                "ndg_added": None,
-                "status": "pass",
-                "min_degeneracy": min_deg,
-            })
+            kept.append(
+                {
+                    "rule_id": rule_id,
+                    "seed": rule.get("seed"),
+                    "index_in_seed": rule.get("index_in_seed", 0),
+                    "rule_text": rule_text,
+                    "points": rule.get("points", []),
+                    "guards": ", ".join(extra_guards) if extra_guards else "",
+                    "ndg_added": None,
+                    "status": "pass",
+                    "min_degeneracy": min_deg,
+                }
+            )
             continue
 
         if status != "success":
             # insufficient_pairs / insufficient_good_sets 等 → 丢弃
             stats[f"dropped_{status}"] += 1
-            dropped.append({"rule_id": rule_id, "rule_text": rule_text,
-                            "reason": status})
+            dropped.append(
+                {"rule_id": rule_id, "rule_text": rule_text, "reason": status}
+            )
             continue
 
         # status == "success": 尝试选出合法候选谓词
         surviving = dist_rec.get("surviving_predicates", [])
         conclusion_predicates = _conclusion_predicate_set(rule_text)
-        best = (select_best_predicate(surviving, conclusion_predicates)
-                if surviving else None)
+        best = (
+            select_best_predicate(surviving, conclusion_predicates)
+            if surviving
+            else None
+        )
         if best is None:
             stats["dropped_no_valid_candidate"] += 1
-            dropped.append({"rule_id": rule_id, "rule_text": rule_text,
-                            "reason": "no_valid_candidate"})
+            dropped.append(
+                {
+                    "rule_id": rule_id,
+                    "rule_text": rule_text,
+                    "reason": "no_valid_candidate",
+                }
+            )
             continue
 
         # NDG 谓词作为守卫，不混入 rule_text
@@ -335,25 +373,30 @@ def apply_ndg(
         guard_str = ", ".join([best["predicate"], *extra_guards])
 
         stats["kept_ndg_added"] += 1
-        kept.append({
-            "rule_id": rule_id,
-            "seed": rule.get("seed"),
-            "index_in_seed": rule.get("index_in_seed", 0),
-            "rule_text": rule_text,  # 原规则文本，不修改
-            "points": rule.get("points", []),
-            "guards": guard_str,
-            "original_rule_text": rule_text,
-            "ndg_added": best["predicate"],
-            "ndg_priority": best["priority"],
-            "ndg_negated": best["negated"],
-            "true_at_good": best["true_at_good"],
-            "n_surviving_total": len(surviving),
-            "n_pairs": dist_rec.get("n_pairs", 0),
-            "status": "success",
-        })
+        kept.append(
+            {
+                "rule_id": rule_id,
+                "seed": rule.get("seed"),
+                "index_in_seed": rule.get("index_in_seed", 0),
+                "rule_text": rule_text,  # 原规则文本，不修改
+                "points": rule.get("points", []),
+                "guards": guard_str,
+                "original_rule_text": rule_text,
+                "ndg_added": best["predicate"],
+                "ndg_priority": best["priority"],
+                "ndg_negated": best["negated"],
+                "true_at_good": best["true_at_good"],
+                "n_surviving_total": len(surviving),
+                "n_pairs": dist_rec.get("n_pairs", 0),
+                "status": "success",
+            }
+        )
 
     # 保存：只写入 kept（success+NDG 和 pass 两类）
-    os.makedirs(os.path.dirname(output_file) if os.path.dirname(output_file) else ".", exist_ok=True)
+    os.makedirs(
+        os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
+        exist_ok=True,
+    )
     with open(output_file, "w", encoding="utf-8") as f:
         for rec in kept:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -370,9 +413,11 @@ def apply_ndg(
             f.write(line + "\n")
 
     # 统计
-    print(f"\n{'='*50}")
-    print(f"[ndg_apply] Kept {len(kept)}/{len(rules)} rules "
-          f"(NDG added: {stats['kept_ndg_added']}, pass-through: {stats['kept_pass']})")
+    print(f"\n{'=' * 50}")
+    print(
+        f"[ndg_apply] Kept {len(kept)}/{len(rules)} rules "
+        f"(NDG added: {stats['kept_ndg_added']}, pass-through: {stats['kept_pass']})"
+    )
     print(f"[ndg_apply] Dropped {len(dropped)}/{len(rules)} rules:")
     for k, v in stats.items():
         if k.startswith("dropped_"):
@@ -380,7 +425,7 @@ def apply_ndg(
     print(f"[ndg_apply] Saved to: {output_file}")
 
     # 展示几个示例
-    print(f"\n[ndg_apply] Examples (NDG added):")
+    print("\n[ndg_apply] Examples (NDG added):")
     shown = 0
     for rec in kept:
         if rec.get("ndg_added"):

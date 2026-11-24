@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import tempfile
-import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -79,7 +78,9 @@ class EvaluationOutputTests(unittest.TestCase):
                         "load_solver_config",
                         return_value={"using_exp": True},
                     ):
-                        with patch.object(evaluation.ray, "is_initialized", side_effect=[False, True]):
+                        with patch.object(
+                            evaluation.ray, "is_initialized", side_effect=[False, True]
+                        ):
                             with patch.object(evaluation.ray, "init"):
                                 with patch.object(
                                     evaluation.ray,

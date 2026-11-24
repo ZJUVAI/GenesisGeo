@@ -36,10 +36,7 @@ def _generation_problem_dsl(problem: ProblemJGEX) -> str:
         list(problem.constructions),
         SimpleNamespace(dep_graph=source_dep_graph),
     )
-    goals = [
-        Statement.from_tokens(goal, source_dep_graph)
-        for goal in problem.goals
-    ]
+    goals = [Statement.from_tokens(goal, source_dep_graph) for goal in problem.goals]
     assert all(goal is not None for goal in goals)
     return ProblemWorker._generate_problem_predicates_section(
         _identity_mapping(problem),
@@ -77,9 +74,12 @@ def test_problem_dsl_uses_basic_order():
 
 
 def test_full_aux_dsl_parses_all_semicolon_separated_aux_points():
-    assert try_full_aux_dsl_to_constructions(
-        "e : coll a b e [000] ; x00 f : coll a c f [001] ;"
-    ) == "e = on_line e a b; f = on_line f a c"
+    assert (
+        try_full_aux_dsl_to_constructions(
+            "e : coll a b e [000] ; x00 f : coll a c f [001] ;"
+        )
+        == "e = on_line e a b; f = on_line f a c"
+    )
 
 
 def test_search_submit_renames_whole_problem_before_ddar(monkeypatch):

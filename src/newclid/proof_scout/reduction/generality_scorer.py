@@ -10,6 +10,7 @@ Generality is measured by:
 Score tuple: (-n_premises, n_conclusions)
 This ensures sorting puts more general rules first.
 """
+
 import re
 from typing import Tuple
 
@@ -32,22 +33,22 @@ class GeneralityScorer:
             "cong a b c d => para a b c d" -> (-1, 1)
             "cong a b c d, cong e f g h => para a b c d" -> (-2, 1)
         """
-        if '=>' not in rule_text:
+        if "=>" not in rule_text:
             return (0, 0)
 
-        premise_part, conclusion_part = rule_text.split('=>', 1)
+        premise_part, conclusion_part = rule_text.split("=>", 1)
 
         # Count premises
         n_premises = 0
-        for condition in premise_part.split(','):
-            parts = re.findall(r'\w+', condition)
+        for condition in premise_part.split(","):
+            parts = re.findall(r"\w+", condition)
             if parts:
                 n_premises += 1
 
         # Count conclusions
         n_conclusions = 0
-        for condition in conclusion_part.split(','):
-            parts = re.findall(r'\w+', condition)
+        for condition in conclusion_part.split(","):
+            parts = re.findall(r"\w+", condition)
             if parts:
                 n_conclusions += 1
 

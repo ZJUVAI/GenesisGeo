@@ -9,6 +9,7 @@ AuxExtractor
   from newclid.data_discovery.aux_extractor import AuxExtractor
   stats = AuxExtractor().filter_results_with_aux(in_json, out_json)
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -37,25 +38,33 @@ class AuxExtractor:
         if not isinstance(results, list):
             filtered: List[Dict[str, Any]] = []
         else:
-            filtered = [r for r in results if isinstance(r, dict) and self._has_non_empty_aux(r)]
+            filtered = [
+                r for r in results if isinstance(r, dict) and self._has_non_empty_aux(r)
+            ]
 
         # 最小改动：浅拷贝 + 替换 results
         new_obj = dict(obj)
         new_obj["results"] = filtered
         return new_obj
 
-    def filter_results_with_aux(self, input_json_path: str, output_json_path: str) -> Dict[str, int]:
+    def filter_results_with_aux(
+        self, input_json_path: str, output_json_path: str
+    ) -> Dict[str, int]:
         """读取 input_json -> 过滤 -> 写入 output_json，返回统计信息。"""
         with open(input_json_path, "r", encoding="utf-8") as f:
             obj = json.load(f)
 
         out_obj = self.filter_results_obj(obj if isinstance(obj, dict) else {})
         kept = len(out_obj.get("results", []) or [])
-        total = len((obj or {}).get("results", []) or []) if isinstance(obj, dict) else 0
+        total = (
+            len((obj or {}).get("results", []) or []) if isinstance(obj, dict) else 0
+        )
         dropped = max(0, total - kept)
 
         with open(output_json_path, "w", encoding="utf-8") as f:
             json.dump(out_obj, f, ensure_ascii=False, indent=2)
 
-        print(f"[aux] filtered: total={total} kept={kept} dropped={dropped} -> {output_json_path}")
+        print(
+            f"[aux] filtered: total={total} kept={kept} dropped={dropped} -> {output_json_path}"
+        )
         return {"total": total, "kept": kept, "dropped": dropped}

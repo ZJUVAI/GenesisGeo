@@ -34,7 +34,7 @@ def load_solver_config(config_path: Path = None, **overrides) -> Dict[str, bool]
     if config_path is None:
         config_path = default_solver_config_path()
 
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         config = json.load(f)
 
     # Apply overrides

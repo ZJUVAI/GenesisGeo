@@ -141,22 +141,28 @@ def translate_dsl_to_construction(
         return f"{predicate} {' '.join(args)}"
 
     def _arrange(a: str, b: str, c: str, d: str) -> tuple[str, str, str] | None:
-        if a == c: return (b, a, d)
-        if a == d: return (b, a, c)
-        if b == c: return (a, b, d)
-        if b == d: return (a, b, c)
+        if a == c:
+            return (b, a, d)
+        if a == d:
+            return (b, a, c)
+        if b == c:
+            return (a, b, d)
+        if b == d:
+            return (a, b, c)
         return None
 
     a, b, c, d, e, f, g, h = args
     if len(set(args)) == 8:
-        _map = {h: f"on_aline0 {h} {a} {b} {c} {d} {e} {f} {g}",
-                g: f"on_aline0 {g} {a} {b} {c} {d} {e} {f} {h}",
-                f: f"on_aline0 {f} {c} {d} {a} {b} {g} {h} {e}",
-                e: f"on_aline0 {e} {c} {d} {a} {b} {g} {h} {f}",
-                d: f"on_aline0 {d} {e} {f} {g} {h} {a} {b} {c}",
-                c: f"on_aline0 {c} {e} {f} {g} {h} {a} {b} {d}",
-                b: f"on_aline0 {b} {g} {h} {e} {f} {c} {d} {a}",
-                a: f"on_aline0 {a} {g} {h} {e} {f} {c} {d} {b}"}
+        _map = {
+            h: f"on_aline0 {h} {a} {b} {c} {d} {e} {f} {g}",
+            g: f"on_aline0 {g} {a} {b} {c} {d} {e} {f} {h}",
+            f: f"on_aline0 {f} {c} {d} {a} {b} {g} {h} {e}",
+            e: f"on_aline0 {e} {c} {d} {a} {b} {g} {h} {f}",
+            d: f"on_aline0 {d} {e} {f} {g} {h} {a} {b} {c}",
+            c: f"on_aline0 {c} {e} {f} {g} {h} {a} {b} {d}",
+            b: f"on_aline0 {b} {g} {h} {e} {f} {c} {d} {a}",
+            a: f"on_aline0 {a} {g} {h} {e} {f} {c} {d} {b}",
+        }
         if point in _map:
             return _map[point]
 
@@ -183,7 +189,9 @@ def problem_to_dsl(problem: ProblemJGEX, defs: dict[str, DefinitionJGEX]) -> str
                 if not basics:
                     grouped_statements[" ".join(resolved_points)] = []
                 for basic in basics:
-                    stmt = Statement.from_tokens(translate_sentence(mapping, basic), dep_graph)
+                    stmt = Statement.from_tokens(
+                        translate_sentence(mapping, basic), dep_graph
+                    )
                     grouped_statements[" ".join(resolved_points)].append(stmt)
 
     problem_parts: list[str] = []
@@ -196,7 +204,13 @@ def problem_to_dsl(problem: ProblemJGEX, defs: dict[str, DefinitionJGEX]) -> str
         problem_parts.append(rendered.strip())
 
     goals = [Statement.from_tokens(goal, dep_graph).to_str() for goal in problem.goals]
-    return "<problem> " + " ; ".join(problem_parts) + " ? " + " ; ".join(goals) + " </problem>"
+    return (
+        "<problem> "
+        + " ; ".join(problem_parts)
+        + " ? "
+        + " ; ".join(goals)
+        + " </problem>"
+    )
 
 
 def _extract_args(stmt) -> list[str]:
@@ -212,7 +226,10 @@ def extract_points(proof: ProofState) -> list[tuple[str, Any, Any]]:
 
 
 def extract_premises(proof: ProofState) -> list[tuple[str, list[str]]]:
-    return [(stmt.predicate.NAME, _extract_args(stmt)) for stmt in proof.dep_graph.hyper_graph]
+    return [
+        (stmt.predicate.NAME, _extract_args(stmt))
+        for stmt in proof.dep_graph.hyper_graph
+    ]
 
 
 def extract_goals(proof: ProofState) -> list[tuple[str, list[str]]]:
@@ -221,7 +238,14 @@ def extract_goals(proof: ProofState) -> list[tuple[str, list[str]]]:
 
 def run_ddar_c(proof: ProofState, ddar_config: dict[str, bool] | None = None) -> bool:
     config = DEFAULT_DDAR_CONFIG if ddar_config is None else ddar_config
-    solved, _ = DDAR.run_ddar("", extract_points(proof), extract_premises(proof), extract_goals(proof), 500, config)
+    solved, _ = DDAR.run_ddar(
+        "",
+        extract_points(proof),
+        extract_premises(proof),
+        extract_goals(proof),
+        500,
+        config,
+    )
     return solved
 
 
@@ -259,8 +283,7 @@ class BeamQueue:
 
     def map_nodes(self, func) -> None:
         self.queue = [
-            (val, sk, order, func(node))
-            for val, sk, order, node in self.queue
+            (val, sk, order, func(node)) for val, sk, order, node in self.queue
         ]
 
 
@@ -291,7 +314,11 @@ def run_ddar_task(
     try:
         build_start = time.time()
         points, premises, goals = build_ddar_input(
-            problem, defs, np.random.default_rng(998244353), max_attempts=100, only_useful_points=False,
+            problem,
+            defs,
+            np.random.default_rng(998244353),
+            max_attempts=100,
+            only_useful_points=False,
         )
         build_end = time.time()
         ddar_build_work_time_s = build_end - build_start
@@ -370,4 +397,6 @@ def run_ddar_remote(
     return_proof: bool = False,
     ddar_config: dict[str, bool] | None = None,
 ):
-    return run_ddar_task(problem, defs, rules, return_proof=return_proof, ddar_config=ddar_config)
+    return run_ddar_task(
+        problem, defs, rules, return_proof=return_proof, ddar_config=ddar_config
+    )

@@ -57,8 +57,12 @@ def run_pipeline(config_path: str) -> None:
         # part1 关闭时，沿用 part1 本会产出的默认输出路径，
         # 让 part2.input=null 也能直接读取上一次 part1 的结果。
         last_output = resolve_output(
-            part1_cfg.get("output"), output_dir, "part1",
-            "normalized_rules.jsonl" if part1_cfg.get("normalize", True) else "propositions.jsonl",
+            part1_cfg.get("output"),
+            output_dir,
+            "part1",
+            "normalized_rules.jsonl"
+            if part1_cfg.get("normalize", True)
+            else "propositions.jsonl",
         )
 
     # ---------------- Part 2: 规则规约（含 NDG 发现，见 part2_reduction.ndg） ----------------
@@ -97,8 +101,8 @@ def run_part1(
     (output_path, stats)
     """
     part1_cfg = cfg["part1_extract"]
-    limit = part1_cfg.get("limit")          # 取前 N 条
-    sample = part1_cfg.get("sample")        # 随机抽 N 条（优先于 limit）
+    limit = part1_cfg.get("limit")  # 取前 N 条
+    sample = part1_cfg.get("sample")  # 随机抽 N 条（优先于 limit）
     random_seed = part1_cfg.get("random_seed")
 
     # Step 0 (optional): robustness pre-filter.  Strip coordinates from each
@@ -112,14 +116,17 @@ def run_part1(
         robust_output = os.path.join(output_dir, "robustness_filtered.jsonl")
         os.makedirs(output_dir, exist_ok=True)
         r_stats = filter_file(
-            robust_input, robust_output,
+            robust_input,
+            robust_output,
             rebuild_seed=robust_cfg.get("rebuild_seed", 999983),
             max_attempts=robust_cfg.get("max_attempts", 100),
             n_workers=robust_cfg.get("n_workers", 1),
             limit=limit if not sample else None,
         )
-        print(f"[part1] 鲁棒性过滤: {r_stats['total']} -> {r_stats['kept']} "
-              f"(build失败={r_stats['build_fail']}, goal不成立={r_stats['goal_fail']})")
+        print(
+            f"[part1] 鲁棒性过滤: {r_stats['total']} -> {r_stats['kept']} "
+            f"(build失败={r_stats['build_fail']}, goal不成立={r_stats['goal_fail']})"
+        )
         input_path = robust_output  # Use filtered data for subsequent steps
 
     # 跳过读数据/构图/拆解/命题提取，直接从已落盘的 propositions.jsonl 做规范化去重。
@@ -129,10 +136,16 @@ def run_part1(
         return _run_normalize_only(cfg, output_dir, normalize_only_input)
 
     prop_path = resolve_output(
-        None, output_dir, "part1", "propositions.jsonl",
+        None,
+        output_dir,
+        "part1",
+        "propositions.jsonl",
     )
     output_path = resolve_output(
-        part1_cfg.get("output"), output_dir, "part1", "normalized_rules.jsonl",
+        part1_cfg.get("output"),
+        output_dir,
+        "part1",
+        "normalized_rules.jsonl",
     )
     decompose = part1_cfg.get("decompose", False)
     merge_eqpoints_flag = part1_cfg.get("merge_eqpoints", True)
@@ -142,7 +155,9 @@ def run_part1(
     # 按 chunk 把整条处理链路下放到 worker；否则走串行版，逐子步单独统计打印。
     extract_n_workers = part1_cfg.get("extract_n_workers") or 0
     if extract_n_workers and extract_n_workers > 1:
-        from newclid.discovery.extraction.parallel_extract import extract_propositions_parallel
+        from newclid.discovery.extraction.parallel_extract import (
+            extract_propositions_parallel,
+        )
         from newclid.discovery.extraction.proposition_extractor import (
             proposition_to_output,
             proposition_to_text,
@@ -153,7 +168,9 @@ def run_part1(
         rule_skip_predicates = part1_cfg.get("rule_skip_predicates") or []
         propositions, failures, pstats = extract_propositions_parallel(
             input_path,
-            limit=limit, sample=sample, random_seed=random_seed,
+            limit=limit,
+            sample=sample,
+            random_seed=random_seed,
             simplify=part1_cfg.get("simplify", True),
             decompose=decompose,
             merge_eqpoints_flag=merge_eqpoints_flag,
@@ -172,19 +189,25 @@ def run_part1(
             "eqpoint_dropped_trivial": pstats["eqpoint_dropped_trivial"],
             "propositions": len(propositions),
         }
-        print(f"[part1] built={pstats['built']} failures={pstats['failures']} "
-              f"collapsed_steps={pstats['collapsed_steps']} "
-              f"subgraphs={pstats['subgraphs']} "
-              f"skipped_by_predicate={pstats['skipped_by_predicate']} "
-              f"skipped_by_eqpoint={pstats['skipped_by_eqpoint']} "
-              f"propositions={len(propositions)}")
-        print(f"[part1] eqpoint 合并: {pstats['eqpoint_merged']} 条命题合并等价点, "
-              f"{pstats['eqpoint_dropped_trivial']} 条合并后平凡被丢弃")
+        print(
+            f"[part1] built={pstats['built']} failures={pstats['failures']} "
+            f"collapsed_steps={pstats['collapsed_steps']} "
+            f"subgraphs={pstats['subgraphs']} "
+            f"skipped_by_predicate={pstats['skipped_by_predicate']} "
+            f"skipped_by_eqpoint={pstats['skipped_by_eqpoint']} "
+            f"propositions={len(propositions)}"
+        )
+        print(
+            f"[part1] eqpoint 合并: {pstats['eqpoint_merged']} 条命题合并等价点, "
+            f"{pstats['eqpoint_dropped_trivial']} 条合并后平凡被丢弃"
+        )
         for f in failures[:5]:
             print("  FAIL", f)
         if propositions:
             p = propositions[0]
-            print(f"[part1] sample proposition {p.proposition_id}: {proposition_to_text(p)}")
+            print(
+                f"[part1] sample proposition {p.proposition_id}: {proposition_to_text(p)}"
+            )
 
         os.makedirs(os.path.dirname(prop_path), exist_ok=True)
         write_jsonl([proposition_to_output(p) for p in propositions], prop_path)
@@ -192,7 +215,10 @@ def run_part1(
     else:
         print(f"[part1] 读取数据并构图: {input_path}")
         graphs, failures = build_proof_graphs(
-            input_path, limit=limit, sample=sample, random_seed=random_seed,
+            input_path,
+            limit=limit,
+            sample=sample,
+            random_seed=random_seed,
         )
 
         # 单前提推导折叠（config: part1_extract.simplify，默认开启）
@@ -207,9 +233,12 @@ def run_part1(
         subgraphs: list = []
         if decompose:
             from newclid.discovery.extraction.decomposer import decompose_by_aux
+
             for g in tqdm(graphs, desc="[part1] 拆解辅助点子图", unit="图"):
                 subgraphs.extend(decompose_by_aux(g))
-            print(f"[part1] 拆解: {len(graphs)} 张原图 -> {len(subgraphs)} 张含辅助点子图")
+            print(
+                f"[part1] 拆解: {len(graphs)} 张原图 -> {len(subgraphs)} 张含辅助点子图"
+            )
 
         # 需要绘制 / 统计的目标图集
         target_graphs = subgraphs if decompose else graphs
@@ -220,6 +249,7 @@ def run_part1(
         # eqpoint 是证明内部的正常中间步骤，保留。
         rule_skip_predicates = part1_cfg.get("rule_skip_predicates") or []
         from newclid.discovery.extraction.graph_manager import graph_skip_reason
+
         skip_set = set(rule_skip_predicates)
         skipped_by_predicate = 0
         skipped_by_eqpoint = 0
@@ -233,8 +263,10 @@ def run_part1(
             else:
                 kept_graphs.append(g)
         target_graphs = kept_graphs
-        print(f"[part1] 整图过滤: 丢弃 {skipped_by_predicate} 张(命中 {sorted(skip_set)}) "
-              f"+ {skipped_by_eqpoint} 张(裸 eqpoint), 剩余 {len(target_graphs)} 张")
+        print(
+            f"[part1] 整图过滤: 丢弃 {skipped_by_predicate} 张(命中 {sorted(skip_set)}) "
+            f"+ {skipped_by_eqpoint} 张(裸 eqpoint), 剩余 {len(target_graphs)} 张"
+        )
 
         n = len(target_graphs)
         n_facts = sum(len(g.facts) for g in target_graphs)
@@ -249,9 +281,11 @@ def run_part1(
             "avg_facts_per_graph": round(n_facts / n, 2) if n else 0,
             "avg_rules_per_graph": round(n_rules / n, 2) if n else 0,
         }
-        print(f"[part1] built={len(graphs)} failures={len(failures)} "
-              f"targets={n} avg_facts={stats['avg_facts_per_graph']} "
-              f"avg_rules={stats['avg_rules_per_graph']}")
+        print(
+            f"[part1] built={len(graphs)} failures={len(failures)} "
+            f"targets={n} avg_facts={stats['avg_facts_per_graph']} "
+            f"avg_rules={stats['avg_rules_per_graph']}"
+        )
         for f in failures[:5]:
             print("  FAIL", f)
 
@@ -267,6 +301,7 @@ def run_part1(
             import json as _json
 
             from newclid.discovery.extraction.visualizer import draw_proof_graph
+
             draw_limit = part1_cfg.get("draw_limit") or len(target_graphs)
             os.makedirs(draw_dir, exist_ok=True)
             drawn = 0
@@ -280,7 +315,9 @@ def run_part1(
                     "index_in_seed": g.index_in_seed,
                     **(g.raw_record or {}),
                 }
-                with open(os.path.join(draw_dir, stem + ".json"), "w", encoding="utf-8") as sf:
+                with open(
+                    os.path.join(draw_dir, stem + ".json"), "w", encoding="utf-8"
+                ) as sf:
                     _json.dump(sidecar, sf, ensure_ascii=False, indent=2)
                 drawn += 1
             stats["drawn"] = drawn
@@ -301,20 +338,26 @@ def run_part1(
             print(f"[part1] 命题提取: {len(propositions)} 条")
             if propositions:
                 p = propositions[0]
-                print(f"[part1] sample proposition {p.proposition_id}: {proposition_to_text(p)}")
+                print(
+                    f"[part1] sample proposition {p.proposition_id}: {proposition_to_text(p)}"
+                )
 
             # eqpoint 等价点合并（config: part1_extract.merge_eqpoints，默认开启）
             # eqpoint a b 表示两点数值重合，多为采点退化而非有意义的几何条件，
             # 用 Union-Find 把等价点合并为代表元、去掉 eqpoint 前提本身。
             if merge_eqpoints_flag:
-                from newclid.discovery.extraction.eqpoint_merge import merge_eqpoints_batch
+                from newclid.discovery.extraction.eqpoint_merge import (
+                    merge_eqpoints_batch,
+                )
 
                 propositions, merged, dropped = merge_eqpoints_batch(propositions)
                 stats["eqpoint_merged"] = merged
                 stats["eqpoint_dropped_trivial"] = dropped
                 stats["propositions"] = len(propositions)
-                print(f"[part1] eqpoint 合并: {merged} 条命题合并等价点, "
-                      f"{dropped} 条合并后平凡被丢弃, 剩余 {len(propositions)} 条")
+                print(
+                    f"[part1] eqpoint 合并: {merged} 条命题合并等价点, "
+                    f"{dropped} 条合并后平凡被丢弃, 剩余 {len(propositions)} 条"
+                )
 
             # 落盘原始命题（规则文本 + 点坐标）
             os.makedirs(os.path.dirname(prop_path), exist_ok=True)
@@ -334,7 +377,9 @@ def run_part1(
         bridge_cfg = part1_cfg.get("bridge_elimination", {})
         if bridge_cfg.get("enabled", False) and rules:
             from dataclasses import replace
-            from newclid.discovery.reduction.bridge_elimination import bridge_point_eliminate
+            from newclid.discovery.reduction.bridge_elimination import (
+                bridge_point_eliminate,
+            )
 
             n_bridge = 0
             for i, r in enumerate(rules):
@@ -356,10 +401,14 @@ def run_part1(
         stats["output"] = output_path
         print(f"[part1] 规则已保存 -> {output_path}")
 
-        occurrences_path = os.path.join(os.path.dirname(output_path), "rule_seed_occurrences_all.json")
+        occurrences_path = os.path.join(
+            os.path.dirname(output_path), "rule_seed_occurrences_all.json"
+        )
         _write_occurrences(occurrences, occurrences_path)
         stats["seed_occurrences_all"] = occurrences_path
-        print(f"[part1] 去重前 rule_text->seed 出现次数统计已保存 -> {occurrences_path}")
+        print(
+            f"[part1] 去重前 rule_text->seed 出现次数统计已保存 -> {occurrences_path}"
+        )
     else:
         output_path = prop_path
         stats["output"] = prop_path
@@ -377,7 +426,8 @@ def _write_occurrences(occurrences: dict[str, dict[str, int]], path: str) -> Non
 
 
 def _normalize_dedup(
-    part1_cfg: dict[str, Any], propositions: list,
+    part1_cfg: dict[str, Any],
+    propositions: list,
 ) -> tuple[list, dict[str, dict[str, int]]]:
     """按配置在串行 / Ray 并行的 normalize_and_dedup 之间选择。
 
@@ -392,13 +442,17 @@ def _normalize_dedup(
     if n_workers and n_workers > 1:
         chunk_size = part1_cfg.get("normalize_chunk_size", 5000)
         return normalize_and_dedup_parallel(
-            propositions, n_workers=n_workers, chunk_size=chunk_size,
+            propositions,
+            n_workers=n_workers,
+            chunk_size=chunk_size,
         )
     return normalize_and_dedup(propositions)
 
 
 def _run_normalize_only(
-    cfg: dict[str, Any], output_dir: str, propositions_path: str,
+    cfg: dict[str, Any],
+    output_dir: str,
+    propositions_path: str,
 ) -> tuple[str, dict[str, Any]]:
     """只跑规范化去重：从已落盘的 propositions.jsonl 读入，跳过读数据/构图等步骤。"""
     from newclid.discovery.extraction.normalizer import rule_to_output
@@ -417,14 +471,19 @@ def _run_normalize_only(
         print(f"[part1] sample rule {rules[0].rule_id}: {rules[0].rule_text}")
 
     output_path = resolve_output(
-        part1_cfg.get("output"), output_dir, "part1", "normalized_rules.jsonl",
+        part1_cfg.get("output"),
+        output_dir,
+        "part1",
+        "normalized_rules.jsonl",
     )
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     write_jsonl([rule_to_output(r) for r in rules], output_path)
     stats["output"] = output_path
     print(f"[part1] 规则已保存 -> {output_path}")
 
-    occurrences_path = os.path.join(os.path.dirname(output_path), "rule_seed_occurrences_all.json")
+    occurrences_path = os.path.join(
+        os.path.dirname(output_path), "rule_seed_occurrences_all.json"
+    )
     _write_occurrences(occurrences, occurrences_path)
     stats["seed_occurrences_all"] = occurrences_path
     print(f"[part1] 去重前 rule_text->seed 出现次数统计已保存 -> {occurrences_path}")
@@ -438,6 +497,5 @@ def run_part2(
 ) -> tuple[str, dict[str, Any]]:
     """执行 Part 2: 规则规约（第一步：按前提数量过滤）。委托 reduction.orchestrator。"""
     from newclid.discovery.reduction.orchestrator import run_part2 as _run_part2
+
     return _run_part2(cfg, output_dir, input_path)
-
-

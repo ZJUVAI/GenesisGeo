@@ -135,7 +135,9 @@ class BaseAgent(DeductiveAgent, ABC):
         self._defs_ref = ray.put(base_proof.defs)
         self._rules_ref = ray.put(rules)
 
-        modes = ("v1", "v2") if self.search_version == "hybrid" else (self.search_version,)
+        modes = (
+            ("v1", "v2") if self.search_version == "hybrid" else (self.search_version,)
+        )
         error = "Tried but failed."
         try:
             for mode in modes:
@@ -151,14 +153,18 @@ class BaseAgent(DeductiveAgent, ABC):
         except Exception as exc:
             return self._infos(t0, False, f"{type(exc).__name__}: {exc}")
 
-    def _search(self, mode: str, proof: ProofState, deadline: float) -> tuple[bool, str]:
+    def _search(
+        self, mode: str, proof: ProofState, deadline: float
+    ) -> tuple[bool, str]:
         beam = BeamQueue(max_size=self.beam_size)
         beam.add(node=((), self.problemJGEX, ""), val=0.0, stable_key=())
 
         for depth in range(self.search_depth):
             self._step = depth + 1
             frontier = list(beam)
-            self._trace("depth_start", mode=mode, depth=depth, frontier_size=len(frontier))
+            self._trace(
+                "depth_start", mode=mode, depth=depth, frontier_size=len(frontier)
+            )
             if not frontier:
                 self._trace("depth_end", mode=mode, depth=depth, next_frontier_size=0)
                 break
@@ -212,18 +218,29 @@ class BaseAgent(DeductiveAgent, ABC):
                         except Exception as exc:
                             last_lm_done = time.time()
                             self._trace(
-                                "lm_error", mode=mode, depth=depth,
+                                "lm_error",
+                                mode=mode,
+                                depth=depth,
                                 request_id=request.get("request_id"),
-                                error_type=type(exc).__name__, error_message=str(exc),
-                                request_elapsed_s=round(last_lm_done - request_started, 6),
+                                error_type=type(exc).__name__,
+                                error_message=str(exc),
+                                request_elapsed_s=round(
+                                    last_lm_done - request_started, 6
+                                ),
                             )
                         else:
-                            last_lm_done = float(result.get("completed_at_unix_s", time.time()))
+                            last_lm_done = float(
+                                result.get("completed_at_unix_s", time.time())
+                            )
                             self._trace(
-                                "lm_result", mode=mode, depth=depth,
+                                "lm_result",
+                                mode=mode,
+                                depth=depth,
                                 request_id=result.get("request_id"),
                                 candidate_count=len(result.get("aux_dsl_scores", {})),
-                                request_elapsed_s=round(last_lm_done - request_started, 6),
+                                request_elapsed_s=round(
+                                    last_lm_done - request_started, 6
+                                ),
                             )
 
                         if time.time() < deadline and not solved:
@@ -241,11 +258,24 @@ class BaseAgent(DeductiveAgent, ABC):
 
                         if result is not None:
                             solved = self._submit(
-                                result, context, pending, meta, next_beam, last_depth,
-                                deadline, mode=mode, depth=depth,
+                                result,
+                                context,
+                                pending,
+                                meta,
+                                next_beam,
+                                last_depth,
+                                deadline,
+                                mode=mode,
+                                depth=depth,
                             ) or self._collect(
-                                pending, meta, next_beam, last_depth, deadline,
-                                mode=mode, depth=depth, block=False,
+                                pending,
+                                meta,
+                                next_beam,
+                                last_depth,
+                                deadline,
+                                mode=mode,
+                                depth=depth,
+                                block=False,
                             )
                             if solved:
                                 break
@@ -255,17 +285,44 @@ class BaseAgent(DeductiveAgent, ABC):
             self._llm_wall += max(last_lm_done - lm_start, 0.0)
             if timed_out:
                 self._cancel(pending)
-                self._trace("depth_end", mode=mode, depth=depth, next_frontier_size=len(next_beam), solved=False)
+                self._trace(
+                    "depth_end",
+                    mode=mode,
+                    depth=depth,
+                    next_frontier_size=len(next_beam),
+                    solved=False,
+                )
                 return False, "Timeout"
             if not solved:
-                solved = self._collect(pending, meta, next_beam, last_depth, deadline, mode=mode, depth=depth, block=True)
+                solved = self._collect(
+                    pending,
+                    meta,
+                    next_beam,
+                    last_depth,
+                    deadline,
+                    mode=mode,
+                    depth=depth,
+                    block=True,
+                )
             if solved:
                 self._cancel(pending)
-                self._trace("depth_end", mode=mode, depth=depth, next_frontier_size=len(next_beam), solved=True)
+                self._trace(
+                    "depth_end",
+                    mode=mode,
+                    depth=depth,
+                    next_frontier_size=len(next_beam),
+                    solved=True,
+                )
                 return True, ""
 
             beam = next_beam
-            self._trace("depth_end", mode=mode, depth=depth, next_frontier_size=len(beam), solved=False)
+            self._trace(
+                "depth_end",
+                mode=mode,
+                depth=depth,
+                next_frontier_size=len(beam),
+                solved=False,
+            )
 
         return False, "Tried but failed."
 
@@ -277,7 +334,9 @@ class BaseAgent(DeductiveAgent, ABC):
         proof: ProofState,
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         if not ray.is_initialized():
-            raise RuntimeError("Ray must be initialized before evaluation request build.")
+            raise RuntimeError(
+                "Ray must be initialized before evaluation request build."
+            )
 
         entries: list[dict[str, Any]] = []
         refs = []
@@ -312,8 +371,12 @@ class BaseAgent(DeductiveAgent, ABC):
                 request = ray.get(ref)
             except Exception as exc:
                 self._trace(
-                    "request_build_error", mode=mode, depth=depth, request_id=request_id,
-                    error_type=type(exc).__name__, error_message=str(exc),
+                    "request_build_error",
+                    mode=mode,
+                    depth=depth,
+                    request_id=request_id,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
                 )
                 continue
             requests_list.append(request)
@@ -324,7 +387,10 @@ class BaseAgent(DeductiveAgent, ABC):
                 "request": request,
             }
             self._trace(
-                "lm_request", mode=mode, depth=depth, request_id=request_id,
+                "lm_request",
+                mode=mode,
+                depth=depth,
+                request_id=request_id,
                 response_prefix=request.get("response_prefix"),
                 new_point_name=request.get("new_point_name"),
             )
@@ -347,53 +413,81 @@ class BaseAgent(DeductiveAgent, ABC):
         response_prefix = str(ctx["request"]["response_prefix"])
         aux_dsl_thinks = result.get("aux_dsl_thinks", {})
 
-        for rank, (aux_dsl, score) in enumerate(_rank(result.get("aux_dsl_scores", {}))):
+        for rank, (aux_dsl, score) in enumerate(
+            _rank(result.get("aux_dsl_scores", {}))
+        ):
             if not aux_dsl.startswith(response_prefix):
                 continue
-            aux_body = aux_dsl[len(response_prefix):].strip()
+            aux_body = aux_dsl[len(response_prefix) :].strip()
             if bool(getattr(self, "think", False)):
                 aux_construction = try_full_aux_dsl_to_constructions(aux_body)
             else:
                 aux_construction = try_dsl_to_constructions(aux_body)
             model_think = aux_dsl_thinks.get(aux_dsl)
             self._trace(
-                "candidate_parse", mode=mode, depth=depth,
-                request_id=result["request_id"], candidate_rank=rank,
-                aux_dsl=aux_dsl, parsed=aux_construction is not None,
+                "candidate_parse",
+                mode=mode,
+                depth=depth,
+                request_id=result["request_id"],
+                candidate_rank=rank,
+                aux_dsl=aux_dsl,
+                parsed=aux_construction is not None,
                 model_think=model_think,
             )
             if aux_construction is None:
                 continue
 
             try:
-                appended_problem = ctx["problem"].with_more_construction(aux_construction)
+                appended_problem = ctx["problem"].with_more_construction(
+                    aux_construction
+                )
                 new_problem = appended_problem.renamed()
                 new_constructions = new_problem.constructions[
-                    len(ctx["problem"].constructions):
+                    len(ctx["problem"].constructions) :
                 ]
                 renamed_construction = "; ".join(str(c) for c in new_constructions)
             except Exception as exc:
                 self._trace(
-                    "candidate_build", mode=mode, depth=depth,
-                    request_id=result["request_id"], candidate_rank=rank,
-                    construction_text=aux_construction, built=False, error_message=str(exc),
+                    "candidate_build",
+                    mode=mode,
+                    depth=depth,
+                    request_id=result["request_id"],
+                    candidate_rank=rank,
+                    construction_text=aux_construction,
+                    built=False,
+                    error_message=str(exc),
                 )
                 continue
 
             self._trace(
-                "candidate_build", mode=mode, depth=depth,
-                request_id=result["request_id"], candidate_rank=rank,
+                "candidate_build",
+                mode=mode,
+                depth=depth,
+                request_id=result["request_id"],
+                candidate_rank=rank,
                 construction_text=renamed_construction,
                 raw_construction_text=aux_construction,
                 built=True,
             )
 
             while len(pending) >= self._max_pending:
-                if self._collect(pending, meta, next_beam, last_depth, deadline, mode=mode, depth=depth, block=True):
+                if self._collect(
+                    pending,
+                    meta,
+                    next_beam,
+                    last_depth,
+                    deadline,
+                    mode=mode,
+                    depth=depth,
+                    block=True,
+                ):
                     return True
 
             future = run_ddar_remote.options(max_retries=0).remote(
-                new_problem, self._defs_ref, self._rules_ref, ddar_config=self.ddar_config,
+                new_problem,
+                self._defs_ref,
+                self._rules_ref,
+                ddar_config=self.ddar_config,
             )
             self._ddar_calls += 1
             pending.append(future)
@@ -403,14 +497,17 @@ class BaseAgent(DeductiveAgent, ABC):
                 "rank": rank,
                 "score": score,
                 "problem": new_problem,
-                "child_aux_prefix": aux_dsl[len("<aux>"):],
+                "child_aux_prefix": aux_dsl[len("<aux>") :],
                 "request_id": result["request_id"],
                 "construction_text": renamed_construction,
                 "raw_construction_text": aux_construction,
             }
             self._trace(
-                "ddar_submit", mode=mode, depth=depth,
-                request_id=result["request_id"], candidate_rank=rank,
+                "ddar_submit",
+                mode=mode,
+                depth=depth,
+                request_id=result["request_id"],
+                candidate_rank=rank,
                 construction_text=renamed_construction,
                 raw_construction_text=aux_construction,
             )
@@ -434,7 +531,9 @@ class BaseAgent(DeductiveAgent, ABC):
                 return False
 
             wait_start = time.perf_counter()
-            done, remaining = ray.wait(pending, num_returns=1, timeout=1.0 if block else 0.0)
+            done, remaining = ray.wait(
+                pending, num_returns=1, timeout=1.0 if block else 0.0
+            )
             self._ddar_wall += time.perf_counter() - wait_start
             if not done:
                 if block:
@@ -445,12 +544,17 @@ class BaseAgent(DeductiveAgent, ABC):
             result = ray.get(done[0])
             info = meta.pop(done[0])
             self._trace(
-                "ddar_result", mode=mode, depth=depth,
-                request_id=info["request_id"], candidate_rank=info["rank"],
-                status=result.get("status"), elapsed_time=result.get("elapsed_time"),
+                "ddar_result",
+                mode=mode,
+                depth=depth,
+                request_id=info["request_id"],
+                candidate_rank=info["rank"],
+                status=result.get("status"),
+                elapsed_time=result.get("elapsed_time"),
                 construction_text=info.get("construction_text"),
                 raw_construction_text=info.get("raw_construction_text"),
-                error_type=result.get("error_type"), error_message=result.get("error_message"),
+                error_type=result.get("error_type"),
+                error_message=result.get("error_message"),
             )
 
             if result.get("status") == "solved":
@@ -487,7 +591,9 @@ class BaseAgent(DeductiveAgent, ABC):
         if self.trace_writer is not None:
             self.trace_writer.log(event, **payload)
 
-    def _infos(self, t0: float, success: bool, error: str | None = None) -> dict[str, Any]:
+    def _infos(
+        self, t0: float, success: bool, error: str | None = None
+    ) -> dict[str, Any]:
         infos: dict[str, Any] = {
             "runtime": time.time() - t0,
             "success": success,

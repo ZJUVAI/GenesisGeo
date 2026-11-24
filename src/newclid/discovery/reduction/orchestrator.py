@@ -43,14 +43,20 @@ def _write(rules: list[RuleItem], output_path: str) -> None:
     txt_path = os.path.splitext(output_path)[0] + ".txt"
     with open(output_path, "w", encoding="utf-8") as f:
         for r in rules:
-            f.write(json.dumps({
-                "rule_id": r.rule_id,
-                "seed": r.seed,
-                "index_in_seed": r.index_in_seed,
-                "rule_text": r.rule_text,
-                "points": [{"name": n, "x": x, "y": y} for n, x, y in r.points],
-                "guards": r.guards,
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "rule_id": r.rule_id,
+                        "seed": r.seed,
+                        "index_in_seed": r.index_in_seed,
+                        "rule_text": r.rule_text,
+                        "points": [{"name": n, "x": x, "y": y} for n, x, y in r.points],
+                        "guards": r.guards,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
     with open(txt_path, "w", encoding="utf-8") as f:
         for r in rules:
             if r.guards:
@@ -92,18 +98,15 @@ def _run_ndg_stage(
     min_good_ratio = ndg_cfg.get("min_good_ratio", 0.0)
 
     part1_dir = os.path.join(output_dir, "part1")
-    normalized_rules_path = (
-        ndg_cfg.get("normalized_rules_path")
-        or os.path.join(part1_dir, "normalized_rules.jsonl")
+    normalized_rules_path = ndg_cfg.get("normalized_rules_path") or os.path.join(
+        part1_dir, "normalized_rules.jsonl"
     )
-    occurrences_path = (
-        ndg_cfg.get("occurrences_path")
-        or os.path.join(part1_dir, "rule_seed_occurrences_all.json")
+    occurrences_path = ndg_cfg.get("occurrences_path") or os.path.join(
+        part1_dir, "rule_seed_occurrences_all.json"
     )
-    source_dataset_path = (
-        ndg_cfg.get("source_dataset_path")
-        or cfg.get("part1_extract", {}).get("input")
-    )
+    source_dataset_path = ndg_cfg.get("source_dataset_path") or cfg.get(
+        "part1_extract", {}
+    ).get("input")
     if not source_dataset_path:
         raise ValueError(
             "part2_reduction.ndg.enabled=True 需要 source_dataset_path（原始数据集），"
@@ -118,13 +121,19 @@ def _run_ndg_stage(
     rules_file = os.path.join(out_dir, "ndg_input.jsonl")
     with open(rules_file, "w", encoding="utf-8") as f:
         for r in rules:
-            f.write(_json.dumps({
-                "rule_id": r.rule_id,
-                "seed": r.seed,
-                "index_in_seed": r.index_in_seed,
-                "rule_text": r.rule_text,
-                "points": [{"name": n, "x": x, "y": y} for n, x, y in r.points],
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                _json.dumps(
+                    {
+                        "rule_id": r.rule_id,
+                        "seed": r.seed,
+                        "index_in_seed": r.index_in_seed,
+                        "rule_text": r.rule_text,
+                        "points": [{"name": n, "x": x, "y": y} for n, x, y in r.points],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
     print("[part2][ndg] Step 1: discovering distinguishing predicates...")
     results = discover_all(
@@ -143,7 +152,9 @@ def _run_ndg_stage(
     print("[part2][ndg] Step 2: applying NDG predicates...")
     ndg_output_file = os.path.join(out_dir, "ndg_output.jsonl")
     apply_stats, apply_dropped = apply_ndg(
-        dist_file, rules_file, ndg_output_file,
+        dist_file,
+        rules_file,
+        ndg_output_file,
         degeneracy_threshold=degeneracy_threshold,
     )
 
@@ -194,7 +205,9 @@ def run_part2(
 
     out_dir = os.path.join(output_dir, "part2")
     os.makedirs(out_dir, exist_ok=True)
-    output_path = part2_cfg.get("output") or os.path.join(out_dir, "reduced_rules.jsonl")
+    output_path = part2_cfg.get("output") or os.path.join(
+        out_dir, "reduced_rules.jsonl"
+    )
 
     # 加载
     rules = load_rules(input_path)
@@ -209,7 +222,9 @@ def run_part2(
     if extra_rules_path:
         extra_sources = load_rules(extra_rules_path)
         stats["extra_sources"] = len(extra_sources)
-        print(f"[part2] 加载额外 sources 规则(不参与规约): {len(extra_sources)} 条 <- {extra_rules_path}")
+        print(
+            f"[part2] 加载额外 sources 规则(不参与规约): {len(extra_sources)} 条 <- {extra_rules_path}"
+        )
 
     # 全量 audit：rule_id -> {rule_text, status, stage, ...}，最终落盘为 rule_audit_log.jsonl。
     # 记录范围是 Part 2 的输入（即 Part 1 产出的全部规则），逐阶段追加"dropped/merged"记录，
@@ -228,7 +243,11 @@ def run_part2(
 
     # 阶段 0：点数预过滤 + 前提数预过滤 + perp 前提数过滤
     max_perp_premises = part2_cfg.get("max_perp_premises")
-    if max_points_drop is not None or max_premises_drop is not None or max_perp_premises is not None:
+    if (
+        max_points_drop is not None
+        or max_premises_drop is not None
+        or max_perp_premises is not None
+    ):
         before = rules
         if max_points_drop is not None:
             rules = [r for r in rules if len(r.points) < max_points_drop]
@@ -236,8 +255,10 @@ def run_part2(
             rules = [r for r in rules if r.premise_count < max_premises_drop]
         if max_perp_premises is not None:
             rules = [
-                r for r in rules
-                if sum(1 for name, _args in r.premises if name == "perp") <= max_perp_premises
+                r
+                for r in rules
+                if sum(1 for name, _args in r.premises if name == "perp")
+                <= max_perp_premises
             ]
         dropped_ids = {r.rule_id for r in before} - {r.rule_id for r in rules}
         by_id = {r.rule_id: r for r in before}
@@ -247,13 +268,15 @@ def run_part2(
                 "status": "dropped",
                 "stage": "premise_num_filter",
                 "reason": f"points>={max_points_drop} or premises>={max_premises_drop} "
-                          f"or perp_premises>{max_perp_premises}",
+                f"or perp_premises>{max_perp_premises}",
             }
         stats["after_premise_filter"] = len(rules)
-        print(f"[part2] 点数<{max_points_drop}"
-              f"{' 且 前提数<' + str(max_premises_drop) if max_premises_drop is not None else ''}"
-              f"{' 且 perp 前提数<=' + str(max_perp_premises) if max_perp_premises is not None else ''}"
-              f" 过滤后: {len(rules)} 条")
+        print(
+            f"[part2] 点数<{max_points_drop}"
+            f"{' 且 前提数<' + str(max_premises_drop) if max_premises_drop is not None else ''}"
+            f"{' 且 perp 前提数<=' + str(max_perp_premises) if max_perp_premises is not None else ''}"
+            f" 过滤后: {len(rules)} 条"
+        )
         _write(rules, os.path.join(out_dir, "premise_num_filtered.jsonl"))
 
     # 阶段 0.5：NDG 发现 + 应用（必须在任何规约之前做，否则规约阶段用来
@@ -263,7 +286,10 @@ def run_part2(
     ndg_cfg = part2_cfg.get("ndg", {})
     if ndg_cfg.get("enabled", False):
         rules, ndg_stage_audit, ndg_stats = _run_ndg_stage(
-            rules, cfg, output_dir, out_dir,
+            rules,
+            cfg,
+            output_dir,
+            out_dir,
         )
         audit.update(ndg_stage_audit)
         stats.update(ndg_stats)
@@ -272,7 +298,10 @@ def run_part2(
 
     # 阶段 1：seed 分组规约
     rules, stage_audit = seed_reducer.reduce_by_seed(
-        rules, n_workers=n_workers, use_ray=use_ray, config_path=config_path,
+        rules,
+        n_workers=n_workers,
+        use_ray=use_ray,
+        config_path=config_path,
         extra_sources=extra_sources,
     )
     audit.update(stage_audit)
@@ -281,8 +310,12 @@ def run_part2(
 
     # 阶段 3：分治规约
     rules, stage_audit = divide_conquer_reducer.reduce(
-        rules, chunk_size=chunk_size, n_workers=n_workers, use_ray=use_ray,
-        config_path=config_path, extra_sources=extra_sources,
+        rules,
+        chunk_size=chunk_size,
+        n_workers=n_workers,
+        use_ray=use_ray,
+        config_path=config_path,
+        extra_sources=extra_sources,
     )
     audit.update(stage_audit)
     stats["after_divide_conquer"] = len(rules)
@@ -292,7 +325,10 @@ def run_part2(
     # 可能漏掉的"同前提互推"冗余），保证 merge_same_premise 合并时组内不再
     # 发生规约层面的丢弃 —— 此后不会再对存活规则的前提/结论做任何丢弃或改写。
     rules, stage_audit = seed_reducer.reduce_by_premise_group(
-        rules, n_workers=n_workers, use_ray=use_ray, config_path=config_path,
+        rules,
+        n_workers=n_workers,
+        use_ray=use_ray,
+        config_path=config_path,
         extra_sources=extra_sources,
     )
     audit.update(stage_audit)
@@ -318,7 +354,9 @@ def run_part2(
     audit_path = _write_audit_log(rules, audit, initial_rule_texts, out_dir)
     stats["audit_log"] = audit_path
 
-    print(f"[part2] 规约完成: {stats['input']} -> {len(rules)} 条, 结果 -> {output_path}")
+    print(
+        f"[part2] 规约完成: {stats['input']} -> {len(rules)} 条, 结果 -> {output_path}"
+    )
     return output_path, stats
 
 
@@ -344,7 +382,11 @@ def _write_audit_log(
         if rule_id in audit:
             rec = {"rule_id": rule_id, "rule_text": rule_text, **audit[rule_id]}
         elif rule_id in survived_texts:
-            rec = {"rule_id": rule_id, "rule_text": survived_texts[rule_id], "status": "kept"}
+            rec = {
+                "rule_id": rule_id,
+                "rule_text": survived_texts[rule_id],
+                "status": "kept",
+            }
         else:
             # 理论上不应发生：既不在 audit（未被记录丢弃/合并），又不在最终存活集合。
             rec = {"rule_id": rule_id, "rule_text": rule_text, "status": "unknown"}
@@ -359,21 +401,29 @@ def _write_audit_log(
     n_dropped = sum(1 for r in records if r["status"] == "dropped")
     n_merged = sum(1 for r in records if r["status"] == "merged")
     n_unknown = sum(1 for r in records if r["status"] == "unknown")
-    print(f"[part2] audit log 已保存 -> {audit_path} "
-          f"(kept={n_kept} dropped={n_dropped} merged={n_merged} unknown={n_unknown})")
+    print(
+        f"[part2] audit log 已保存 -> {audit_path} "
+        f"(kept={n_kept} dropped={n_dropped} merged={n_merged} unknown={n_unknown})"
+    )
     return audit_path
 
 
-def _write_survived_occurrences(rules: list[RuleItem], input_path: str, out_dir: str) -> None:
+def _write_survived_occurrences(
+    rules: list[RuleItem], input_path: str, out_dir: str
+) -> None:
     """从 Part 1 落盘的全量 rule_text->seed 出现次数统计里，筛出当前存活规则
     （规约结束、合并之前）对应的子集，另存一份，便于反查最终规则的原始泛化程度。
 
     全量统计文件默认与 Part 1 输出（normalized_rules.jsonl）同目录，名为
     rule_seed_occurrences_all.json；找不到则跳过（不阻塞规约流程）。
     """
-    all_path = os.path.join(os.path.dirname(input_path), "rule_seed_occurrences_all.json")
+    all_path = os.path.join(
+        os.path.dirname(input_path), "rule_seed_occurrences_all.json"
+    )
     if not os.path.exists(all_path):
-        print(f"[part2] 未找到全量 rule_text->seed 统计文件 {all_path}, 跳过存活子集落盘")
+        print(
+            f"[part2] 未找到全量 rule_text->seed 统计文件 {all_path}, 跳过存活子集落盘"
+        )
         return
 
     with open(all_path, "r", encoding="utf-8") as f:
@@ -381,11 +431,15 @@ def _write_survived_occurrences(rules: list[RuleItem], input_path: str, out_dir:
 
     survived_texts = {r.rule_text for r in rules}
     survived_occurrences = {
-        text: all_occurrences[text] for text in survived_texts if text in all_occurrences
+        text: all_occurrences[text]
+        for text in survived_texts
+        if text in all_occurrences
     }
 
     survived_path = os.path.join(out_dir, "rule_seed_occurrences_survived.json")
     with open(survived_path, "w", encoding="utf-8") as f:
         json.dump(survived_occurrences, f, ensure_ascii=False, indent=2)
-    print(f"[part2] 存活规则(合并前) rule_text->seed 出现次数统计已保存 -> {survived_path} "
-          f"({len(survived_occurrences)}/{len(survived_texts)} 条匹配到全量统计)")
+    print(
+        f"[part2] 存活规则(合并前) rule_text->seed 出现次数统计已保存 -> {survived_path} "
+        f"({len(survived_occurrences)}/{len(survived_texts)} 条匹配到全量统计)"
+    )

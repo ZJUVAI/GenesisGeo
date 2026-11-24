@@ -21,6 +21,7 @@ from newclid.discovery.reduction.subsumption_tester import RuleItem, Subsumption
 # 贪心累积规约（核心）
 # ---------------------------------------------------------------------------
 
+
 def greedy_reduce(
     rules: list[RuleItem],
     tester: SubsumptionTester,
@@ -105,7 +106,7 @@ def leave_one_out_reduce(
     i = 0
     while i < len(current):
         target = current[i]
-        others = current[:i] + current[i + 1:]
+        others = current[:i] + current[i + 1 :]
         if tester.is_derivable(target, others + extra):
             if audit is not None:
                 audit[target.rule_id] = {
@@ -124,13 +125,16 @@ def leave_one_out_reduce(
 # 阶段 2a：合并前提一致的规则前，先组内规约一次
 # ---------------------------------------------------------------------------
 
+
 def _premise_key(r: RuleItem) -> tuple:
     """前提集合的规范键（无序）。"""
     return tuple(sorted(f"{n} {' '.join(a)}" for n, a in r.premises))
 
 
 def _reduce_premise_group(
-    rules: list[RuleItem], seed: int, config_path: str | None,
+    rules: list[RuleItem],
+    seed: int,
+    config_path: str | None,
     extra_sources: list[RuleItem] | None = None,
 ) -> tuple[list[RuleItem], dict[str, dict]]:
     """单个"前提一致"组内规约（组内规模小，用留一法在 worker 内串行执行）。"""
@@ -139,7 +143,11 @@ def _reduce_premise_group(
     tester = SubsumptionTester(seed=seed, config_path=config_path)
     audit: dict[str, dict] = {}
     survivors = leave_one_out_reduce(
-        rules, tester, stage="premise_group_reduce", audit=audit, extra_sources=extra_sources,
+        rules,
+        tester,
+        stage="premise_group_reduce",
+        audit=audit,
+        extra_sources=extra_sources,
     )
     return survivors, audit
 
@@ -164,8 +172,10 @@ def reduce_by_premise_group(
     for r in rules:
         groups[_premise_key(r)].append(r)
     multi_groups = {k: g for k, g in groups.items() if len(g) > 1}
-    print(f"[premise_group_reduce] {len(rules)} 条规则 -> {len(groups)} 个前提组"
-          f"（其中 {len(multi_groups)} 组需要组内规约）")
+    print(
+        f"[premise_group_reduce] {len(rules)} 条规则 -> {len(groups)} 个前提组"
+        f"（其中 {len(multi_groups)} 组需要组内规约）"
+    )
 
     if not multi_groups:
         return rules, {}
@@ -182,14 +192,19 @@ def reduce_by_premise_group(
         args = [(g, seed, config_path, extra_sources) for g in multi_groups.values()]
         for group_survivors, group_audit in tqdm(
             run_bounded(remote, args, inflight=n_workers),
-            total=len(multi_groups), desc="[part2] 前提组内规约", unit="组",
+            total=len(multi_groups),
+            desc="[part2] 前提组内规约",
+            unit="组",
         ):
             survivors.extend(group_survivors)
             audit.update(group_audit)
     else:
         for g in tqdm(multi_groups.values(), desc="[part2] 前提组内规约", unit="组"):
             group_survivors, group_audit = _reduce_premise_group(
-                g, seed, config_path, extra_sources=extra_sources,
+                g,
+                seed,
+                config_path,
+                extra_sources=extra_sources,
             )
             survivors.extend(group_survivors)
             audit.update(group_audit)
@@ -273,15 +288,22 @@ def merge_same_premise(rules: list[RuleItem]) -> tuple[list[RuleItem], dict[str,
 # 阶段 1：按 seed 分组规约（Ray 并行）
 # ---------------------------------------------------------------------------
 
+
 def _reduce_group(
-    rules: list[RuleItem], seed: int, config_path: str | None,
+    rules: list[RuleItem],
+    seed: int,
+    config_path: str | None,
     extra_sources: list[RuleItem] | None = None,
 ) -> tuple[list[RuleItem], dict[str, dict]]:
     """单个 seed 组的规约（在 worker 内串行执行 greedy_reduce）。"""
     tester = SubsumptionTester(seed=seed, config_path=config_path)
     audit: dict[str, dict] = {}
     survivors = greedy_reduce(
-        rules, tester, stage="seed_reduce", audit=audit, extra_sources=extra_sources,
+        rules,
+        tester,
+        stage="seed_reduce",
+        audit=audit,
+        extra_sources=extra_sources,
     )
     return survivors, audit
 
@@ -311,18 +333,24 @@ def reduce_by_seed(
 
         ensure_ray(n_workers)
         remote = ray.remote(_reduce_group)
-        args = [(g, (seed if isinstance(seed, int) else 0), config_path, extra_sources)
-                for seed, g in groups.items()]
+        args = [
+            (g, (seed if isinstance(seed, int) else 0), config_path, extra_sources)
+            for seed, g in groups.items()
+        ]
         for group_survivors, group_audit in tqdm(
             run_bounded(remote, args, inflight=n_workers),
-            total=len(groups), desc="[part2] seed 分组规约", unit="组",
+            total=len(groups),
+            desc="[part2] seed 分组规约",
+            unit="组",
         ):
             survivors.extend(group_survivors)
             audit.update(group_audit)
     else:
         for seed, g in tqdm(groups.items(), desc="[part2] seed 分组规约", unit="组"):
             group_survivors, group_audit = _reduce_group(
-                g, seed if isinstance(seed, int) else 0, config_path,
+                g,
+                seed if isinstance(seed, int) else 0,
+                config_path,
                 extra_sources=extra_sources,
             )
             survivors.extend(group_survivors)

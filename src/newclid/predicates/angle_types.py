@@ -21,8 +21,9 @@ if TYPE_CHECKING:
 
 def _angle_dot(a: Point, b: Point, c: Point) -> float:
     """Compute dot product (A-B)·(C-B). Positive = acute, negative = obtuse."""
-    return (a.num.x - b.num.x) * (c.num.x - b.num.x) + \
-           (a.num.y - b.num.y) * (c.num.y - b.num.y)
+    return (a.num.x - b.num.x) * (c.num.x - b.num.x) + (a.num.y - b.num.y) * (
+        c.num.y - b.num.y
+    )
 
 
 class Obtuse(Predicate):
@@ -46,7 +47,9 @@ class Obtuse(Predicate):
         cls, args: tuple[str, ...], dep_graph: DependencyGraph
     ) -> Optional[tuple[Any, ...]]:
         preparse = cls.preparse(args)
-        return tuple(dep_graph.symbols_graph.names2points(preparse)) if preparse else None
+        return (
+            tuple(dep_graph.symbols_graph.names2points(preparse)) if preparse else None
+        )
 
     @classmethod
     def check_numerical(cls, statement: Statement) -> bool:
@@ -91,7 +94,9 @@ class Acute(Predicate):
         cls, args: tuple[str, ...], dep_graph: DependencyGraph
     ) -> Optional[tuple[Any, ...]]:
         preparse = cls.preparse(args)
-        return tuple(dep_graph.symbols_graph.names2points(preparse)) if preparse else None
+        return (
+            tuple(dep_graph.symbols_graph.names2points(preparse)) if preparse else None
+        )
 
     @classmethod
     def check_numerical(cls, statement: Statement) -> bool:

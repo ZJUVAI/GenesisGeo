@@ -30,6 +30,7 @@ GraphPruner
 
 不引入新依赖；仅依赖 ProofGraph 的节点/边与 aux_points、节点的 label/args 元数据。
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -69,9 +70,7 @@ class GraphPruner:
         }
         # 过滤该题的边
         edges_all: List[Tuple[str, str]] = [
-            (u, v)
-            for (u, v) in pg.edges
-            if u in nodes_all and v in nodes_all
+            (u, v) for (u, v) in pg.edges if u in nodes_all and v in nodes_all
         ]
         # 辅助点集合
         aux_set: Set[str] = set()
@@ -100,11 +99,13 @@ class GraphPruner:
             except Exception:
                 return False
 
-        def _recompute_degrees(n_alive: Set[str], e_alive: Set[Tuple[str, str]]) -> Tuple[Dict[str, int], Dict[str, int]]:
+        def _recompute_degrees(
+            n_alive: Set[str], e_alive: Set[Tuple[str, str]]
+        ) -> Tuple[Dict[str, int], Dict[str, int]]:
             indeg = {nid: 0 for nid in n_alive}
             outdeg = {nid: 0 for nid in n_alive}
             to_remove = []
-            for (u, v) in e_alive:
+            for u, v in e_alive:
                 if u not in n_alive or v not in n_alive:
                     to_remove.append((u, v))
                     continue
@@ -114,7 +115,9 @@ class GraphPruner:
                 e_alive.discard(e)
             return indeg, outdeg
 
-        def _remove_orphan_facts(n_alive: Set[str], e_alive: Set[Tuple[str, str]]) -> None:
+        def _remove_orphan_facts(
+            n_alive: Set[str], e_alive: Set[Tuple[str, str]]
+        ) -> None:
             """删除度为 0 的孤立 fact 节点。"""
             indeg, outdeg = _recompute_degrees(n_alive, e_alive)
             for f in list(n_alive):
@@ -122,14 +125,16 @@ class GraphPruner:
                     continue
                 if indeg.get(f, 0) == 0 and outdeg.get(f, 0) == 0:
                     n_alive.discard(f)
-                    for (u, v) in list(e_alive):
+                    for u, v in list(e_alive):
                         if u == f or v == f:
                             e_alive.discard((u, v))
 
-        def _remove_node(nid: str, n_alive: Set[str], e_alive: Set[Tuple[str, str]]) -> None:
+        def _remove_node(
+            nid: str, n_alive: Set[str], e_alive: Set[Tuple[str, str]]
+        ) -> None:
             """删除节点及其所有关联边。"""
             n_alive.discard(nid)
-            for (u, v) in list(e_alive):
+            for u, v in list(e_alive):
                 if u == nid or v == nid:
                     e_alive.discard((u, v))
 
@@ -149,7 +154,9 @@ class GraphPruner:
             bu_changed = False
             indeg, outdeg = _recompute_degrees(nodes_alive, edges_alive)
             # 结论候选：outdeg=0 的 fact 节点
-            conclusion_candidates = [f for f in nodes_alive if is_fact(f) and outdeg.get(f, 0) == 0]
+            conclusion_candidates = [
+                f for f in nodes_alive if is_fact(f) and outdeg.get(f, 0) == 0
+            ]
 
             for concl in conclusion_candidates:
                 if concl not in nodes_alive:
@@ -158,7 +165,11 @@ class GraphPruner:
                     continue  # 含 aux 的结论不删
 
                 # 找直接前驱 rule 节点
-                parent_rules = {r for (r, v) in edges_alive if v == concl and r in nodes_alive and is_rule(r)}
+                parent_rules = {
+                    r
+                    for (r, v) in edges_alive
+                    if v == concl and r in nodes_alive and is_rule(r)
+                }
 
                 if not parent_rules:
                     # 无前驱 rule 的非 aux 结论 → 孤立结论，删除
@@ -169,7 +180,7 @@ class GraphPruner:
                 # 找这些 rule 的直接前驱 fact 节点
                 parent_facts: Set[str] = set()
                 for r in parent_rules:
-                    for (u, v) in edges_alive:
+                    for u, v in edges_alive:
                         if v == r and u in nodes_alive and is_fact(u):
                             parent_facts.add(u)
 
@@ -190,7 +201,9 @@ class GraphPruner:
         # 每个 outdeg=0 的 fact 为一个子图的结论，通过反向 BFS 收集所有可达祖先。
         # ================================================================
         indeg, outdeg = _recompute_degrees(nodes_alive, edges_alive)
-        conclusion_nodes = [f for f in nodes_alive if is_fact(f) and outdeg.get(f, 0) == 0]
+        conclusion_nodes = [
+            f for f in nodes_alive if is_fact(f) and outdeg.get(f, 0) == 0
+        ]
 
         if not conclusion_nodes:
             # 无结论节点 → 返回空
@@ -205,7 +218,7 @@ class GraphPruner:
             sub_edges: Set[Tuple[str, str]] = set()
             while queue:
                 cur = queue.popleft()
-                for (u, v) in edges_alive:
+                for u, v in edges_alive:
                     if v == cur and u in nodes_alive and u not in visited:
                         visited.add(u)
                         sub_edges.add((u, v))
@@ -222,7 +235,17 @@ class GraphPruner:
             # 复制为独立可变集合
             sn = set(sub_nodes)
             se = set(sub_edges)
-            self._top_down_prune(sn, se, nodes_all, aux_set, is_fact, is_rule, fact_contains_aux, _recompute_degrees, _remove_orphan_facts)
+            self._top_down_prune(
+                sn,
+                se,
+                nodes_all,
+                aux_set,
+                is_fact,
+                is_rule,
+                fact_contains_aux,
+                _recompute_degrees,
+                _remove_orphan_facts,
+            )
             # 生成 rendered
             rendered = self._build_rendered(sn, se, nodes_all, aux_set)
             if rendered and rendered.get("nodes"):
@@ -249,7 +272,9 @@ class GraphPruner:
             changed = False
             indeg, outdeg = _recompute_degrees(nodes_alive, edges_alive)
 
-            current_premises: Set[str] = {nid for nid in nodes_alive if is_fact(nid) and indeg.get(nid, 0) == 0}
+            current_premises: Set[str] = {
+                nid for nid in nodes_alive if is_fact(nid) and indeg.get(nid, 0) == 0
+            }
 
             rules_to_delete: List[str] = []
             for nid in list(nodes_alive):
@@ -268,11 +293,17 @@ class GraphPruner:
                 # 兄弟规则-辅助点牵连保护
                 blocked_by_sibling = False
                 for p in preds:
-                    sibling_rules = [v for (u, v) in edges_alive if u == p and is_rule(v) and v != nid]
+                    sibling_rules = [
+                        v
+                        for (u, v) in edges_alive
+                        if u == p and is_rule(v) and v != nid
+                    ]
                     if not sibling_rules:
                         continue
                     for r2 in sibling_rules:
-                        r2_preds = [u for (u, v) in edges_alive if v == r2 and is_fact(u)]
+                        r2_preds = [
+                            u for (u, v) in edges_alive if v == r2 and is_fact(u)
+                        ]
                         if any(fact_contains_aux(fp) for fp in r2_preds):
                             blocked_by_sibling = True
                             break
@@ -289,7 +320,7 @@ class GraphPruner:
             for r in rules_to_delete:
                 if r not in nodes_alive:
                     continue
-                for (u, v) in list(edges_alive):
+                for u, v in list(edges_alive):
                     if u == r or v == r:
                         edges_alive.discard((u, v))
                 nodes_alive.discard(r)
@@ -327,7 +358,7 @@ class GraphPruner:
             nodes_out.append({"idx": idx_map[nid], "type": ntype, "label": label})
 
         edges_out: List[List[int]] = []
-        for (u, v) in edges_alive:
+        for u, v in edges_alive:
             if u in idx_map and v in idx_map:
                 edges_out.append([idx_map[u], idx_map[v]])
 

@@ -69,12 +69,16 @@ def _rewrite(pred: Pred, rep: dict[str, str]) -> Pred:
 # 退化判断需要按谓词的参数结构分组检查——不同"线段"/"三角形"之间共享端点是
 # 合法的几何情况（如 perp a e e g 表示两条线段在 e 点垂直相交），只有同一
 # 线段/同一三角形内部出现重复点才算退化。分组沿用 utils/symmetry.py 的谓词分类。
-_SEGMENT_PAIR_PREDICATES = frozenset({"cong", "para", "npara", "perp", "nperp", "eqpoint"})
+_SEGMENT_PAIR_PREDICATES = frozenset(
+    {"cong", "para", "npara", "perp", "nperp", "eqpoint"}
+)
 _SEGMENT_QUAD_PREDICATES = frozenset({"eqangle", "eqratio", "aconst", "rconst"})
 # 否定形式(ncoll/nperp/npara)与正向形式共享同一套"参数须两两不同"约束——
 # ncoll a b c 断言 A,B,C 不共线，若 b==c 之类同名参数出现，命题本身已无意义
 # (退化前就该丢弃)，之前漏掉 ncoll 导致 "coll C E E" 这类命题被放行。
-_ALL_DISTINCT_PREDICATES = frozenset({"coll", "ncoll", "cyclic", "midp", "constline", "circle"})
+_ALL_DISTINCT_PREDICATES = frozenset(
+    {"coll", "ncoll", "cyclic", "midp", "constline", "circle"}
+)
 _TRIANGLE_PAIR_PREDICATES = frozenset({"contri", "simtri", "contrir", "simtrir"})
 
 
@@ -84,7 +88,7 @@ def _has_dup(args: tuple[str, ...]) -> bool:
 
 def _segments(point_args: tuple[str, ...]) -> list[frozenset[str]]:
     """按 2 个一组切出线段集合（用集合比较，忽略线段内部顺序）。"""
-    return [frozenset(point_args[i:i + 2]) for i in range(0, len(point_args) - 1, 2)]
+    return [frozenset(point_args[i : i + 2]) for i in range(0, len(point_args) - 1, 2)]
 
 
 def _is_degenerate(pred: Pred) -> bool:
@@ -99,13 +103,15 @@ def _is_degenerate(pred: Pred) -> bool:
     if name in _SEGMENT_PAIR_PREDICATES:
         # 4 参数 = 2 条线段 (0,1) (2,3)，线段内两点不可相同，两条线段也不可完全相同
         segs = _segments(args)
-        if any(_has_dup(args[i:i + 2]) for i in range(0, len(args) - 1, 2)):
+        if any(_has_dup(args[i : i + 2]) for i in range(0, len(args) - 1, 2)):
             return True
         return len(set(segs)) < len(segs)
     if name in _SEGMENT_QUAD_PREDICATES:
         # 8/5 参数中前面部分是 4 条线段 (0,1)(2,3)(4,5)(6,7)，末尾常量参数忽略
         point_args = tuple(a for a in args if a and not a[0].isdigit())
-        if any(_has_dup(point_args[i:i + 2]) for i in range(0, len(point_args) - 1, 2)):
+        if any(
+            _has_dup(point_args[i : i + 2]) for i in range(0, len(point_args) - 1, 2)
+        ):
             return True
         segs = _segments(point_args)
         # 参照 DDAR EqAngle::trivial() / EqRatio::trivial()：
@@ -115,7 +121,9 @@ def _is_degenerate(pred: Pred) -> bool:
         # 仅一侧内部线段相同、另一侧不同，不是恒真句，而是在断言另一侧也必须退化为 0/1，
         # 这是真实的几何约束（如 eqangle c j c j e j f j 断言 EJ∥FJ），不能丢弃。
         if len(segs) == 4:
-            return (segs[0] == segs[2] and segs[1] == segs[3]) or (segs[0] == segs[1] and segs[2] == segs[3])
+            return (segs[0] == segs[2] and segs[1] == segs[3]) or (
+                segs[0] == segs[1] and segs[2] == segs[3]
+            )
         return False
     if name in _TRIANGLE_PAIR_PREDICATES:
         # 6 参数 = 2 个三角形 (0,1,2) (3,4,5)，三角形内三点须两两不同

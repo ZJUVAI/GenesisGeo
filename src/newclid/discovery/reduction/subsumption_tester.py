@@ -28,11 +28,11 @@ class RuleItem:
     seed: int | None
     index_in_seed: int
     rule_text: str
-    points: list[tuple[str, float, float]]           # [(name, x, y)]
+    points: list[tuple[str, float, float]]  # [(name, x, y)]
     premises: list[tuple[str, list[str]]] = field(default_factory=list)
     goal: tuple[str, list[str]] | None = None
     premise_count: int = 0
-    guards: str = ""                                  # NDG guard predicates (numerical-only)
+    guards: str = ""  # NDG guard predicates (numerical-only)
 
     @classmethod
     def from_record(cls, rec: dict) -> "RuleItem":

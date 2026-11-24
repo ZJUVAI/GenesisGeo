@@ -19,20 +19,29 @@ from newclid.discovery.reduction.subsumption_tester import RuleItem, Subsumption
 
 
 def _reduce_chunk(
-    rules: list[RuleItem], seed: int, config_path: str | None, stage: str = "divide_conquer",
+    rules: list[RuleItem],
+    seed: int,
+    config_path: str | None,
+    stage: str = "divide_conquer",
     extra_sources: list[RuleItem] | None = None,
 ) -> tuple[list[RuleItem], dict[str, dict]]:
     tester = SubsumptionTester(seed=seed, config_path=config_path)
     audit: dict[str, dict] = {}
-    basis = greedy_reduce(rules, tester, stage=stage, audit=audit, extra_sources=extra_sources)
+    basis = greedy_reduce(
+        rules, tester, stage=stage, audit=audit, extra_sources=extra_sources
+    )
     survivors = leave_one_out_reduce(
-        basis, tester, stage=stage, audit=audit, extra_sources=extra_sources,
+        basis,
+        tester,
+        stage=stage,
+        audit=audit,
+        extra_sources=extra_sources,
     )
     return survivors, audit
 
 
 def _split(rules: list[RuleItem], chunk_size: int) -> list[list[RuleItem]]:
-    return [rules[i:i + chunk_size] for i in range(0, len(rules), chunk_size)]
+    return [rules[i : i + chunk_size] for i in range(0, len(rules), chunk_size)]
 
 
 def reduce(
@@ -65,7 +74,11 @@ def reduce(
         stage = f"divide_conquer_round_{rnd}"
         if before <= chunk_size:
             current, round_audit = _reduce_chunk(
-                current, seed, config_path, stage=stage, extra_sources=extra_sources,
+                current,
+                seed,
+                config_path,
+                stage=stage,
+                extra_sources=extra_sources,
             )
             audit.update(round_audit)
             print(f"[divide_conquer] 轮{rnd}: 单块 {before} -> {len(current)}")
@@ -82,19 +95,27 @@ def reduce(
             args = [(c, seed, config_path, stage, extra_sources) for c in chunks]
             for chunk_survivors, chunk_audit in tqdm(
                 run_bounded(remote, args, inflight=n_workers),
-                total=len(chunks), desc=f"[part2] 分治规约 轮{rnd}", unit="块",
+                total=len(chunks),
+                desc=f"[part2] 分治规约 轮{rnd}",
+                unit="块",
             ):
                 survivors.extend(chunk_survivors)
                 audit.update(chunk_audit)
         else:
             for c in tqdm(chunks, desc=f"[part2] 分治规约 轮{rnd}", unit="块"):
                 chunk_survivors, chunk_audit = _reduce_chunk(
-                    c, seed, config_path, stage=stage, extra_sources=extra_sources,
+                    c,
+                    seed,
+                    config_path,
+                    stage=stage,
+                    extra_sources=extra_sources,
                 )
                 survivors.extend(chunk_survivors)
                 audit.update(chunk_audit)
 
         current = survivors
-        print(f"[divide_conquer] 轮{rnd}: {before} -> {len(current)} ({len(chunks)} 块)")
+        print(
+            f"[divide_conquer] 轮{rnd}: {before} -> {len(current)} ({len(chunks)} 块)"
+        )
 
     return current, audit

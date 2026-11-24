@@ -6,7 +6,11 @@ from matplotlib.pylab import Generator
 
 from newclid.dependencies.symbols import Point
 from newclid.numerical import close_enough
-from newclid.numerical.draw_figure import draw_segment, draw_segment_num, get_figure_theme
+from newclid.numerical.draw_figure import (
+    draw_segment,
+    draw_segment_num,
+    get_figure_theme,
+)
 from newclid.predicates.predicate import Predicate
 from newclid.algebraic_reasoning.tables import Ratio_Chase
 from newclid.tools import reshape

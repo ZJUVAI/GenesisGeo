@@ -21,12 +21,12 @@ if TYPE_CHECKING:
 
 
 # 配色
-_COLOR_PREMISE = "#66bb6a"       # 绿
-_COLOR_AUX_PREMISE = "#ef5350"   # 红
-_COLOR_CONCLUSION = "#ffee58"    # 黄
-_COLOR_MID_AUX = "#f48fb1"       # 粉
-_COLOR_MID = "#42a5f5"           # 蓝
-_COLOR_RULE = "#d0d0d0"          # 灰（rule 节点）
+_COLOR_PREMISE = "#66bb6a"  # 绿
+_COLOR_AUX_PREMISE = "#ef5350"  # 红
+_COLOR_CONCLUSION = "#ffee58"  # 黄
+_COLOR_MID_AUX = "#f48fb1"  # 粉
+_COLOR_MID = "#42a5f5"  # 蓝
+_COLOR_RULE = "#d0d0d0"  # 灰（rule 节点）
 _COLOR_EDGE = "#888888"
 
 
@@ -54,7 +54,9 @@ _CATEGORY_COLOR = {
 }
 
 
-def _compute_layers(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str, int]:
+def _compute_layers(
+    node_ids: list[str], edges: list[tuple[str, str]]
+) -> dict[str, int]:
     """按最长路径给每个节点分层（源节点层 0）。"""
     preds: dict[str, list[str]] = {n: [] for n in node_ids}
     for u, v in edges:
@@ -87,6 +89,7 @@ def draw_proof_graph(graph: "SingleProofGraph", out_path: str) -> str:
     不关心用的是哪条规则）。
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import networkx as nx
@@ -143,18 +146,31 @@ def draw_proof_graph(graph: "SingleProofGraph", out_path: str) -> str:
     ax.axis("off")
 
     nx.draw_networkx_edges(
-        G, pos, ax=ax, arrows=True, arrowstyle="-|>", arrowsize=14,
-        width=1.1, edge_color=_COLOR_EDGE,
+        G,
+        pos,
+        ax=ax,
+        arrows=True,
+        arrowstyle="-|>",
+        arrowsize=14,
+        width=1.1,
+        edge_color=_COLOR_EDGE,
     )
     nx.draw_networkx_nodes(
-        G, pos, nodelist=fact_ids, node_shape="o",
+        G,
+        pos,
+        nodelist=fact_ids,
+        node_shape="o",
         node_color=[fact_color[f] for f in fact_ids],
-        edgecolors="#333333", linewidths=1.2, node_size=2200, ax=ax,
+        edgecolors="#333333",
+        linewidths=1.2,
+        node_size=2200,
+        ax=ax,
     )
     nx.draw_networkx_labels(G, pos, labels=labels, font_size=7, ax=ax)
 
     # 图例
     from matplotlib.patches import Patch
+
     legend = [
         Patch(facecolor=_COLOR_PREMISE, edgecolor="#333", label="premise"),
         Patch(facecolor=_COLOR_AUX_PREMISE, edgecolor="#333", label="aux premise"),

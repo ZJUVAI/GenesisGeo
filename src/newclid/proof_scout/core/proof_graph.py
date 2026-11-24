@@ -52,7 +52,6 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 ENABLE_PG_METADATA_REWRITE: bool = True
 
 
-
 class ProofGraph:
     """
     分层有向证明图。
@@ -67,7 +66,9 @@ class ProofGraph:
     # 正则：用于解析带方括号的局部ID，如 [004]
     _BRACKET_ID_RE = re.compile(r"\[(\d+)\]")
     # 正则：解析 fact 片段，如 "cong a d a e [000]"
-    _FACT_SEG_RE = re.compile(r"^\s*(?P<pred>\w+)\s+(?P<args>.*?)\s*\[(?P<id>\d+)\]\s*$")
+    _FACT_SEG_RE = re.compile(
+        r"^\s*(?P<pred>\w+)\s+(?P<args>.*?)\s*\[(?P<id>\d+)\]\s*$"
+    )
     # 正则：剥离 <analysis> .. </analysis> / <proof> .. </proof> 等标签
     _TAGS_RE = re.compile(r"<\/?\w+>")
 
@@ -147,7 +148,10 @@ class ProofGraph:
             if not m:
                 # 不是标准 fact 结构，发出 warning
                 self.stats["unparsed_fact_segments"] += 1
-                self._log(logging.WARNING, f"unparsed_fact_segment (ignored as fact): '{seg}' (problem {problem_id})")
+                self._log(
+                    logging.WARNING,
+                    f"unparsed_fact_segment (ignored as fact): '{seg}' (problem {problem_id})",
+                )
                 continue
 
             pred = m.group("pred")
@@ -156,7 +160,9 @@ class ProofGraph:
             args = [tok for tok in args_str.split() if tok]
 
             # 尝试登记
-            self._add_fact(problem_id, id_local, pred, args, layer=1, source_hint="fact_block")
+            self._add_fact(
+                problem_id, id_local, pred, args, layer=1, source_hint="fact_block"
+            )
 
     # 内部：添加 fact 节点（处理重复/冲突）
     def _add_fact(
@@ -214,7 +220,9 @@ class ProofGraph:
     # -------------------------------
     # proof 步骤解析与入图
     # -------------------------------
-    def parse_proof_step(self, line: str) -> Optional[Tuple[str, List[str], str, str, List[str]]]:
+    def parse_proof_step(
+        self, line: str
+    ) -> Optional[Tuple[str, List[str], str, str, List[str]]]:
         """
         解析一条 proof 语句：
         形如："pred a b c [004] rule [000] [001]"。
@@ -232,7 +240,7 @@ class ProofGraph:
 
         concl_id = first.group(1)
         left = s[: first.start()].strip()
-        right = s[first.end():].strip()
+        right = s[first.end() :].strip()
 
         # left: "pred args..."，拆出 pred 与 args
         if not left:
@@ -324,7 +332,12 @@ class ProofGraph:
 
         # 结论 fact
         concl_fact_node_id = self._ensure_conclusion_fact(
-            problem_id, concl_id, concl_pred, concl_args, produced_by=rule_node_id, layer=rule_layer + 1
+            problem_id,
+            concl_id,
+            concl_pred,
+            concl_args,
+            produced_by=rule_node_id,
+            layer=rule_layer + 1,
         )
 
         # 规则 → 结论 边
@@ -371,7 +384,12 @@ class ProofGraph:
 
         # 创建新结论 fact
         node_id = self._add_fact(
-            problem_id, id_local, label=label, args=args, layer=layer, source_hint=f"produced_by:{produced_by}"
+            problem_id,
+            id_local,
+            label=label,
+            args=args,
+            layer=layer,
+            source_hint=f"produced_by:{produced_by}",
         )
         if ENABLE_PG_METADATA_REWRITE:
             try:
@@ -420,7 +438,11 @@ class ProofGraph:
         # 解析点依赖 point_rely_on（支持放在 proof_block 或顶层 result_obj）
         # 注意：proof_block 可能是 dict 或 str，只有在为 dict 时才可 .get
         if isinstance(proof_block, dict):
-            rely_src = proof_block.get("point_rely_on") or result_obj.get("point_rely_on") or {}
+            rely_src = (
+                proof_block.get("point_rely_on")
+                or result_obj.get("point_rely_on")
+                or {}
+            )
         else:
             rely_src = result_obj.get("point_rely_on") or {}
         if isinstance(rely_src, dict):
@@ -460,7 +482,10 @@ class ProofGraph:
             parsed = self.parse_proof_step(seg)
             if not parsed:
                 self.stats["bad_proof_steps"] += 1
-                self._log(logging.WARNING, f"bad_proof_step_skip: '{seg}' (problem {problem_id})")
+                self._log(
+                    logging.WARNING,
+                    f"bad_proof_step_skip: '{seg}' (problem {problem_id})",
+                )
                 continue
             concl_pred, concl_args, concl_id, rule_code, premise_ids = parsed
             self.logger.info(
@@ -496,9 +521,13 @@ class ProofGraph:
         self.logger.info(
             f"all problems processed: total_nodes={len(self.nodes)} total_edges={len(self.edges)}"
         )
-    # 追加：按题目统计平均节点/边数量，便于配置 max_nodes
+        # 追加：按题目统计平均节点/边数量，便于配置 max_nodes
         try:
-            problem_ids: Set[str] = {nd.get("problem_id") for nd in self.nodes.values() if nd.get("problem_id") is not None}
+            problem_ids: Set[str] = {
+                nd.get("problem_id")
+                for nd in self.nodes.values()
+                if nd.get("problem_id") is not None
+            }
             num_problems = len(problem_ids) if problem_ids else 0
             if num_problems > 0:
                 avg_nodes = len(self.nodes) / num_problems
@@ -515,7 +544,9 @@ class ProofGraph:
     # 便捷构造与说明接口
     # -------------------------------
     @classmethod
-    def build_from_results_json(cls, path: str, *, verbose: bool = True, log_level: int = logging.INFO) -> "ProofGraph":
+    def build_from_results_json(
+        cls, path: str, *, verbose: bool = True, log_level: int = logging.INFO
+    ) -> "ProofGraph":
         """类构造器：从 JSON 路径直接构建 ProofGraph 实例。"""
         inst = cls(verbose=verbose, log_level=log_level)
         inst.from_results_json(path)
@@ -547,29 +578,46 @@ class ProofGraph:
             },
             "edge": ["(src_node_id, dst_node_id) directed"],
             "problem_meta": {
-                "point_coords": {"point_lines": ["point a x y"], "points": [{"name": "a", "x": 0.0, "y": 0.0}]},
+                "point_coords": {
+                    "point_lines": ["point a x y"],
+                    "points": [{"name": "a", "x": 0.0, "y": 0.0}],
+                },
                 "point_rely_on": {"p": ["deps..."]},
                 "aux_points": ["m", "n", ...],
             },
             "rendered": {
                 "nodes": [{"idx": 0, "type": "fact|rule", "label": "cong(a,b,c,...)"}],
-                "edges": [[0,1],[1,2]],
+                "edges": [[0, 1], [1, 2]],
             },
         }
 
     def get_problem_summary(self, problem_id: str) -> Dict[str, Any]:
         """汇总单题的节点/边统计与元数据（便于快速审计）。"""
         pid = str(problem_id)
-        facts = [nd for nd in self.nodes.values() if nd.get("type") == "fact" and nd.get("problem_id") == pid]
-        rules = [nd for nd in self.nodes.values() if nd.get("type") == "rule" and nd.get("problem_id") == pid]
-        edges = [(u, v) for (u, v) in self.edges if self.nodes.get(u, {}).get("problem_id") == pid]
+        facts = [
+            nd
+            for nd in self.nodes.values()
+            if nd.get("type") == "fact" and nd.get("problem_id") == pid
+        ]
+        rules = [
+            nd
+            for nd in self.nodes.values()
+            if nd.get("type") == "rule" and nd.get("problem_id") == pid
+        ]
+        edges = [
+            (u, v)
+            for (u, v) in self.edges
+            if self.nodes.get(u, {}).get("problem_id") == pid
+        ]
         return {
             "problem_id": pid,
             "facts": len(facts),
             "rules": len(rules),
             "edges": len(edges),
             "point_coords": self.point_coords.get(pid),
-            "point_rely_on": {k: sorted(list(v)) for k, v in self.point_rely_on.get(pid, {}).items()},
+            "point_rely_on": {
+                k: sorted(list(v)) for k, v in self.point_rely_on.get(pid, {}).items()
+            },
             "aux_points": self.aux_points.get(pid, []),
         }
 
@@ -593,6 +641,7 @@ class ProofGraph:
 # 仍可发现多步推导（F->R->F->R->F...）。
 # 注：后续可扩展为完整 gSpan（含 backward 扩展与最小DFS码）。
 
+
 class MergedGraph:
     """将 ProofGraph 的多题子图合为一张大图G*，节点保留 problem_id，不跨题连边。
 
@@ -610,13 +659,15 @@ class MergedGraph:
         self.in_edges: Dict[int, List[int]] = {}
         self._next_gid = 0
 
-    def add_node(self, label: str, type_: str, problem_id: str, orig_node_id: str) -> int:
+    def add_node(
+        self, label: str, type_: str, problem_id: str, orig_node_id: str
+    ) -> int:
         gid = self._next_gid
         self._next_gid += 1
         self.nodes[gid] = {
             "gid": gid,
             "label": label,  # 例如 F:cong / R:r54
-            "type": type_,   # fact / rule
+            "type": type_,  # fact / rule
             "problem_id": problem_id,
             "orig_node_id": orig_node_id,
         }
@@ -672,8 +723,8 @@ class GSpanMiner:
 
         self.G = self._build_merged_graph()
         # 延迟构建：规则-规则邻接（仅规则节点）
-        self._rule_out_rules: Optional[Dict[int, List[int]]]=None
-        self._rule_in_rules: Optional[Dict[int, List[int]]]=None
+        self._rule_out_rules: Optional[Dict[int, List[int]]] = None
+        self._rule_in_rules: Optional[Dict[int, List[int]]] = None
 
     def _build_rule_adjacency(self) -> None:
         """基于合并图 G 构建仅规则节点的邻接：r1 -> r2 若存在 r1->F 且 F->r2（同题）。"""
@@ -719,10 +770,15 @@ class GSpanMiner:
                 label = f"F:{nd['label']}"
             else:
                 label = f"R:{nd['code']}"
-            gid = G.add_node(label=label, type_=nd["type"], problem_id=nd["problem_id"], orig_node_id=node_id)
+            gid = G.add_node(
+                label=label,
+                type_=nd["type"],
+                problem_id=nd["problem_id"],
+                orig_node_id=node_id,
+            )
             id2gid[node_id] = gid
 
-        for (u, v) in self.pg.edges:
+        for u, v in self.pg.edges:
             if u in id2gid and v in id2gid:
                 G.add_edge(id2gid[u], id2gid[v])
         return G
@@ -748,7 +804,9 @@ class GSpanMiner:
         局限：不同结构但同标签序列的模式会被折叠（对路径而言通常可接受）。
         """
         min_sup = self._min_sup_abs()
-        self.logger.info(f"gSpan path-mining start: min_support={min_sup}, min_rule_nodes={self.min_rule_nodes}, min_edges={self.min_edges}")
+        self.logger.info(
+            f"gSpan path-mining start: min_support={min_sup}, min_rule_nodes={self.min_rule_nodes}, min_edges={self.min_edges}"
+        )
 
         # 初始化：从所有 F->R 边作为起始路径（保证从 fact 开始）
         initial: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
@@ -760,13 +818,25 @@ class GSpanMiner:
                 if nd_v["type"] != "rule":
                     continue
                 key = (nd_u["label"], nd_v["label"])  # (F:*, R:*)
-                entry = {"pids": {nd_u["problem_id"]}, "emb": [{"pid": nd_u["problem_id"], "mapping": {0: u, 1: v}}]}
+                entry = {
+                    "pids": {nd_u["problem_id"]},
+                    "emb": [{"pid": nd_u["problem_id"], "mapping": {0: u, 1: v}}],
+                }
                 initial.setdefault(key, []).append(entry)
 
         # 聚合初始模式（去重 pid，拼接嵌入）
         patterns: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+
         def add_or_update(labels: Tuple[str, ...], entries: List[Dict[str, Any]]):
-            p = patterns.setdefault(labels, {"labels": list(labels), "edges": [(i, i+1) for i in range(len(labels)-1)], "pids": set(), "embeddings": []})
+            p = patterns.setdefault(
+                labels,
+                {
+                    "labels": list(labels),
+                    "edges": [(i, i + 1) for i in range(len(labels) - 1)],
+                    "pids": set(),
+                    "embeddings": [],
+                },
+            )
             for e in entries:
                 p["pids"].update(e["pids"])
                 p["embeddings"].extend(e["emb"])  # 可截断
@@ -802,7 +872,7 @@ class GSpanMiner:
                     # 不允许重用节点，保持简单路径
                     if w in mapping.values():
                         continue
-                    label_w = self.G.nodes[w]["label"]
+                    self.G.nodes[w]["label"]
                     # 生成新嵌入
                     new_mapping = dict(mapping)
                     new_mapping[last_idx + 1] = w
@@ -826,7 +896,7 @@ class GSpanMiner:
                 # 复制并更新模式对象（避免原 pobj 被污染）
                 new_pobj = {
                     "labels": list(new_labels),
-                    "edges": [(i, i+1) for i in range(len(new_labels)-1)],
+                    "edges": [(i, i + 1) for i in range(len(new_labels) - 1)],
                     # 注意：这里保留全部嵌入以便在后续扩展阶段正确聚合支持度；
                     # 代表性截断仅在输出阶段进行。
                     "pids": set(e["pid"] for e in emb_list),
@@ -836,7 +906,9 @@ class GSpanMiner:
                 # 一旦结构满足，再依据支持度决定是否继续扩展，否则交由 finalize 处理。
                 rule_cnt_new = sum(1 for lb in new_labels if lb.startswith("R:"))
                 edges_new = len(new_labels) - 1
-                struct_not_met = (rule_cnt_new < self.min_rule_nodes) or (edges_new < self.min_edges)
+                struct_not_met = (rule_cnt_new < self.min_rule_nodes) or (
+                    edges_new < self.min_edges
+                )
                 if struct_not_met:
                     expand(new_labels, new_pobj)
                 else:
@@ -869,10 +941,12 @@ class GSpanMiner:
             if rec is None:
                 results[labels_t] = {
                     "labels": list(labels_t),
-                    "edges": [(i, i+1) for i in range(len(labels_t)-1)],
+                    "edges": [(i, i + 1) for i in range(len(labels_t) - 1)],
                     "pids": set(pobj_like.get("pids", set())),
                     # 仅在输出阶段截断代表嵌入数量，避免结果过大
-                    "embeddings": list(pobj_like.get("embeddings", []))[: self.sample_embeddings],
+                    "embeddings": list(pobj_like.get("embeddings", []))[
+                        : self.sample_embeddings
+                    ],
                 }
             else:
                 rec["pids"].update(pobj_like.get("pids", set()))
@@ -889,16 +963,25 @@ class GSpanMiner:
         # 收尾：附加支持计数与排序
         out: List[Dict[str, Any]] = []
         for labels_t, rec in results.items():
-            out.append({
-                "labels": rec["labels"],
-                "edges": rec["edges"],
-                "support": len(rec["pids"]),
-                "pids": sorted(list(rec["pids"])),
-                "embeddings": rec["embeddings"],
-            })
+            out.append(
+                {
+                    "labels": rec["labels"],
+                    "edges": rec["edges"],
+                    "support": len(rec["pids"]),
+                    "pids": sorted(list(rec["pids"])),
+                    "embeddings": rec["embeddings"],
+                }
+            )
 
         # 简单排序：优先规则数多、长度长、支持高
-        out.sort(key=lambda r: (sum(1 for lb in r["labels"] if lb.startswith("R:")), len(r["labels"]), r["support"]), reverse=True)
+        out.sort(
+            key=lambda r: (
+                sum(1 for lb in r["labels"] if lb.startswith("R:")),
+                len(r["labels"]),
+                r["support"],
+            ),
+            reverse=True,
+        )
 
         self.logger.info(f"gSpan path-mining done: patterns={len(out)}")
         return out
@@ -932,9 +1015,10 @@ class GSpanMiner:
 
         # 变量化
         var_map: Dict[str, str] = {}
+
         def vget(x: str) -> str:
             if x not in var_map:
-                var_map[x] = f"X{len(var_map)+1}"
+                var_map[x] = f"X{len(var_map) + 1}"
             return var_map[x]
 
         def fact_to_term(nd: Dict[str, Any]) -> str:
@@ -968,6 +1052,7 @@ class GSpanMiner:
         在合并图上挖掘允许分叉/汇合的连通子图（受限变体）。
         """
         import time
+
         start_time = time.time()
 
         min_sup = self._min_sup_abs()
@@ -978,8 +1063,10 @@ class GSpanMiner:
 
         # Pre-compute global label support (for both facts and rules)
 
-        results: Dict[Tuple[Tuple[str, ...], Tuple[Tuple[int,int], ...]], Dict[str, Any]] = {}
-        visited: Set[Tuple[Tuple[str, ...], Tuple[Tuple[int,int], ...]]] = set()
+        results: Dict[
+            Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]], Dict[str, Any]
+        ] = {}
+        visited: Set[Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]]] = set()
         expansions = 0
 
         label_pid_support: Dict[str, int] = {}
@@ -996,14 +1083,17 @@ class GSpanMiner:
         def compute_pids(emb_list: List[Dict[str, Any]]) -> Set[str]:
             return {e["pid"] for e in emb_list}
 
-        def degrees(labels: List[str], edges: List[Tuple[int,int]]):
-            indeg = [0]*len(labels)
-            outdeg = [0]*len(labels)
-            for a,b in edges:
-                outdeg[a]+=1; indeg[b]+=1
+        def degrees(labels: List[str], edges: List[Tuple[int, int]]):
+            indeg = [0] * len(labels)
+            outdeg = [0] * len(labels)
+            for a, b in edges:
+                outdeg[a] += 1
+                indeg[b] += 1
             return indeg, outdeg
 
-        def eligible_output(labels: List[str], edges: List[Tuple[int,int]], pids: Set[str]) -> bool:
+        def eligible_output(
+            labels: List[str], edges: List[Tuple[int, int]], pids: Set[str]
+        ) -> bool:
             if len(edges) < self.min_edges:
                 return False
             if sum(1 for lb in labels if lb.startswith("R:")) < self.min_rule_nodes:
@@ -1011,31 +1101,51 @@ class GSpanMiner:
             if len(pids) < min_sup:
                 return False
             indeg, outdeg = degrees(labels, edges)
-            src_facts = [i for i,lb in enumerate(labels) if lb.startswith("F:") and indeg[i]==0]
+            src_facts = [
+                i
+                for i, lb in enumerate(labels)
+                if lb.startswith("F:") and indeg[i] == 0
+            ]
             # 新增：所有出度为0的节点必须是 fact，不允许 rule 成为汇点
-            sink_all = [i for i,_ in enumerate(labels) if outdeg[i]==0]
+            sink_all = [i for i, _ in enumerate(labels) if outdeg[i] == 0]
             if any(labels[i].startswith("R:") for i in sink_all):
                 return False
-            sink_facts = [i for i,lb in enumerate(labels) if lb.startswith("F:") and outdeg[i]==0]
+            sink_facts = [
+                i
+                for i, lb in enumerate(labels)
+                if lb.startswith("F:") and outdeg[i] == 0
+            ]
             if not src_facts or len(sink_facts) != 1:
                 return False
-            if min_rule_indeg2_count>0:
+            if min_rule_indeg2_count > 0:
                 cnt = 0
-                for i,lb in enumerate(labels):
+                for i, lb in enumerate(labels):
                     if lb.startswith("R:") and indeg[i] >= 2:
                         cnt += 1
                 if cnt < min_rule_indeg2_count:
                     return False
             return True
 
-        def filter_embs_var_closure(labels_loc: List[str], edges_loc: List[Tuple[int,int]], embs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def filter_embs_var_closure(
+            labels_loc: List[str],
+            edges_loc: List[Tuple[int, int]],
+            embs: List[Dict[str, Any]],
+        ) -> List[Dict[str, Any]]:
             if not enable_var_closure_check:
                 return embs
             if not labels_loc or not edges_loc or not embs:
                 return embs
             indeg, outdeg = degrees(labels_loc, edges_loc)
-            premise_idx = [i for i,lb in enumerate(labels_loc) if lb.startswith("F:") and indeg[i]==0]
-            sink_idx = [i for i,lb in enumerate(labels_loc) if lb.startswith("F:") and outdeg[i]==0]
+            premise_idx = [
+                i
+                for i, lb in enumerate(labels_loc)
+                if lb.startswith("F:") and indeg[i] == 0
+            ]
+            sink_idx = [
+                i
+                for i, lb in enumerate(labels_loc)
+                if lb.startswith("F:") and outdeg[i] == 0
+            ]
             if len(sink_idx) != 1:
                 return embs
             good: List[Dict[str, Any]] = []
@@ -1058,7 +1168,9 @@ class GSpanMiner:
                     good.append(emb)
             return good
 
-        def finalize(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any]):
+        def finalize(
+            labels: List[str], edges: List[Tuple[int, int]], pobj: Dict[str, Any]
+        ):
             if not eligible_output(labels, edges, pobj.get("pids", set())):
                 return
             # 变量闭包：对每条嵌入逐一过滤，并据此更新支持
@@ -1084,12 +1196,24 @@ class GSpanMiner:
                     if len(rec["embeddings"]) < self.sample_embeddings:
                         rec["embeddings"].append(e)
 
-        def expand(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any], *, producer_layers_used: int = 0):
+        def expand(
+            labels: List[str],
+            edges: List[Tuple[int, int]],
+            pobj: Dict[str, Any],
+            *,
+            producer_layers_used: int = 0,
+        ):
             nonlocal expansions
-            if time_budget_seconds is not None and (time.time() - start_time) >= time_budget_seconds:
+            if (
+                time_budget_seconds is not None
+                and (time.time() - start_time) >= time_budget_seconds
+            ):
                 finalize(labels, edges, pobj)
                 return
-            if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
+            if (
+                debug_limit_expansions is not None
+                and expansions >= debug_limit_expansions
+            ):
                 finalize(labels, edges, pobj)
                 return
             if len(labels) >= self.max_nodes:
@@ -1119,10 +1243,18 @@ class GSpanMiner:
                             if fu not in mapping.values():
                                 return False
                 return True
+
             if all_rules_complete():
                 finalize(labels, edges, pobj)
+
             # Helper: complete a single rule r_idx by adding all missing premise facts (grouped by identical label sequences)
-            def try_complete_rule_once(labels0: List[str], edges0: List[Tuple[int,int]], pobj0: Dict[str, Any], r_idx: int) -> bool:
+            def try_complete_rule_once(
+                labels0: List[str],
+                edges0: List[Tuple[int, int]],
+                pobj0: Dict[str, Any],
+                r_idx: int,
+            ) -> bool:
+                nonlocal expansions
                 lb_r = labels0[r_idx]
                 if not lb_r.startswith("R:"):
                     return False
@@ -1148,7 +1280,9 @@ class GSpanMiner:
                             continue
                         missing.append(fu)
                     # stable order by (label, gid)
-                    missing_sorted = sorted(missing, key=lambda g: (self.G.nodes[g]["label"], g))
+                    missing_sorted = sorted(
+                        missing, key=lambda g: (self.G.nodes[g]["label"], g)
+                    )
                     key = tuple(self.G.nodes[g]["label"] for g in missing_sorted)
                     # apply mapping update for this embedding (temporarily)
                     new_map = dict(mapping)
@@ -1167,7 +1301,8 @@ class GSpanMiner:
                         low = False
                         for lb_add in key_labels:
                             if label_pid_support.get(lb_add, 0) < min_sup:
-                                low = True; break
+                                low = True
+                                break
                         if low:
                             continue
                     # capacity check
@@ -1182,10 +1317,25 @@ class GSpanMiner:
                     for i in range(added_nodes):
                         new_edges.append((base + i, r_idx))
                     expansions += 1
-                    if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
-                        self.logger.info(f"branched-debug: expansions={expansions} complete-rule r_idx={r_idx} add={list(key_labels)}")
-                    new_pobj = {"labels": new_labels, "edges": new_edges, "embeddings": emb_list, "pids": compute_pids(emb_list)}
-                    expand(new_labels, new_edges, new_pobj, producer_layers_used=producer_layers_used)
+                    if (
+                        debug_limit_expansions is not None
+                        and expansions % max(1, debug_log_every) == 0
+                    ):
+                        self.logger.info(
+                            f"branched-debug: expansions={expansions} complete-rule r_idx={r_idx} add={list(key_labels)}"
+                        )
+                    new_pobj = {
+                        "labels": new_labels,
+                        "edges": new_edges,
+                        "embeddings": emb_list,
+                        "pids": compute_pids(emb_list),
+                    }
+                    expand(
+                        new_labels,
+                        new_edges,
+                        new_pobj,
+                        producer_layers_used=producer_layers_used,
+                    )
                     progressed = True
                 return progressed
 
@@ -1223,7 +1373,9 @@ class GSpanMiner:
                 if not lb.startswith("F:"):
                     continue
                 # group embeddings by (rule_label, concl_label, other_premise_labels...)
-                buckets_frf: Dict[Tuple[str, str, Tuple[str, ...]], List[Dict[str, Any]]] = {}
+                buckets_frf: Dict[
+                    Tuple[str, str, Tuple[str, ...]], List[Dict[str, Any]]
+                ] = {}
                 for emb in pobj["embeddings"]:
                     pid = emb["pid"]
                     mapping = emb["mapping"]
@@ -1234,14 +1386,22 @@ class GSpanMiner:
                         nd_rv = self.G.nodes[rv]
                         if nd_rv["type"] != "rule":
                             continue
-                        if prune_by_rule and label_pid_support.get(nd_rv["label"], 0) < min_sup:
+                        if (
+                            prune_by_rule
+                            and label_pid_support.get(nd_rv["label"], 0) < min_sup
+                        ):
                             continue
                         if rv in mapping.values():
                             continue
                         if nd_rv["problem_id"] != pid:
                             continue
                         # conclusion fact(s) of this rule (expected 1)
-                        fouts = [fv for fv in self.G.out_edges.get(rv, []) if self.G.nodes[fv]["type"] == "fact" and self.G.nodes[fv]["problem_id"] == pid]
+                        fouts = [
+                            fv
+                            for fv in self.G.out_edges.get(rv, [])
+                            if self.G.nodes[fv]["type"] == "fact"
+                            and self.G.nodes[fv]["problem_id"] == pid
+                        ]
                         if not fouts:
                             continue
                         # choose all possible conclusions (usually 1)
@@ -1264,8 +1424,14 @@ class GSpanMiner:
                                 if nd_fu["problem_id"] != pid:
                                     continue
                                 others.append(fu)
-                            others_sorted = sorted(others, key=lambda g: (self.G.nodes[g]["label"], g))
-                            key = (nd_rv["label"], self.G.nodes[fv]["label"], tuple(self.G.nodes[g]["label"] for g in others_sorted))
+                            others_sorted = sorted(
+                                others, key=lambda g: (self.G.nodes[g]["label"], g)
+                            )
+                            key = (
+                                nd_rv["label"],
+                                self.G.nodes[fv]["label"],
+                                tuple(self.G.nodes[g]["label"] for g in others_sorted),
+                            )
                             new_map = dict(mapping)
                             # append rule
                             idx_r = len(labels)
@@ -1278,7 +1444,9 @@ class GSpanMiner:
                             # append conclusion
                             idx_f = idx_next
                             new_map[idx_f] = fv
-                            buckets_frf.setdefault(key, []).append({"pid": pid, "mapping": new_map})
+                            buckets_frf.setdefault(key, []).append(
+                                {"pid": pid, "mapping": new_map}
+                            )
                 for key, emb_list in buckets_frf.items():
                     r_lb, f_lb, prem_lbs = key
                     # capacity check
@@ -1287,12 +1455,16 @@ class GSpanMiner:
                         continue
                     if prune_low_support_labels:
                         low = False
-                        if label_pid_support.get(r_lb, 0) < min_sup or label_pid_support.get(f_lb, 0) < min_sup:
+                        if (
+                            label_pid_support.get(r_lb, 0) < min_sup
+                            or label_pid_support.get(f_lb, 0) < min_sup
+                        ):
                             low = True
                         else:
                             for lbx in prem_lbs:
                                 if label_pid_support.get(lbx, 0) < min_sup:
-                                    low = True; break
+                                    low = True
+                                    break
                         if low:
                             continue
                     # edges check
@@ -1309,17 +1481,34 @@ class GSpanMiner:
                     # r -> concl
                     new_edges.append((base, base + 1 + len(prem_lbs)))
                     expansions += 1
-                    if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
-                        self.logger.info(f"branched-debug: expansions={expansions} FRF from f_idx={f_idx} add={[r_lb, *prem_lbs, f_lb]}")
-                    new_pobj = {"labels": new_labels, "edges": new_edges, "embeddings": emb_list, "pids": compute_pids(emb_list)}
-                    expand(new_labels, new_edges, new_pobj, producer_layers_used=producer_layers_used)
+                    if (
+                        debug_limit_expansions is not None
+                        and expansions % max(1, debug_log_every) == 0
+                    ):
+                        self.logger.info(
+                            f"branched-debug: expansions={expansions} FRF from f_idx={f_idx} add={[r_lb, *prem_lbs, f_lb]}"
+                        )
+                    new_pobj = {
+                        "labels": new_labels,
+                        "edges": new_edges,
+                        "embeddings": emb_list,
+                        "pids": compute_pids(emb_list),
+                    }
+                    expand(
+                        new_labels,
+                        new_edges,
+                        new_pobj,
+                        producer_layers_used=producer_layers_used,
+                    )
 
             # Phase C: attach producer (rule -> fact) up to max_producer_depth
             if attach_producer and producer_layers_used < max_producer_depth:
                 for f_idx, lb in enumerate(labels):
                     if not lb.startswith("F:"):
                         continue
-                    buckets_prod: Dict[Tuple[str, Tuple[str, ...]], List[Dict[str, Any]]] = {}
+                    buckets_prod: Dict[
+                        Tuple[str, Tuple[str, ...]], List[Dict[str, Any]]
+                    ] = {}
                     for emb in pobj["embeddings"]:
                         pid = emb["pid"]
                         mapping = emb["mapping"]
@@ -1330,7 +1519,10 @@ class GSpanMiner:
                             nd_rv = self.G.nodes[rv]
                             if nd_rv["type"] != "rule":
                                 continue
-                            if prune_by_rule and label_pid_support.get(nd_rv["label"], 0) < min_sup:
+                            if (
+                                prune_by_rule
+                                and label_pid_support.get(nd_rv["label"], 0) < min_sup
+                            ):
                                 continue
                             if rv in mapping.values():
                                 continue
@@ -1349,8 +1541,13 @@ class GSpanMiner:
                                 if nd_fu["problem_id"] != pid:
                                     continue
                                 prem.append(fu)
-                            prem_sorted = sorted(prem, key=lambda g: (self.G.nodes[g]["label"], g))
-                            key = (nd_rv["label"], tuple(self.G.nodes[g]["label"] for g in prem_sorted))
+                            prem_sorted = sorted(
+                                prem, key=lambda g: (self.G.nodes[g]["label"], g)
+                            )
+                            key = (
+                                nd_rv["label"],
+                                tuple(self.G.nodes[g]["label"] for g in prem_sorted),
+                            )
                             new_map = dict(mapping)
                             idx_r = len(labels)
                             new_map[idx_r] = rv
@@ -1358,7 +1555,9 @@ class GSpanMiner:
                             for fu in prem_sorted:
                                 new_map[idx_next] = fu
                                 idx_next += 1
-                            buckets_prod.setdefault(key, []).append({"pid": pid, "mapping": new_map})
+                            buckets_prod.setdefault(key, []).append(
+                                {"pid": pid, "mapping": new_map}
+                            )
                     for key, emb_list in buckets_prod.items():
                         r_lb, prem_lbs = key
                         add_count = 1 + len(prem_lbs)
@@ -1371,7 +1570,8 @@ class GSpanMiner:
                             else:
                                 for lbx in prem_lbs:
                                     if label_pid_support.get(lbx, 0) < min_sup:
-                                        low = True; break
+                                        low = True
+                                        break
                             if low:
                                 continue
                         # 不再单独限制边数
@@ -1384,16 +1584,33 @@ class GSpanMiner:
                         # r -> f_idx
                         new_edges.append((base, f_idx))
                         expansions += 1
-                        if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
-                            self.logger.info(f"branched-debug: expansions={expansions} attach-producer f_idx={f_idx} add={[r_lb, *prem_lbs]}")
-                        new_pobj = {"labels": new_labels, "edges": new_edges, "embeddings": emb_list, "pids": compute_pids(emb_list)}
-                        expand(new_labels, new_edges, new_pobj, producer_layers_used=producer_layers_used + 1)
+                        if (
+                            debug_limit_expansions is not None
+                            and expansions % max(1, debug_log_every) == 0
+                        ):
+                            self.logger.info(
+                                f"branched-debug: expansions={expansions} attach-producer f_idx={f_idx} add={[r_lb, *prem_lbs]}"
+                            )
+                        new_pobj = {
+                            "labels": new_labels,
+                            "edges": new_edges,
+                            "embeddings": emb_list,
+                            "pids": compute_pids(emb_list),
+                        }
+                        expand(
+                            new_labels,
+                            new_edges,
+                            new_pobj,
+                            producer_layers_used=producer_layers_used + 1,
+                        )
 
             # Finally, try to finalize current pattern (might already satisfy constraints)
             finalize(labels, edges, pobj)
 
         # Build initial seeds using FRF with full premises (rules integrity from the start)
-        initial_by_sig: Dict[Tuple[Tuple[str, ...], Tuple[Tuple[int,int], ...]], Dict[str, Any]] = {}
+        initial_by_sig: Dict[
+            Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]], Dict[str, Any]
+        ] = {}
         for u, nd_u in self.G.nodes.items():
             if nd_u["type"] != "fact":
                 continue
@@ -1423,11 +1640,18 @@ class GSpanMiner:
                         if nd_fu["problem_id"] != pid:
                             continue
                         others.append(fu)
-                    others_sorted = sorted(others, key=lambda g: (self.G.nodes[g]["label"], g))
-                    labels0 = [nd_u["label"], nd_r["label"], *[self.G.nodes[g]["label"] for g in others_sorted], nd_w["label"]]
-                    edges0: List[Tuple[int,int]] = []
+                    others_sorted = sorted(
+                        others, key=lambda g: (self.G.nodes[g]["label"], g)
+                    )
+                    labels0 = [
+                        nd_u["label"],
+                        nd_r["label"],
+                        *[self.G.nodes[g]["label"] for g in others_sorted],
+                        nd_w["label"],
+                    ]
+                    edges0: List[Tuple[int, int]] = []
                     # u->r
-                    edges0.append((0,1))
+                    edges0.append((0, 1))
                     # others -> r (indices start at 2)
                     for i in range(len(others_sorted)):
                         edges0.append((2 + i, 1))
@@ -1437,13 +1661,19 @@ class GSpanMiner:
                     for i, fu in enumerate(others_sorted):
                         mapping0[2 + i] = fu
                     mapping0[2 + len(others_sorted)] = w
-                    pobj0 = {"labels": labels0, "edges": edges0, "embeddings": [{"pid": pid, "mapping": mapping0}], "pids": {pid}}
                     # support pruning by min_sup is deferred to aggregation below
                     sig0 = make_signature(labels0, edges0)
                     if sig0 not in initial_by_sig:
-                        initial_by_sig[sig0] = {"labels": list(labels0), "edges": list(edges0), "pids": set(), "embeddings": []}
+                        initial_by_sig[sig0] = {
+                            "labels": list(labels0),
+                            "edges": list(edges0),
+                            "pids": set(),
+                            "embeddings": [],
+                        }
                     initial_by_sig[sig0]["pids"].add(pid)
-                    initial_by_sig[sig0]["embeddings"].append({"pid": pid, "mapping": mapping0})
+                    initial_by_sig[sig0]["embeddings"].append(
+                        {"pid": pid, "mapping": mapping0}
+                    )
 
         # Filter seeds by support
         patterns_list: List[Dict[str, Any]] = []
@@ -1452,20 +1682,31 @@ class GSpanMiner:
                 patterns_list.append(pobj)
 
         for pobj in patterns_list:
-            expand(list(pobj["labels"]), list(pobj["edges"]), pobj, producer_layers_used=0)
+            expand(
+                list(pobj["labels"]), list(pobj["edges"]), pobj, producer_layers_used=0
+            )
 
         out: List[Dict[str, Any]] = []
         for _, rec in results.items():
-            out.append({
-                "nodes": rec["nodes"],
-                "labels": rec["labels"],
-                "edges": rec["edges"],
-                "support": len(rec["pids"]),
-                "pids": sorted(list(rec["pids"])),
-                "embeddings": rec["embeddings"],
-            })
+            out.append(
+                {
+                    "nodes": rec["nodes"],
+                    "labels": rec["labels"],
+                    "edges": rec["edges"],
+                    "support": len(rec["pids"]),
+                    "pids": sorted(list(rec["pids"])),
+                    "embeddings": rec["embeddings"],
+                }
+            )
 
-        out.sort(key=lambda r: (sum(1 for lb in r["labels"] if lb.startswith("R:")), len(r["edges"]), r["support"]), reverse=True)
+        out.sort(
+            key=lambda r: (
+                sum(1 for lb in r["labels"] if lb.startswith("R:")),
+                len(r["edges"]),
+                r["support"],
+            ),
+            reverse=True,
+        )
         self.logger.info(f"branched-mining done: patterns={len(out)}")
         return out
 
@@ -1505,7 +1746,9 @@ class GSpanMiner:
             return [a for a in args[:-1]]
         return args
 
-    def build_rendered_for_problem(self, problem_id: str, *, label_mode: str = "legend") -> Dict[str, Any]:
+    def build_rendered_for_problem(
+        self, problem_id: str, *, label_mode: str = "legend"
+    ) -> Dict[str, Any]:
         """基于当前图构建单题目的 rendered 结构：{"nodes": [{idx,type,label}], "edges": [(u,v),...]}
 
         - label_mode："full" | "short" | "legend"（legend 模式只影响 draw 阶段的显示，rendered 仍存 raw label）。
@@ -1514,7 +1757,9 @@ class GSpanMiner:
         """
         pid = str(problem_id)
         # 收集节点
-        node_ids = [nid for nid, nd in self.nodes.items() if nd.get("problem_id") == pid]
+        node_ids = [
+            nid for nid, nd in self.nodes.items() if nd.get("problem_id") == pid
+        ]
         if not node_ids:
             return {"nodes": [], "edges": []}
         # 建立映射
@@ -1538,7 +1783,7 @@ class GSpanMiner:
 
         # 收集边（仅保留同题边）
         edges_out: List[Tuple[int, int]] = []
-        for (u, v) in self.edges:
+        for u, v in self.edges:
             u_nd = self.nodes.get(u)
             v_nd = self.nodes.get(v)
             if not u_nd or not v_nd:
@@ -1549,7 +1794,12 @@ class GSpanMiner:
                 continue
             edges_out.append((nid2idx[u], nid2idx[v]))
 
-        return {"nodes": [{k: v for k, v in nd.items() if k != "_orig"} for nd in nodes_out], "edges": edges_out}
+        return {
+            "nodes": [
+                {k: v for k, v in nd.items() if k != "_orig"} for nd in nodes_out
+            ],
+            "edges": edges_out,
+        }
 
     def draw_problem_png(
         self,
@@ -1569,22 +1819,23 @@ class GSpanMiner:
         - 规则节点浅灰底；
         - 若结论与辅助冲突，以结论蓝优先。
         """
-    # Visualization always enabled
+        # Visualization always enabled
 
         # 依赖按需导入
         try:
             import networkx as nx  # type: ignore
             import matplotlib  # type: ignore
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt  # type: ignore
         except Exception as e:
             raise RuntimeError(
-                "缺少依赖：需要 networkx 与 matplotlib。请安装后重试。"\
+                "缺少依赖：需要 networkx 与 matplotlib。请安装后重试。"
                 f" 导入错误：{type(e).__name__}: {e}"
             )
         try:
             import pydot  # noqa: F401, type: ignore
-        except Exception as e:
+        except Exception:
             # 允许回退
             pydot = None  # type: ignore
 
@@ -1597,7 +1848,7 @@ class GSpanMiner:
         # 计算入度/出度
         indeg: Dict[int, int] = {n.get("idx"): 0 for n in nodes}
         outdeg: Dict[int, int] = {n.get("idx"): 0 for n in nodes}
-        for (u, v) in edges:
+        for u, v in edges:
             outdeg[u] = outdeg.get(u, 0) + 1
             indeg[v] = indeg.get(v, 0) + 1
 
@@ -1606,10 +1857,11 @@ class GSpanMiner:
 
         # 构图
         import networkx as nx  # type: ignore
+
         G = nx.DiGraph()
         for n in nodes:
             G.add_node(n["idx"], ntype=n.get("type"), raw_label=str(n.get("label", "")))
-        for (u, v) in edges:
+        for u, v in edges:
             G.add_edge(u, v)
 
         # 布局：优先 graphviz
@@ -1622,10 +1874,10 @@ class GSpanMiner:
             pos = nx.spring_layout(G, seed=42)
 
         # 样式参数
-        COLOR_FACT_OK = "#e0ffe0"       # 绿色
-        COLOR_FACT_AUX = "#ffe4b5"      # 橙色（Moccasin）
-        COLOR_FACT_CONCL = "#e0f2ff"    # 蓝色
-        COLOR_RULE = "#f0f0f0"          # 浅灰
+        COLOR_FACT_OK = "#e0ffe0"  # 绿色
+        COLOR_FACT_AUX = "#ffe4b5"  # 橙色（Moccasin）
+        COLOR_FACT_CONCL = "#e0f2ff"  # 蓝色
+        COLOR_RULE = "#f0f0f0"  # 浅灰
         COLOR_BORDER = "#333333"
         COLOR_CONCL_BORDER = "#007bff"
 
@@ -1649,7 +1901,9 @@ class GSpanMiner:
         # 为避免在 rendered 中暴露 _orig，我们通过重建：按 label 匹配可能不唯一，改为直接从 self.nodes 过滤该 problem 的顺序映射
         pid = str(problem_id)
         # 重新建立 nid 列表与 idx 映射（与 build_rendered_for_problem 使用相同规则：按 node_id 排序）
-        node_ids = [nid for nid, nd in self.nodes.items() if nd.get("problem_id") == pid]
+        node_ids = [
+            nid for nid, nd in self.nodes.items() if nd.get("problem_id") == pid
+        ]
         node_ids_sorted = sorted(node_ids)
         nid2idx_local = {nid: i for i, nid in enumerate(node_ids_sorted)}
         for nid, nd in self.nodes.items():
@@ -1691,11 +1945,11 @@ class GSpanMiner:
             node_edge_colors[idx] = COLOR_BORDER
             node_linewidths[idx] = 1.0
             if ntype == "rule":
-                node_shapes[idx] = 's'
+                node_shapes[idx] = "s"
                 node_colors[idx] = COLOR_RULE
                 node_sizes[idx] = 1300
             else:
-                node_shapes[idx] = 'o'
+                node_shapes[idx] = "o"
                 node_sizes[idx] = 1600
                 # 判断是否结论（出度为 0）
                 is_concl = outdeg.get(idx, 0) == 0
@@ -1724,8 +1978,11 @@ class GSpanMiner:
 
         # 分形状绘制
         import matplotlib.pyplot as plt  # type: ignore
+
         fig_size = (12, 9)
-        if isinstance(style_opts, dict) and isinstance(style_opts.get("figsize"), (list, tuple)):
+        if isinstance(style_opts, dict) and isinstance(
+            style_opts.get("figsize"), (list, tuple)
+        ):
             try:
                 w, h = style_opts.get("figsize")
                 fig_size = (float(w), float(h))
@@ -1735,7 +1992,17 @@ class GSpanMiner:
         ax.axis("off")
 
         import networkx as nx  # type: ignore
-        nx.draw_networkx_edges(G, pos, ax=ax, arrows=True, arrowstyle='-|>', arrowsize=15, width=1.2, edge_color="#777777")
+
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            ax=ax,
+            arrows=True,
+            arrowstyle="-|>",
+            arrowsize=15,
+            width=1.2,
+            edge_color="#777777",
+        )
 
         # 聚合同形状节点
         shape_map: Dict[str, List[int]] = {}
@@ -1743,8 +2010,10 @@ class GSpanMiner:
             shape_map.setdefault(node_shapes[n["idx"]], []).append(n["idx"])
         for shape, nodelist in shape_map.items():
             nx.draw_networkx_nodes(
-                G, pos,
-                nodelist=nodelist, node_shape=shape,
+                G,
+                pos,
+                nodelist=nodelist,
+                node_shape=shape,
                 node_color=[node_colors[nid] for nid in nodelist],
                 edgecolors=[node_edge_colors[nid] for nid in nodelist],
                 linewidths=[node_linewidths[nid] for nid in nodelist],
@@ -1754,22 +2023,34 @@ class GSpanMiner:
 
         # 标签
         font_size = 8
-        if isinstance(style_opts, dict) and isinstance(style_opts.get("font_size"), (int, float)):
+        if isinstance(style_opts, dict) and isinstance(
+            style_opts.get("font_size"), (int, float)
+        ):
             try:
                 font_size = int(style_opts.get("font_size"))
             except Exception:
                 pass
-        nx.draw_networkx_labels(G, pos, labels=display_label, font_size=font_size, ax=ax)
+        nx.draw_networkx_labels(
+            G, pos, labels=display_label, font_size=font_size, ax=ax
+        )
 
         # legend
         if label_mode == "legend" and legend_lines:
             legend_text = "Legend:\n" + "\n".join(legend_lines)
-            ax.text(0.99, 0.99, legend_text, transform=ax.transAxes, ha='right', va='top',
-                    fontsize=max(7, font_size-1),
-                    bbox=dict(boxstyle='round', fc='white', ec='#999999', alpha=0.85))
+            ax.text(
+                0.99,
+                0.99,
+                legend_text,
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=max(7, font_size - 1),
+                bbox=dict(boxstyle="round", fc="white", ec="#999999", alpha=0.85),
+            )
 
         # 保存
         from pathlib import Path as _Path
+
         outp = _Path(out_png)
         outp.parent.mkdir(parents=True, exist_ok=True)
         fig.tight_layout()
@@ -1788,10 +2069,17 @@ class GSpanMiner:
         返回统计信息。
         """
         from pathlib import Path as _Path
+
         out_base = _Path(out_dir)
         out_base.mkdir(parents=True, exist_ok=True)
         # 收集题目 ID
-        pids: List[str] = sorted({str(nd.get("problem_id")) for nd in self.nodes.values() if nd.get("problem_id") is not None})
+        pids: List[str] = sorted(
+            {
+                str(nd.get("problem_id"))
+                for nd in self.nodes.values()
+                if nd.get("problem_id") is not None
+            }
+        )
         total = 0
         done = 0
         skipped = 0
@@ -1808,10 +2096,20 @@ class GSpanMiner:
                 failed += 1
             total += 1
             if show_progress and total % 10 == 0:
-                print(f"[render] {total}/{len(pids)} done={done} skipped={skipped} failed={failed}")
+                print(
+                    f"[render] {total}/{len(pids)} done={done} skipped={skipped} failed={failed}"
+                )
         if show_progress:
-            print(f"[render] finished: total={len(pids)} done={done} skipped={skipped} failed={failed}")
-        return {"total": total, "done": done, "skipped": skipped, "failed": failed, "out_dir": str(out_base)}
+            print(
+                f"[render] finished: total={len(pids)} done={done} skipped={skipped} failed={failed}"
+            )
+        return {
+            "total": total,
+            "done": done,
+            "skipped": skipped,
+            "failed": failed,
+            "out_dir": str(out_base),
+        }
 
     # ------------------------- 并行支持：按种子构建与从种子扩展（branched） -------------------------
     def build_branched_seeds(
@@ -1835,7 +2133,9 @@ class GSpanMiner:
             label_pid_support = {lb: len(pids) for lb, pids in tmp_map.items()}
 
         # 初始化 FRF 种子
-        initial_by_sig: Dict[Tuple[Tuple[str, ...], Tuple[Tuple[int,int], ...]], Dict[str, Any]] = {}
+        initial_by_sig: Dict[
+            Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]], Dict[str, Any]
+        ] = {}
         for u, nd_u in self.G.nodes.items():
             if nd_u["type"] != "fact":
                 continue
@@ -1865,11 +2165,18 @@ class GSpanMiner:
                         if nd_fu["problem_id"] != pid:
                             continue
                         others.append(fu)
-                    others_sorted = sorted(others, key=lambda g: (self.G.nodes[g]["label"], g))
-                    labels0 = [nd_u["label"], nd_r["label"], *[self.G.nodes[g]["label"] for g in others_sorted], nd_w["label"]]
-                    edges0: List[Tuple[int,int]] = []
+                    others_sorted = sorted(
+                        others, key=lambda g: (self.G.nodes[g]["label"], g)
+                    )
+                    labels0 = [
+                        nd_u["label"],
+                        nd_r["label"],
+                        *[self.G.nodes[g]["label"] for g in others_sorted],
+                        nd_w["label"],
+                    ]
+                    edges0: List[Tuple[int, int]] = []
                     # u->r
-                    edges0.append((0,1))
+                    edges0.append((0, 1))
                     # others -> r (indices start at 2)
                     for i in range(len(others_sorted)):
                         edges0.append((2 + i, 1))
@@ -1879,12 +2186,18 @@ class GSpanMiner:
                     for i, fu in enumerate(others_sorted):
                         mapping0[2 + i] = fu
                     mapping0[2 + len(others_sorted)] = w
-                    pobj0 = {"labels": labels0, "edges": edges0, "embeddings": [{"pid": pid, "mapping": mapping0}], "pids": {pid}}
                     sig0 = (tuple(labels0), tuple(sorted(edges0)))
                     if sig0 not in initial_by_sig:
-                        initial_by_sig[sig0] = {"labels": list(labels0), "edges": list(edges0), "pids": set(), "embeddings": []}
+                        initial_by_sig[sig0] = {
+                            "labels": list(labels0),
+                            "edges": list(edges0),
+                            "pids": set(),
+                            "embeddings": [],
+                        }
                     initial_by_sig[sig0]["pids"].add(pid)
-                    initial_by_sig[sig0]["embeddings"].append({"pid": pid, "mapping": mapping0})
+                    initial_by_sig[sig0]["embeddings"].append(
+                        {"pid": pid, "mapping": mapping0}
+                    )
 
         # 过滤支持
         seeds: List[Dict[str, Any]] = []
@@ -1895,9 +2208,9 @@ class GSpanMiner:
 
     def expand_branched_from_seed(
         self,
-    seed: Dict[str, Any],
-    *,
-    min_rule_indeg2_count: int = 0,
+        seed: Dict[str, Any],
+        *,
+        min_rule_indeg2_count: int = 0,
         debug_limit_expansions: Optional[int] = None,
         debug_log_every: int = 10000,
         time_budget_seconds: Optional[float] = None,
@@ -1914,15 +2227,16 @@ class GSpanMiner:
         线程内维护独立 visited/expansions，避免与其他线程共享状态。
         """
         import time as _time
+
         start_time = _time.time()
 
         min_sup = self._min_sup_abs()
-    # 边数不再单独受限，由 max_nodes 与其他预算控制
+        # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         def make_signature(labels: List[str], edges: List[Tuple[int, int]]):
             return (tuple(labels), tuple(sorted(edges)))
 
-        visited: Set[Tuple[Tuple[str, ...], Tuple[Tuple[int,int], ...]]] = set()
+        visited: Set[Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]]] = set()
         expansions = 0
 
         # 全局标签支持（用于剪枝）
@@ -1946,21 +2260,34 @@ class GSpanMiner:
             except Exception:
                 return False
 
-        def degrees(labels: List[str], edges: List[Tuple[int,int]]):
-            indeg = [0]*len(labels)
-            outdeg = [0]*len(labels)
-            for a,b in edges:
-                outdeg[a]+=1; indeg[b]+=1
+        def degrees(labels: List[str], edges: List[Tuple[int, int]]):
+            indeg = [0] * len(labels)
+            outdeg = [0] * len(labels)
+            for a, b in edges:
+                outdeg[a] += 1
+                indeg[b] += 1
             return indeg, outdeg
 
-        def filter_embs_var_closure(labels_loc: List[str], edges_loc: List[Tuple[int,int]], embs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def filter_embs_var_closure(
+            labels_loc: List[str],
+            edges_loc: List[Tuple[int, int]],
+            embs: List[Dict[str, Any]],
+        ) -> List[Dict[str, Any]]:
             if not enable_var_closure_check:
                 return embs
             if not labels_loc or not edges_loc or not embs:
                 return embs
             indeg, outdeg = degrees(labels_loc, edges_loc)
-            premise_idx = [i for i,lb in enumerate(labels_loc) if lb.startswith("F:") and indeg[i]==0]
-            sink_idx = [i for i,lb in enumerate(labels_loc) if lb.startswith("F:") and outdeg[i]==0]
+            premise_idx = [
+                i
+                for i, lb in enumerate(labels_loc)
+                if lb.startswith("F:") and indeg[i] == 0
+            ]
+            sink_idx = [
+                i
+                for i, lb in enumerate(labels_loc)
+                if lb.startswith("F:") and outdeg[i] == 0
+            ]
             if len(sink_idx) != 1:
                 return embs
             good: List[Dict[str, Any]] = []
@@ -1983,7 +2310,9 @@ class GSpanMiner:
                     good.append(emb)
             return good
 
-        def eligible_output(labels: List[str], edges: List[Tuple[int,int]], pids: Set[str]) -> bool:
+        def eligible_output(
+            labels: List[str], edges: List[Tuple[int, int]], pids: Set[str]
+        ) -> bool:
             if len(edges) < self.min_edges:
                 return False
             if sum(1 for lb in labels if lb.startswith("R:")) < self.min_rule_nodes:
@@ -1991,23 +2320,33 @@ class GSpanMiner:
             if len(pids) < min_sup:
                 return False
             indeg, outdeg = degrees(labels, edges)
-            src_facts = [i for i,lb in enumerate(labels) if lb.startswith("F:") and indeg[i]==0]
-            sink_all = [i for i,_ in enumerate(labels) if outdeg[i]==0]
+            src_facts = [
+                i
+                for i, lb in enumerate(labels)
+                if lb.startswith("F:") and indeg[i] == 0
+            ]
+            sink_all = [i for i, _ in enumerate(labels) if outdeg[i] == 0]
             if any(labels[i].startswith("R:") for i in sink_all):
                 return False
-            sink_facts = [i for i,lb in enumerate(labels) if lb.startswith("F:") and outdeg[i]==0]
+            sink_facts = [
+                i
+                for i, lb in enumerate(labels)
+                if lb.startswith("F:") and outdeg[i] == 0
+            ]
             if not src_facts or len(sink_facts) != 1:
                 return False
-            if min_rule_indeg2_count>0:
+            if min_rule_indeg2_count > 0:
                 cnt = 0
-                for i,lb in enumerate(labels):
+                for i, lb in enumerate(labels):
                     if lb.startswith("R:") and degrees(labels, edges)[0][i] >= 2:
                         cnt += 1
                 if cnt < min_rule_indeg2_count:
                     return False
             return True
 
-        def finalize(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any]):
+        def finalize(
+            labels: List[str], edges: List[Tuple[int, int]], pobj: Dict[str, Any]
+        ):
             if not eligible_output(labels, edges, pobj.get("pids", set())):
                 return
             embs = pobj.get("embeddings", [])
@@ -2026,12 +2365,24 @@ class GSpanMiner:
                 }
                 emit(rec)
 
-        def expand(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any], *, producer_layers_used: int = 0):
+        def expand(
+            labels: List[str],
+            edges: List[Tuple[int, int]],
+            pobj: Dict[str, Any],
+            *,
+            producer_layers_used: int = 0,
+        ):
             nonlocal expansions
-            if time_budget_seconds is not None and (_time.time() - start_time) >= time_budget_seconds:
+            if (
+                time_budget_seconds is not None
+                and (_time.time() - start_time) >= time_budget_seconds
+            ):
                 finalize(labels, edges, pobj)
                 return
-            if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
+            if (
+                debug_limit_expansions is not None
+                and expansions >= debug_limit_expansions
+            ):
                 finalize(labels, edges, pobj)
                 return
             if len(labels) >= self.max_nodes:
@@ -2061,11 +2412,18 @@ class GSpanMiner:
                             if fu not in mapping.values():
                                 return False
                 return True
+
             if all_rules_complete():
                 finalize(labels, edges, pobj)
 
             # Phase A: 完整化规则
-            def try_complete_rule_once(labels0: List[str], edges0: List[Tuple[int,int]], pobj0: Dict[str, Any], r_idx: int) -> bool:
+            def try_complete_rule_once(
+                labels0: List[str],
+                edges0: List[Tuple[int, int]],
+                pobj0: Dict[str, Any],
+                r_idx: int,
+            ) -> bool:
+                nonlocal expansions
                 lb_r = labels0[r_idx]
                 if not lb_r.startswith("R:"):
                     return False
@@ -2088,7 +2446,9 @@ class GSpanMiner:
                         if nd_fu["problem_id"] != pid:
                             continue
                         missing.append(fu)
-                    missing_sorted = sorted(missing, key=lambda g: (self.G.nodes[g]["label"], g))
+                    missing_sorted = sorted(
+                        missing, key=lambda g: (self.G.nodes[g]["label"], g)
+                    )
                     key = tuple(self.G.nodes[g]["label"] for g in missing_sorted)
                     new_map = dict(mapping)
                     next_idx = len(labels0)
@@ -2105,7 +2465,8 @@ class GSpanMiner:
                         for lb_add in key_labels:
                             # label_pid_support 仅对 fact/rule 标签统计题目覆盖度
                             if label_pid_support.get(lb_add, 0) < min_sup:
-                                low = True; break
+                                low = True
+                                break
                         if low:
                             continue
                     added_nodes = len(key_labels)
@@ -2120,10 +2481,25 @@ class GSpanMiner:
                     if not try_consume_budget():
                         continue
                     expansions += 1
-                    if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
-                        self.logger.info(f"branched-debug: expansions={expansions} complete-rule r_idx={r_idx} add={list(key_labels)}")
-                    new_pobj = {"labels": new_labels, "edges": new_edges, "embeddings": emb_list, "pids": compute_pids(emb_list)}
-                    expand(new_labels, new_edges, new_pobj, producer_layers_used=producer_layers_used)
+                    if (
+                        debug_limit_expansions is not None
+                        and expansions % max(1, debug_log_every) == 0
+                    ):
+                        self.logger.info(
+                            f"branched-debug: expansions={expansions} complete-rule r_idx={r_idx} add={list(key_labels)}"
+                        )
+                    new_pobj = {
+                        "labels": new_labels,
+                        "edges": new_edges,
+                        "embeddings": emb_list,
+                        "pids": compute_pids(emb_list),
+                    }
+                    expand(
+                        new_labels,
+                        new_edges,
+                        new_pobj,
+                        producer_layers_used=producer_layers_used,
+                    )
                     progressed = True
                 return progressed
 
@@ -2155,7 +2531,9 @@ class GSpanMiner:
             for f_idx, lb in enumerate(labels):
                 if not lb.startswith("F:"):
                     continue
-                buckets_frf: Dict[Tuple[str, str, Tuple[str, ...]], List[Dict[str, Any]]] = {}
+                buckets_frf: Dict[
+                    Tuple[str, str, Tuple[str, ...]], List[Dict[str, Any]]
+                ] = {}
                 for emb in pobj.get("embeddings", []):
                     pid = emb["pid"]
                     mapping = emb["mapping"]
@@ -2166,13 +2544,21 @@ class GSpanMiner:
                         nd_rv = self.G.nodes[rv]
                         if nd_rv["type"] != "rule":
                             continue
-                        if prune_by_rule and label_pid_support.get(nd_rv["label"], 0) < min_sup:
+                        if (
+                            prune_by_rule
+                            and label_pid_support.get(nd_rv["label"], 0) < min_sup
+                        ):
                             continue
                         if rv in mapping.values():
                             continue
                         if nd_rv["problem_id"] != pid:
                             continue
-                        fouts = [fv for fv in self.G.out_edges.get(rv, []) if self.G.nodes[fv]["type"] == "fact" and self.G.nodes[fv]["problem_id"] == pid]
+                        fouts = [
+                            fv
+                            for fv in self.G.out_edges.get(rv, [])
+                            if self.G.nodes[fv]["type"] == "fact"
+                            and self.G.nodes[fv]["problem_id"] == pid
+                        ]
                         if not fouts:
                             continue
                         for fv in fouts:
@@ -2192,8 +2578,14 @@ class GSpanMiner:
                                 if nd_fu["problem_id"] != pid:
                                     continue
                                 others.append(fu)
-                            others_sorted = sorted(others, key=lambda g: (self.G.nodes[g]["label"], g))
-                            key = (nd_rv["label"], self.G.nodes[fv]["label"], tuple(self.G.nodes[g]["label"] for g in others_sorted))
+                            others_sorted = sorted(
+                                others, key=lambda g: (self.G.nodes[g]["label"], g)
+                            )
+                            key = (
+                                nd_rv["label"],
+                                self.G.nodes[fv]["label"],
+                                tuple(self.G.nodes[g]["label"] for g in others_sorted),
+                            )
                             new_map = dict(mapping)
                             idx_r = len(labels)
                             new_map[idx_r] = rv
@@ -2203,7 +2595,9 @@ class GSpanMiner:
                                 idx_next += 1
                             idx_f = idx_next
                             new_map[idx_f] = fv
-                            buckets_frf.setdefault(key, []).append({"pid": pid, "mapping": new_map})
+                            buckets_frf.setdefault(key, []).append(
+                                {"pid": pid, "mapping": new_map}
+                            )
                 for key, emb_list in buckets_frf.items():
                     r_lb, f_lb, prem_lbs = key
                     add_count = 1 + len(prem_lbs) + 1
@@ -2211,12 +2605,16 @@ class GSpanMiner:
                         continue
                     if prune_low_support_labels:
                         low = False
-                        if label_pid_support.get(r_lb, 0) < min_sup or label_pid_support.get(f_lb, 0) < min_sup:
+                        if (
+                            label_pid_support.get(r_lb, 0) < min_sup
+                            or label_pid_support.get(f_lb, 0) < min_sup
+                        ):
                             low = True
                         else:
                             for lbx in prem_lbs:
                                 if label_pid_support.get(lbx, 0) < min_sup:
-                                    low = True; break
+                                    low = True
+                                    break
                         if low:
                             continue
                     # 不再单独限制边数
@@ -2231,17 +2629,34 @@ class GSpanMiner:
                     if not try_consume_budget():
                         continue
                     expansions += 1
-                    if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
-                        self.logger.info(f"branched-debug: expansions={expansions} FRF from f_idx={f_idx} add={[r_lb, *prem_lbs, f_lb]}")
-                    new_pobj = {"labels": new_labels, "edges": new_edges, "embeddings": emb_list, "pids": compute_pids(emb_list)}
-                    expand(new_labels, new_edges, new_pobj, producer_layers_used=producer_layers_used)
+                    if (
+                        debug_limit_expansions is not None
+                        and expansions % max(1, debug_log_every) == 0
+                    ):
+                        self.logger.info(
+                            f"branched-debug: expansions={expansions} FRF from f_idx={f_idx} add={[r_lb, *prem_lbs, f_lb]}"
+                        )
+                    new_pobj = {
+                        "labels": new_labels,
+                        "edges": new_edges,
+                        "embeddings": emb_list,
+                        "pids": compute_pids(emb_list),
+                    }
+                    expand(
+                        new_labels,
+                        new_edges,
+                        new_pobj,
+                        producer_layers_used=producer_layers_used,
+                    )
 
             # Phase C: 连接生产者规则
             if attach_producer and producer_layers_used < max_producer_depth:
                 for f_idx, lb in enumerate(labels):
                     if not lb.startswith("F:"):
                         continue
-                    buckets_prod: Dict[Tuple[str, Tuple[str, ...]], List[Dict[str, Any]]] = {}
+                    buckets_prod: Dict[
+                        Tuple[str, Tuple[str, ...]], List[Dict[str, Any]]
+                    ] = {}
                     for emb in pobj.get("embeddings", []):
                         pid = emb["pid"]
                         mapping = emb["mapping"]
@@ -2252,7 +2667,10 @@ class GSpanMiner:
                             nd_rv = self.G.nodes[rv]
                             if nd_rv["type"] != "rule":
                                 continue
-                            if prune_by_rule and label_pid_support.get(nd_rv["label"], 0) < min_sup:
+                            if (
+                                prune_by_rule
+                                and label_pid_support.get(nd_rv["label"], 0) < min_sup
+                            ):
                                 continue
                             if rv in mapping.values():
                                 continue
@@ -2270,8 +2688,13 @@ class GSpanMiner:
                                 if nd_fu["problem_id"] != pid:
                                     continue
                                 prem.append(fu)
-                            prem_sorted = sorted(prem, key=lambda g: (self.G.nodes[g]["label"], g))
-                            key = (nd_rv["label"], tuple(self.G.nodes[g]["label"] for g in prem_sorted))
+                            prem_sorted = sorted(
+                                prem, key=lambda g: (self.G.nodes[g]["label"], g)
+                            )
+                            key = (
+                                nd_rv["label"],
+                                tuple(self.G.nodes[g]["label"] for g in prem_sorted),
+                            )
                             new_map = dict(mapping)
                             idx_r = len(labels)
                             new_map[idx_r] = rv
@@ -2279,7 +2702,9 @@ class GSpanMiner:
                             for fu in prem_sorted:
                                 new_map[idx_next] = fu
                                 idx_next += 1
-                            buckets_prod.setdefault(key, []).append({"pid": pid, "mapping": new_map})
+                            buckets_prod.setdefault(key, []).append(
+                                {"pid": pid, "mapping": new_map}
+                            )
                     for key, emb_list in buckets_prod.items():
                         r_lb, prem_lbs = key
                         add_count = 1 + len(prem_lbs)
@@ -2292,7 +2717,8 @@ class GSpanMiner:
                             else:
                                 for lbx in prem_lbs:
                                     if label_pid_support.get(lbx, 0) < min_sup:
-                                        low = True; break
+                                        low = True
+                                        break
                             if low:
                                 continue
                         # 不再单独限制边数
@@ -2306,14 +2732,34 @@ class GSpanMiner:
                         if not try_consume_budget():
                             continue
                         expansions += 1
-                        if debug_limit_expansions is not None and expansions % max(1, debug_log_every) == 0:
-                            self.logger.info(f"branched-debug: expansions={expansions} attach-producer f_idx={f_idx} add={[r_lb, *prem_lbs]}")
-                        new_pobj = {"labels": new_labels, "edges": new_edges, "embeddings": emb_list, "pids": compute_pids(emb_list)}
-                        expand(new_labels, new_edges, new_pobj, producer_layers_used=producer_layers_used + 1)
+                        if (
+                            debug_limit_expansions is not None
+                            and expansions % max(1, debug_log_every) == 0
+                        ):
+                            self.logger.info(
+                                f"branched-debug: expansions={expansions} attach-producer f_idx={f_idx} add={[r_lb, *prem_lbs]}"
+                            )
+                        new_pobj = {
+                            "labels": new_labels,
+                            "edges": new_edges,
+                            "embeddings": emb_list,
+                            "pids": compute_pids(emb_list),
+                        }
+                        expand(
+                            new_labels,
+                            new_edges,
+                            new_pobj,
+                            producer_layers_used=producer_layers_used + 1,
+                        )
 
             finalize(labels, edges, pobj)
 
-        expand(list(seed.get("labels", [])), list(seed.get("edges", [])), seed, producer_layers_used=0)
+        expand(
+            list(seed.get("labels", [])),
+            list(seed.get("edges", [])),
+            seed,
+            producer_layers_used=0,
+        )
 
     # ------------------------- 规则图挖掘（仅规则节点） -------------------------
     def run_rules_only(
@@ -2328,12 +2774,13 @@ class GSpanMiner:
     ) -> List[Dict[str, Any]]:
         """在规则-规则邻接图上挖掘连通子图（允许分叉/汇合），节点均为规则。"""
         import time as _time
+
         start_time = _time.time()
         self._build_rule_adjacency()
         assert self._rule_out_rules is not None and self._rule_in_rules is not None
 
         min_sup = self._min_sup_abs()
-    # 边数不再单独受限，由 max_nodes 与其他预算控制
+        # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         # 全局标签支持（仅规则标签）
         label_pid_support: Dict[str, int] = {}
@@ -2342,25 +2789,31 @@ class GSpanMiner:
             for gid, nd in self.G.nodes.items():
                 if nd["type"] != "rule":
                     continue
-                lb = f"R:{nd['code']}" if 'code' in nd else self.G.nodes[gid]["label"]
+                lb = f"R:{nd['code']}" if "code" in nd else self.G.nodes[gid]["label"]
                 tmp_map.setdefault(lb, set()).add(nd["problem_id"])
             label_pid_support = {lb: len(pids) for lb, pids in tmp_map.items()}
 
-        def degrees(edges: List[Tuple[int,int]], n: int) -> Tuple[List[int], List[int]]:
-            indeg = [0]*n; outdeg=[0]*n
-            for a,b in edges:
-                outdeg[a]+=1; indeg[b]+=1
+        def degrees(
+            edges: List[Tuple[int, int]], n: int
+        ) -> Tuple[List[int], List[int]]:
+            indeg = [0] * n
+            outdeg = [0] * n
+            for a, b in edges:
+                outdeg[a] += 1
+                indeg[b] += 1
             return indeg, outdeg
 
-        def signature(labels: List[str], edges: List[Tuple[int,int]]):
+        def signature(labels: List[str], edges: List[Tuple[int, int]]):
             return (tuple(labels), tuple(sorted(edges)))
 
-        results: Dict[Tuple[Tuple[str,...], Tuple[Tuple[int,int], ...]], Dict[str, Any]] = {}
-        visited: Set[Tuple[Tuple[str,...], Tuple[Tuple[int,int], ...]]] = set()
+        results: Dict[
+            Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]], Dict[str, Any]
+        ] = {}
+        visited: Set[Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]]] = set()
         expansions = 0
 
         # 初始化种子：所有 r1->r2（同题）
-        seeds_by_label: Dict[Tuple[str,str], List[Dict[str, Any]]] = {}
+        seeds_by_label: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         for r1, outs in self._rule_out_rules.items():
             lb1 = self.G.nodes[r1]["label"]
             pid1 = self.G.nodes[r1]["problem_id"]
@@ -2373,15 +2826,26 @@ class GSpanMiner:
                 if prune_by_rule and label_pid_support.get(lb2, 0) < min_sup:
                     continue
                 key = (lb1, lb2)
-                seeds_by_label.setdefault(key, []).append({
-                    "pids": {pid1},
-                    "emb": [{"pid": pid1, "mapping": {0: r1, 1: r2}}],
-                })
+                seeds_by_label.setdefault(key, []).append(
+                    {
+                        "pids": {pid1},
+                        "emb": [{"pid": pid1, "mapping": {0: r1, 1: r2}}],
+                    }
+                )
 
         # 聚合初始模式
-        patterns: Dict[Tuple[str,...], Dict[str, Any]] = {}
-        def add_or_update(labels_t: Tuple[str,...], entries: List[Dict[str, Any]]):
-            pobj = patterns.setdefault(labels_t, {"labels": list(labels_t), "edges": [(i,i+1) for i in range(len(labels_t)-1)], "pids": set(), "embeddings": []})
+        patterns: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+
+        def add_or_update(labels_t: Tuple[str, ...], entries: List[Dict[str, Any]]):
+            pobj = patterns.setdefault(
+                labels_t,
+                {
+                    "labels": list(labels_t),
+                    "edges": [(i, i + 1) for i in range(len(labels_t) - 1)],
+                    "pids": set(),
+                    "embeddings": [],
+                },
+            )
             for e in entries:
                 pobj["pids"].update(e["pids"])
                 pobj["embeddings"].extend(e["emb"])
@@ -2390,12 +2854,14 @@ class GSpanMiner:
             add_or_update(tuple(key), entries)
 
         # 过滤支持
-        patterns = {k:v for k,v in patterns.items() if len(v["pids"]) >= min_sup}
+        patterns = {k: v for k, v in patterns.items() if len(v["pids"]) >= min_sup}
 
         def support_ok(pobj: Dict[str, Any]) -> bool:
             return len(pobj.get("pids", set())) >= min_sup
 
-        def finalize(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any]):
+        def finalize(
+            labels: List[str], edges: List[Tuple[int, int]], pobj: Dict[str, Any]
+        ):
             # 结构过滤
             if len(labels) < self.min_rule_nodes or len(edges) < self.min_edges:
                 return
@@ -2449,12 +2915,20 @@ class GSpanMiner:
                     if len(rec["embeddings"]) < self.sample_embeddings:
                         rec["embeddings"].append(e)
 
-        def expand(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any]):
+        def expand(
+            labels: List[str], edges: List[Tuple[int, int]], pobj: Dict[str, Any]
+        ):
             nonlocal expansions
-            if time_budget_seconds is not None and (_time.time() - start_time) >= time_budget_seconds:
+            if (
+                time_budget_seconds is not None
+                and (_time.time() - start_time) >= time_budget_seconds
+            ):
                 finalize(labels, edges, pobj)
                 return
-            if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
+            if (
+                debug_limit_expansions is not None
+                and expansions >= debug_limit_expansions
+            ):
                 finalize(labels, edges, pobj)
                 return
             if len(labels) >= self.max_nodes:
@@ -2466,13 +2940,17 @@ class GSpanMiner:
             visited.add(sig)
             expansions += 1
             if debug_log_every and expansions % debug_log_every == 0:
-                self.logger.info(f"rules-only expand step={expansions}, cur_nodes={len(labels)}, cur_edges={len(edges)}, results={len(results)}")
+                self.logger.info(
+                    f"rules-only expand step={expansions}, cur_nodes={len(labels)}, cur_edges={len(edges)}, results={len(results)}"
+                )
 
             # 从任一已有规则节点尝试向外扩一条边并加入新规则节点
             n = len(labels)
             # 为每个候选扩展，收集新的嵌入
             # 候选结构：列表项为 (new_labels, new_edges, new_embeddings)
-            candidates: Dict[Tuple[Tuple[str,...], Tuple[Tuple[int,int],...]], Dict[str, Any]] = {}
+            candidates: Dict[
+                Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]], Dict[str, Any]
+            ] = {}
 
             for anchor_idx in range(n):
                 # 依据每条嵌入，从对应的规则 gid 找到可扩展的相邻规则
@@ -2492,8 +2970,11 @@ class GSpanMiner:
                             continue
                         new_label = self.G.nodes[w]["label"]
                         # 组装新嵌入
-                        mapping2 = dict(emb["mapping"]) ; mapping2[n] = w
-                        bucket_out.setdefault(new_label, []).append({"pid": pid, "mapping": mapping2})
+                        mapping2 = dict(emb["mapping"])
+                        mapping2[n] = w
+                        bucket_out.setdefault(new_label, []).append(
+                            {"pid": pid, "mapping": mapping2}
+                        )
                     # 向内扩展：u -> anchor
                     for u in self._rule_in_rules.get(gid_anchor, []):
                         if self.G.nodes[u]["problem_id"] != pid:
@@ -2501,26 +2982,35 @@ class GSpanMiner:
                         if u in emb["mapping"].values():
                             continue
                         new_label = self.G.nodes[u]["label"]
-                        mapping2 = dict(emb["mapping"]) ; mapping2[n] = u
-                        bucket_in.setdefault(new_label, []).append({"pid": pid, "mapping": mapping2})
+                        mapping2 = dict(emb["mapping"])
+                        mapping2[n] = u
+                        bucket_in.setdefault(new_label, []).append(
+                            {"pid": pid, "mapping": mapping2}
+                        )
 
                 # 生成候选：anchor -> new_n
                 for new_label, emb_list in bucket_out.items():
                     new_labels = labels + [new_label]
                     new_edges = edges + [(anchor_idx, n)]
                     sig2 = signature(new_labels, new_edges)
-                    cand = candidates.setdefault(sig2, {"labels": new_labels, "edges": new_edges, "embeddings": []})
+                    cand = candidates.setdefault(
+                        sig2,
+                        {"labels": new_labels, "edges": new_edges, "embeddings": []},
+                    )
                     cand["embeddings"].extend(emb_list)
                 # 生成候选：new_n -> anchor
                 for new_label, emb_list in bucket_in.items():
                     new_labels = labels + [new_label]
                     new_edges = edges + [(n, anchor_idx)]
                     sig2 = signature(new_labels, new_edges)
-                    cand = candidates.setdefault(sig2, {"labels": new_labels, "edges": new_edges, "embeddings": []})
+                    cand = candidates.setdefault(
+                        sig2,
+                        {"labels": new_labels, "edges": new_edges, "embeddings": []},
+                    )
                     cand["embeddings"].extend(emb_list)
 
             # 对每个候选进行支持聚合与剪枝后递归
-            for (_sig, cand) in candidates.items():
+            for _sig, cand in candidates.items():
                 # 聚合 pids
                 pids = {e["pid"] for e in cand["embeddings"]}
                 cand_pobj = {"pids": pids, "embeddings": cand["embeddings"]}
@@ -2534,7 +3024,11 @@ class GSpanMiner:
                     else:
                         pass
                     # 如果 break 未触发则继续；若触发则跳过
-                    if any((prune_by_rule and label_pid_support.get(lb, 0) < min_sup) for lb in cand["labels"] if lb.startswith("R:")):
+                    if any(
+                        (prune_by_rule and label_pid_support.get(lb, 0) < min_sup)
+                        for lb in cand["labels"]
+                        if lb.startswith("R:")
+                    ):
                         continue
                 # 结构限界
                 if len(cand["labels"]) > self.max_nodes:
@@ -2548,21 +3042,26 @@ class GSpanMiner:
 
         # 从初始模式开始扩展
         for labels_t, pobj in patterns.items():
-            expand(list(labels_t), [(i,i+1) for i in range(len(labels_t)-1)], pobj)
+            expand(list(labels_t), [(i, i + 1) for i in range(len(labels_t) - 1)], pobj)
 
         # 收尾：输出组装
         out: List[Dict[str, Any]] = []
         for sig, rec in results.items():
-            out.append({
-                "nodes": rec["nodes"],
-                "labels": rec["labels"],
-                "edges": rec["edges"],
-                "support": len(rec["pids"]),
-                "pids": sorted(list(rec["pids"])),
-                "embeddings": rec["embeddings"],
-            })
+            out.append(
+                {
+                    "nodes": rec["nodes"],
+                    "labels": rec["labels"],
+                    "edges": rec["edges"],
+                    "support": len(rec["pids"]),
+                    "pids": sorted(list(rec["pids"])),
+                    "embeddings": rec["embeddings"],
+                }
+            )
         # 排序：优先节点多、边多、支持高
-        out.sort(key=lambda r: (len(r["labels"]), len(r["edges"]), r["support"]), reverse=True)
+        out.sort(
+            key=lambda r: (len(r["labels"]), len(r["edges"]), r["support"]),
+            reverse=True,
+        )
         self.logger.info(f"rules-only mining done: patterns={len(out)}")
         return out
 
@@ -2588,7 +3087,7 @@ class GSpanMiner:
                 tmp_map.setdefault(lb, set()).add(nd["problem_id"])
             label_pid_support = {lb: len(pids) for lb, pids in tmp_map.items()}
 
-        seeds_by_label: Dict[Tuple[str,str], List[Dict[str, Any]]] = {}
+        seeds_by_label: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         for r1, outs in self._rule_out_rules.items():
             lb1 = self.G.nodes[r1]["label"]
             pid1 = self.G.nodes[r1]["problem_id"]
@@ -2601,15 +3100,26 @@ class GSpanMiner:
                 if prune_by_rule and label_pid_support.get(lb2, 0) < min_sup:
                     continue
                 key = (lb1, lb2)
-                seeds_by_label.setdefault(key, []).append({
-                    "pids": {pid1},
-                    "emb": [{"pid": pid1, "mapping": {0: r1, 1: r2}}],
-                })
+                seeds_by_label.setdefault(key, []).append(
+                    {
+                        "pids": {pid1},
+                        "emb": [{"pid": pid1, "mapping": {0: r1, 1: r2}}],
+                    }
+                )
 
         # 聚合到模式
-        patterns: Dict[Tuple[str,...], Dict[str, Any]] = {}
-        def add_or_update(labels_t: Tuple[str,...], entries: List[Dict[str, Any]]):
-            pobj = patterns.setdefault(labels_t, {"labels": list(labels_t), "edges": [(i,i+1) for i in range(len(labels_t)-1)], "pids": set(), "embeddings": []})
+        patterns: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+
+        def add_or_update(labels_t: Tuple[str, ...], entries: List[Dict[str, Any]]):
+            pobj = patterns.setdefault(
+                labels_t,
+                {
+                    "labels": list(labels_t),
+                    "edges": [(i, i + 1) for i in range(len(labels_t) - 1)],
+                    "pids": set(),
+                    "embeddings": [],
+                },
+            )
             for e in entries:
                 pobj["pids"].update(e["pids"])
                 pobj["embeddings"].extend(e["emb"])
@@ -2618,7 +3128,7 @@ class GSpanMiner:
             add_or_update(tuple(key), entries)
 
         # 过滤最小支持
-        patterns = {k:v for k,v in patterns.items() if len(v["pids"]) >= min_sup}
+        patterns = {k: v for k, v in patterns.items() if len(v["pids"]) >= min_sup}
         return list(patterns.values())
 
     def expand_rules_only_from_seed(
@@ -2636,12 +3146,13 @@ class GSpanMiner:
     ) -> None:
         """从一个 rules-only 种子开始扩展，达到 finalize 条件时 emit 模式对象。"""
         import time as _time
+
         start_time = _time.time()
         self._build_rule_adjacency()
         assert self._rule_out_rules is not None and self._rule_in_rules is not None
 
         min_sup = self._min_sup_abs()
-    # 边数不再单独受限，由 max_nodes 与其他预算控制
+        # 边数不再单独受限，由 max_nodes 与其他预算控制
 
         # 标签支持
         label_pid_support: Dict[str, int] = {}
@@ -2654,16 +3165,20 @@ class GSpanMiner:
                 tmp_map.setdefault(lb, set()).add(nd["problem_id"])
             label_pid_support = {lb: len(pids) for lb, pids in tmp_map.items()}
 
-        def degrees(edges: List[Tuple[int,int]], n: int) -> Tuple[List[int], List[int]]:
-            indeg = [0]*n; outdeg=[0]*n
-            for a,b in edges:
-                outdeg[a]+=1; indeg[b]+=1
+        def degrees(
+            edges: List[Tuple[int, int]], n: int
+        ) -> Tuple[List[int], List[int]]:
+            indeg = [0] * n
+            outdeg = [0] * n
+            for a, b in edges:
+                outdeg[a] += 1
+                indeg[b] += 1
             return indeg, outdeg
 
-        def signature(labels: List[str], edges: List[Tuple[int,int]]):
+        def signature(labels: List[str], edges: List[Tuple[int, int]]):
             return (tuple(labels), tuple(sorted(edges)))
 
-        visited: Set[Tuple[Tuple[str,...], Tuple[Tuple[int,int], ...]]] = set()
+        visited: Set[Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]]] = set()
         expansions = 0
 
         def try_consume_budget() -> bool:
@@ -2677,7 +3192,9 @@ class GSpanMiner:
         def support_ok(pobj: Dict[str, Any]) -> bool:
             return len(pobj.get("pids", set())) >= min_sup
 
-        def finalize(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any]):
+        def finalize(
+            labels: List[str], edges: List[Tuple[int, int]], pobj: Dict[str, Any]
+        ):
             if len(labels) < self.min_rule_nodes or len(edges) < self.min_edges:
                 return
             # 依据“能导出唯一结论”的嵌入过滤支持
@@ -2693,7 +3210,10 @@ class GSpanMiner:
                 consumed: Set[int] = set()
                 for rg in Rset:
                     for f in self.G.out_edges.get(rg, []):
-                        if self.G.nodes[f]["type"] != "fact" or self.G.nodes[f]["problem_id"] != pid:
+                        if (
+                            self.G.nodes[f]["type"] != "fact"
+                            or self.G.nodes[f]["problem_id"] != pid
+                        ):
                             continue
                         produced.add(f)
                         for r2 in self.G.out_edges.get(f, []):
@@ -2717,12 +3237,20 @@ class GSpanMiner:
                 }
                 emit(rec)
 
-        def expand(labels: List[str], edges: List[Tuple[int,int]], pobj: Dict[str, Any]):
+        def expand(
+            labels: List[str], edges: List[Tuple[int, int]], pobj: Dict[str, Any]
+        ):
             nonlocal expansions
-            if time_budget_seconds is not None and (_time.time() - start_time) >= time_budget_seconds:
+            if (
+                time_budget_seconds is not None
+                and (_time.time() - start_time) >= time_budget_seconds
+            ):
                 finalize(labels, edges, pobj)
                 return
-            if debug_limit_expansions is not None and expansions >= debug_limit_expansions:
+            if (
+                debug_limit_expansions is not None
+                and expansions >= debug_limit_expansions
+            ):
                 finalize(labels, edges, pobj)
                 return
             if len(labels) >= self.max_nodes:
@@ -2738,10 +3266,14 @@ class GSpanMiner:
                 return
             expansions += 1
             if debug_log_every and expansions % max(1, debug_log_every) == 0:
-                self.logger.info(f"rules-only expand step={expansions}, cur_nodes={len(labels)}, cur_edges={len(edges)}")
+                self.logger.info(
+                    f"rules-only expand step={expansions}, cur_nodes={len(labels)}, cur_edges={len(edges)}"
+                )
 
             n = len(labels)
-            candidates: Dict[Tuple[Tuple[str,...], Tuple[Tuple[int,int],...]], Dict[str, Any]] = {}
+            candidates: Dict[
+                Tuple[Tuple[str, ...], Tuple[Tuple[int, int], ...]], Dict[str, Any]
+            ] = {}
             for anchor_idx in range(n):
                 bucket_out: Dict[str, List[Dict[str, Any]]] = {}
                 bucket_in: Dict[str, List[Dict[str, Any]]] = {}
@@ -2756,34 +3288,50 @@ class GSpanMiner:
                         if w in emb["mapping"].values():
                             continue
                         new_label = self.G.nodes[w]["label"]
-                        mapping2 = dict(emb["mapping"]) ; mapping2[n] = w
-                        bucket_out.setdefault(new_label, []).append({"pid": pid, "mapping": mapping2})
+                        mapping2 = dict(emb["mapping"])
+                        mapping2[n] = w
+                        bucket_out.setdefault(new_label, []).append(
+                            {"pid": pid, "mapping": mapping2}
+                        )
                     for u in self._rule_in_rules.get(gid_anchor, []):
                         if self.G.nodes[u]["problem_id"] != pid:
                             continue
                         if u in emb["mapping"].values():
                             continue
                         new_label = self.G.nodes[u]["label"]
-                        mapping2 = dict(emb["mapping"]) ; mapping2[n] = u
-                        bucket_in.setdefault(new_label, []).append({"pid": pid, "mapping": mapping2})
+                        mapping2 = dict(emb["mapping"])
+                        mapping2[n] = u
+                        bucket_in.setdefault(new_label, []).append(
+                            {"pid": pid, "mapping": mapping2}
+                        )
                 for new_label, emb_list in bucket_out.items():
                     new_labels = labels + [new_label]
                     new_edges = edges + [(anchor_idx, n)]
                     sig2 = signature(new_labels, new_edges)
-                    cand = candidates.setdefault(sig2, {"labels": new_labels, "edges": new_edges, "embeddings": []})
+                    cand = candidates.setdefault(
+                        sig2,
+                        {"labels": new_labels, "edges": new_edges, "embeddings": []},
+                    )
                     cand["embeddings"].extend(emb_list)
                 for new_label, emb_list in bucket_in.items():
                     new_labels = labels + [new_label]
                     new_edges = edges + [(n, anchor_idx)]
                     sig2 = signature(new_labels, new_edges)
-                    cand = candidates.setdefault(sig2, {"labels": new_labels, "edges": new_edges, "embeddings": []})
+                    cand = candidates.setdefault(
+                        sig2,
+                        {"labels": new_labels, "edges": new_edges, "embeddings": []},
+                    )
                     cand["embeddings"].extend(emb_list)
 
-            for (_sig, cand) in candidates.items():
+            for _sig, cand in candidates.items():
                 pids = {e["pid"] for e in cand["embeddings"]}
                 cand_pobj = {"pids": pids, "embeddings": cand["embeddings"]}
                 if prune_low_support_labels or prune_by_rule:
-                    if any((prune_by_rule and label_pid_support.get(lb, 0) < min_sup) for lb in cand["labels"] if lb.startswith("R:")):
+                    if any(
+                        (prune_by_rule and label_pid_support.get(lb, 0) < min_sup)
+                        for lb in cand["labels"]
+                        if lb.startswith("R:")
+                    ):
                         continue
                 if len(cand["labels"]) > self.max_nodes:
                     finalize(cand["labels"], cand["edges"], cand_pobj)
@@ -2795,7 +3343,9 @@ class GSpanMiner:
 
         expand(list(seed.get("labels", [])), list(seed.get("edges", [])), seed)
 
-    def pattern_to_schema_rules_only(self, pattern: Dict[str, Any]) -> Tuple[str, Dict[str, str]]:
+    def pattern_to_schema_rules_only(
+        self, pattern: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, str]]:
         """将规则子图模式映射回 G，恢复‘外部前提 => 唯一结论’的 schema。取第一条代表嵌入。"""
         if not pattern.get("embeddings"):
             return "", {}
@@ -2812,12 +3362,18 @@ class GSpanMiner:
         for rg in Rset:
             # 输入前提
             for fu in self.G.in_edges.get(rg, []):
-                if self.G.nodes[fu]["type"] != "fact" or self.G.nodes[fu]["problem_id"] != pid:
+                if (
+                    self.G.nodes[fu]["type"] != "fact"
+                    or self.G.nodes[fu]["problem_id"] != pid
+                ):
                     continue
                 premises_ext.add(fu)
             # 输出事实
             for fv in self.G.out_edges.get(rg, []):
-                if self.G.nodes[fv]["type"] != "fact" or self.G.nodes[fv]["problem_id"] != pid:
+                if (
+                    self.G.nodes[fv]["type"] != "fact"
+                    or self.G.nodes[fv]["problem_id"] != pid
+                ):
                     continue
                 produced.add(fv)
                 for r2 in self.G.out_edges.get(fv, []):
@@ -2833,11 +3389,14 @@ class GSpanMiner:
         # 变量化与渲染
         def vmap_builder():
             return {}
-        var_map: Dict[str,str] = vmap_builder()
+
+        var_map: Dict[str, str] = vmap_builder()
+
         def vget(x: str) -> str:
             if x not in var_map:
-                var_map[x] = f"X{len(var_map)+1}"
+                var_map[x] = f"X{len(var_map) + 1}"
             return var_map[x]
+
         def fact_term_from_gid(fid: int) -> str:
             orig = self.pg.nodes[self.G.nodes[fid]["orig_node_id"]]
             pred = orig["label"]
@@ -2850,33 +3409,41 @@ class GSpanMiner:
 
         premise_terms = [fact_term_from_gid(fid) for fid in sorted(list(premises_ext))]
         concl_term = fact_term_from_gid(concl_gid)
-        expr = (" ∧ ".join(premise_terms) + (" => " if premise_terms else "=> ") + concl_term)
+        expr = (
+            " ∧ ".join(premise_terms)
+            + (" => " if premise_terms else "=> ")
+            + concl_term
+        )
         return expr, var_map
 
-    def pattern_to_schema_branched(self, pattern: Dict[str, Any]) -> Tuple[str, Dict[str, str]]:
+    def pattern_to_schema_branched(
+        self, pattern: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, str]]:
         """
         将分叉子图模式转换为“合取 => 单一结论”表达：
         - premise = 所有 in-degree=0 的 fact 的合取
         - conclusion = 唯一 out-degree=0 的 fact（若不唯一则返回空表达）
         """
         labels: List[str] = pattern.get("labels", [])
-        edges: List[Tuple[int,int]] = pattern.get("edges", [])
+        edges: List[Tuple[int, int]] = pattern.get("edges", [])
         embs = pattern.get("embeddings", [])
         if not labels or not edges or not embs:
             return "", {}
         emb = embs[0]
         mapping = emb.get("mapping", {})
 
-        indeg = [0]*len(labels)
-        outdeg = [0]*len(labels)
-        for a,b in edges:
-            outdeg[a]+=1; indeg[b]+=1
+        indeg = [0] * len(labels)
+        outdeg = [0] * len(labels)
+        for a, b in edges:
+            outdeg[a] += 1
+            indeg[b] += 1
 
         # 变量化
         var_map: Dict[str, str] = {}
+
         def vget(x: str) -> str:
             if x not in var_map:
-                var_map[x] = f"X{len(var_map)+1}"
+                var_map[x] = f"X{len(var_map) + 1}"
             return var_map[x]
 
         def fact_term(idx: int) -> str:
@@ -2893,10 +3460,16 @@ class GSpanMiner:
                 return f"{pred}(" + (head + "," if head else "") + tail + ")"
             return f"{pred}(" + ",".join(vget(a) for a in args) + ")"
 
-        premises = [fact_term(i) for i,lb in enumerate(labels) if lb.startswith("F:") and indeg[i]==0]
+        premises = [
+            fact_term(i)
+            for i, lb in enumerate(labels)
+            if lb.startswith("F:") and indeg[i] == 0
+        ]
         premises = [p for p in premises if p]
         # 只允许唯一结论
-        sink_idxs = [i for i,lb in enumerate(labels) if lb.startswith("F:") and outdeg[i]==0]
+        sink_idxs = [
+            i for i, lb in enumerate(labels) if lb.startswith("F:") and outdeg[i] == 0
+        ]
         if len(sink_idxs) != 1:
             return "", {}
         concl = fact_term(sink_idxs[0])
@@ -2907,4 +3480,3 @@ class GSpanMiner:
 
 
 __all__ = ["ProofGraph", "GSpanMiner", "MergedGraph"]
- 

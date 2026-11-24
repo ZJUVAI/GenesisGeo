@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from typing import Sequence
-from newclid.discovery.data_models import PredicateInstance
 
 
 # ---------------------------------------------------------------------------
 # 规则文本拆分
 # ---------------------------------------------------------------------------
+
 
 def split_rule_text(rule_text: str) -> tuple[list[str], str]:
     """将 rule_text 拆分为 (premise_strings, conclusion_string)。
@@ -45,7 +45,9 @@ def parse_predicate(clause_str: str) -> tuple[str, tuple[str, ...]]:
     return parts[0], tuple(parts[1:])
 
 
-def parse_rule_text(rule_text: str) -> tuple[list[tuple[str, tuple[str, ...]]], tuple[str, tuple[str, ...]]]:
+def parse_rule_text(
+    rule_text: str,
+) -> tuple[list[tuple[str, tuple[str, ...]]], tuple[str, tuple[str, ...]]]:
     """完整解析规则文本为结构化数据。
 
     Returns
@@ -64,6 +66,7 @@ def parse_rule_text(rule_text: str) -> tuple[list[tuple[str, tuple[str, ...]]], 
 # 点名收集与重命名
 # ---------------------------------------------------------------------------
 
+
 def collect_points_in_order(
     premises: list[tuple[str, tuple[str, ...]]],
     conclusion: tuple[str, tuple[str, ...]],
@@ -79,12 +82,14 @@ def collect_points_in_order(
 
 def build_rename_map(points_in_order: list[str]) -> dict[str, str]:
     """生成 original → a, b, c, ... 的重命名映射。"""
+
     def to_name(i: int) -> str:
         s, n = "", i + 1
         while n > 0:
             n, r = divmod(n - 1, 26)
             s = chr(ord("a") + r) + s
         return s
+
     return {p: to_name(i) for i, p in enumerate(points_in_order)}
 
 
@@ -110,6 +115,7 @@ def rename_by_first_appearance(rule_text: str) -> str:
 # 规则文本重建
 # ---------------------------------------------------------------------------
 
+
 def build_rule_text(
     premises: Sequence[tuple[str, tuple[str, ...]]],
     conclusion: tuple[str, tuple[str, ...]],
@@ -121,6 +127,7 @@ def build_rule_text(
     str
         如 "cong a b c d, perp a b b c => para a c d b"
     """
+
     def fmt(pred: tuple[str, tuple[str, ...]]) -> str:
         name, args = pred
         return " ".join([name, *args])
@@ -133,6 +140,7 @@ def build_rule_text(
 # ---------------------------------------------------------------------------
 # CSolver pipe 格式转换
 # ---------------------------------------------------------------------------
+
 
 def to_pipe_format(rule_id: str, rule_text: str, guards: str = "") -> str:
     """将规则转为 CSolver 接受的 pipe 自定义规则格式。
@@ -165,6 +173,7 @@ def to_pipe_format(rule_id: str, rule_text: str, guards: str = "") -> str:
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
+
 
 def count_premises(rule_text: str) -> int:
     """计算规则中 premises 的数量。"""
@@ -207,14 +216,19 @@ if __name__ == "__main__":
 
     print("=== rename_by_first_appearance ===")
     rename_cases = [
-        ("cong x y z w, perp x y y z => para x z w y",
-         "cong a b c d, perp a b b c => para a c d b"),
-        ("coll p q r => para p q p r",
-         "coll a b c => para a b a c"),
-        ("eqangle b d b e c d c e => para b c d e",
-         "eqangle a b a c d b d c => para a d b c"),
-        ("cong a b c d, perp a b b c => para a c d b",
-         "cong a b c d, perp a b b c => para a c d b"),
+        (
+            "cong x y z w, perp x y y z => para x z w y",
+            "cong a b c d, perp a b b c => para a c d b",
+        ),
+        ("coll p q r => para p q p r", "coll a b c => para a b a c"),
+        (
+            "eqangle b d b e c d c e => para b c d e",
+            "eqangle a b a c d b d c => para a d b c",
+        ),
+        (
+            "cong a b c d, perp a b b c => para a c d b",
+            "cong a b c d, perp a b b c => para a c d b",
+        ),
     ]
     for src, expected in rename_cases:
         got = rename_by_first_appearance(src)

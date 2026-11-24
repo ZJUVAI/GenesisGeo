@@ -230,6 +230,7 @@ class LinearProblemPipeline:
             except Exception as e:
                 logging.error(f"Task failed (seed={seed}): {e}")
                 import traceback
+
                 traceback.print_exc()
 
             if task_success:
@@ -261,8 +262,7 @@ class LinearProblemPipeline:
                         summary["n_samples_raw"] - summary["n_samples"]
                     )
                     summary["goals"] = [
-                        re.search(r"\?\s*(\w+)", d["fl_problem"]).group(1)
-                        for d in data
+                        re.search(r"\?\s*(\w+)", d["fl_problem"]).group(1) for d in data
                     ]
                     summary["first_predicate"] = [
                         get_first_predicate(d["fl_problem"]) for d in data
@@ -278,20 +278,15 @@ class LinearProblemPipeline:
                         now = time.time()
                         elapsed_time = now - start_time
                         instant_elapsed = max(now - last_logged_time, 1e-6)
-                        instant_written = (
-                            self.written_count - last_logged_written
-                        )
+                        instant_written = self.written_count - last_logged_written
                         instant_speed = instant_written / instant_elapsed
                         alpha = 1 - math.exp(-instant_elapsed / 500)
                         smoothed_speed = (
                             instant_speed
                             if smoothed_speed is None
-                            else alpha * instant_speed
-                            + (1 - alpha) * smoothed_speed
+                            else alpha * instant_speed + (1 - alpha) * smoothed_speed
                         )
-                        remaining = max(
-                            0, self.n_samples - self.written_count
-                        )
+                        remaining = max(0, self.n_samples - self.written_count)
                         eta_seconds = remaining / max(smoothed_speed, 1e-6)
                         logging.info(
                             f"{millify(self.written_count)}/{millify(self.n_samples)} "
@@ -337,7 +332,9 @@ def positive_int(value: str) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Create problem fl - nl dataset (linear)")
+    parser = argparse.ArgumentParser(
+        description="Create problem fl - nl dataset (linear)"
+    )
     # General parameters
     parser.add_argument(
         "--log_level",

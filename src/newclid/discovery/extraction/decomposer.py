@@ -94,7 +94,8 @@ def decompose_by_aux(graph: "SingleProofGraph") -> list["SingleProofGraph"]:
         # 仅保留含 aux 节点的子图
         has_aux = any(
             _is_aux(graph.facts[fid], aux_set)
-            for fid in inc_facts if fid in graph.facts
+            for fid in inc_facts
+            if fid in graph.facts
         )
         if not has_aux:
             continue

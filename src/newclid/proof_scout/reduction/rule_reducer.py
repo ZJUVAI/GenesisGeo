@@ -11,6 +11,7 @@ Implements a greedy algorithm to eliminate redundant rules:
 5. Eliminate subsumed rules
 6. Return the minimal basis set
 """
+
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import List, Dict, Any, Optional, Tuple
@@ -25,13 +26,14 @@ from newclid.proof_scout.reduction.subsumption_tester import SubsumptionTester
 @dataclass
 class RuleWithSource:
     """Rule with its source problem data."""
-    rule_id: str                    # e.g., "r000042"
-    rule_text: str                  # "premise1, premise2 => conclusion"
+
+    rule_id: str  # e.g., "r000042"
+    rule_text: str  # "premise1, premise2 => conclusion"
     points: List[Tuple[str, float, float]]  # [(name, x, y), ...]
-    premises: List[Tuple[str, List[str]]]   # [(predicate, [args]), ...]
-    goal: Tuple[str, List[str]]             # (predicate, [args])
-    llm_output_renamed: str = ""    # Proof steps from original problem
-    seed: Optional[int] = None      # Construction seed for group reduction
+    premises: List[Tuple[str, List[str]]]  # [(predicate, [args]), ...]
+    goal: Tuple[str, List[str]]  # (predicate, [args])
+    llm_output_renamed: str = ""  # Proof steps from original problem
+    seed: Optional[int] = None  # Construction seed for group reduction
 
     # Parsed structure (computed lazily)
     _premises_parsed: Optional[List[Tuple[str, ...]]] = None
@@ -43,24 +45,24 @@ class RuleWithSource:
         if self._premises_parsed is not None:
             return
 
-        if '=>' not in self.rule_text:
+        if "=>" not in self.rule_text:
             self._premises_parsed = []
             self.conclusions = []
             return
 
-        premise_part, conclusion_part = self.rule_text.split('=>', 1)
+        premise_part, conclusion_part = self.rule_text.split("=>", 1)
 
         # Parse premises
         self._premises_parsed = []
-        for condition in premise_part.split(','):
-            parts = re.findall(r'\w+', condition)
+        for condition in premise_part.split(","):
+            parts = re.findall(r"\w+", condition)
             if parts:
                 self._premises_parsed.append(tuple(parts))
 
         # Parse conclusions
         self.conclusions = []
-        for condition in conclusion_part.split(','):
-            parts = re.findall(r'\w+', condition)
+        for condition in conclusion_part.split(","):
+            parts = re.findall(r"\w+", condition)
             if parts:
                 self.conclusions.append(tuple(parts))
 
@@ -118,7 +120,10 @@ class RuleReducer:
 
         self.scorer = GeneralityScorer()
         if solver_type == "csolver":
-            from newclid.proof_scout.reduction.subsumption_tester import SubsumptionTesterCSolver
+            from newclid.proof_scout.reduction.subsumption_tester import (
+                SubsumptionTesterCSolver,
+            )
+
             self.tester = SubsumptionTesterCSolver(
                 timeout=timeout,
                 seed=seed,
@@ -157,21 +162,31 @@ class RuleReducer:
         if self.max_premises is not None:
             kept = []
             for rule in rules:
-                if '=>' in rule.rule_text:
-                    n_prem = len([c for c in rule.rule_text.split('=>')[0].split(',') if c.strip()])
+                if "=>" in rule.rule_text:
+                    n_prem = len(
+                        [
+                            c
+                            for c in rule.rule_text.split("=>")[0].split(",")
+                            if c.strip()
+                        ]
+                    )
                 else:
                     n_prem = 0
                 if n_prem <= self.max_premises:
                     kept.append(rule)
                 else:
-                    skipped_by_premises.append({
-                        "rule_id": rule.rule_id,
-                        "rule_text": rule.rule_text,
-                        "n_premises": n_prem,
-                        "reason": f"Exceeds max_premises={self.max_premises} (has {n_prem})",
-                    })
+                    skipped_by_premises.append(
+                        {
+                            "rule_id": rule.rule_id,
+                            "rule_text": rule.rule_text,
+                            "n_premises": n_prem,
+                            "reason": f"Exceeds max_premises={self.max_premises} (has {n_prem})",
+                        }
+                    )
             if self.verbose:
-                print(f"  Pre-filter: {len(skipped_by_premises)} rules skipped (premises > {self.max_premises})")
+                print(
+                    f"  Pre-filter: {len(skipped_by_premises)} rules skipped (premises > {self.max_premises})"
+                )
                 print(f"  Remaining: {len(kept)} rules")
             rules = kept
 
@@ -206,8 +221,12 @@ class RuleReducer:
 
         if self.verbose:
             print(f"Step 2: Sorted {len(sorted_rules)} rules by generality")
-            print(f"  Most general: {sorted_rules[0].rule_text[:60]}... (score: {sorted_rules[0].generality_score})")
-            print(f"  Least general: {sorted_rules[-1].rule_text[:60]}... (score: {sorted_rules[-1].generality_score})")
+            print(
+                f"  Most general: {sorted_rules[0].rule_text[:60]}... (score: {sorted_rules[0].generality_score})"
+            )
+            print(
+                f"  Least general: {sorted_rules[-1].rule_text[:60]}... (score: {sorted_rules[-1].generality_score})"
+            )
 
         # Step 3: Greedy elimination
         if self.verbose:
@@ -224,16 +243,21 @@ class RuleReducer:
         n_tests = 0
 
         # Get batch_size from instance or use default
-        batch_size = getattr(self, 'batch_size', 10)
+        batch_size = getattr(self, "batch_size", 10)
 
         if self.use_ray and self.n_workers > 1:
             # Ray pipeline parallel: submit multiple rules concurrently
             # Use ray.wait() to process results as they complete without blocking
             import ray
-            from newclid.proof_scout.reduction.ray_workers import test_subsumption_batch_worker_ray, serialize_rule
+            from newclid.proof_scout.reduction.ray_workers import (
+                test_subsumption_batch_worker_ray,
+                serialize_rule,
+            )
 
             if self.verbose:
-                print(f"  Using Ray with {self.n_workers} workers (pipeline parallel, progress every {batch_size} rules)")
+                print(
+                    f"  Using Ray with {self.n_workers} workers (pipeline parallel, progress every {batch_size} rules)"
+                )
 
             # Pipeline control: limit in-flight tasks to n_workers * 2
             max_in_flight = self.n_workers * 2
@@ -278,7 +302,9 @@ class RuleReducer:
                     done_ref = done[0]
 
                     # Find and process the completed task
-                    for idx, (rule_idx, rule_obj, targets, f) in enumerate(pending_futures):
+                    for idx, (rule_idx, rule_obj, targets, f) in enumerate(
+                        pending_futures
+                    ):
                         if f == done_ref:
                             pending_futures.pop(idx)
                             eliminated_ids = ray.get(done_ref)
@@ -290,22 +316,28 @@ class RuleReducer:
                                 for j, rule_j in enumerate(sorted_rules):
                                     if rule_j.rule_id == rule_id and active_flags[j]:
                                         active_flags[j] = False
-                                        eliminated_rules.append({
-                                            "rule_id": rule_j.rule_id,
-                                            "rule_text": rule_j.rule_text,
-                                            "subsumed_by": rule_obj.rule_id,
-                                            "reason": f"Subsumed by {rule_obj.rule_id}",
-                                        })
+                                        eliminated_rules.append(
+                                            {
+                                                "rule_id": rule_j.rule_id,
+                                                "rule_text": rule_j.rule_text,
+                                                "subsumed_by": rule_obj.rule_id,
+                                                "reason": f"Subsumed by {rule_obj.rule_id}",
+                                            }
+                                        )
 
                                         if self.verbose:
-                                            print(f"    Eliminated {rule_j.rule_id} (subsumed by {rule_obj.rule_id})")
+                                            print(
+                                                f"    Eliminated {rule_j.rule_id} (subsumed by {rule_obj.rule_id})"
+                                            )
                                         break
 
                             # Progress reporting
                             if self.verbose and processed_count % batch_size == 0:
                                 n_active = sum(active_flags)
-                                print(f"  Progress: {processed_count}/{len(sorted_rules)} rules processed, "
-                                      f"{n_active} active, {n_tests} tests, {len(pending_futures)} in-flight")
+                                print(
+                                    f"  Progress: {processed_count}/{len(sorted_rules)} rules processed, "
+                                    f"{n_active} active, {n_tests} tests, {len(pending_futures)} in-flight"
+                                )
                             break
 
             # Wait for remaining tasks
@@ -325,21 +357,27 @@ class RuleReducer:
                             for j, rule_j in enumerate(sorted_rules):
                                 if rule_j.rule_id == rule_id and active_flags[j]:
                                     active_flags[j] = False
-                                    eliminated_rules.append({
-                                        "rule_id": rule_j.rule_id,
-                                        "rule_text": rule_j.rule_text,
-                                        "subsumed_by": rule_obj.rule_id,
-                                        "reason": f"Subsumed by {rule_obj.rule_id}",
-                                    })
+                                    eliminated_rules.append(
+                                        {
+                                            "rule_id": rule_j.rule_id,
+                                            "rule_text": rule_j.rule_text,
+                                            "subsumed_by": rule_obj.rule_id,
+                                            "reason": f"Subsumed by {rule_obj.rule_id}",
+                                        }
+                                    )
 
                                     if self.verbose:
-                                        print(f"    Eliminated {rule_j.rule_id} (subsumed by {rule_obj.rule_id})")
+                                        print(
+                                            f"    Eliminated {rule_j.rule_id} (subsumed by {rule_obj.rule_id})"
+                                        )
                                     break
 
                         if self.verbose and processed_count % batch_size == 0:
                             n_active = sum(active_flags)
-                            print(f"  Progress: {processed_count}/{len(sorted_rules)} rules processed, "
-                                  f"{n_active} active, {n_tests} tests")
+                            print(
+                                f"  Progress: {processed_count}/{len(sorted_rules)} rules processed, "
+                                f"{n_active} active, {n_tests} tests"
+                            )
                         break
 
         elif self.n_workers > 1:
@@ -349,7 +387,9 @@ class RuleReducer:
             from concurrent.futures import ProcessPoolExecutor
 
             if self.verbose:
-                print(f"  Using {self.n_workers} workers (serial state updates, progress every {batch_size} rules)")
+                print(
+                    f"  Using {self.n_workers} workers (serial state updates, progress every {batch_size} rules)"
+                )
 
             with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
                 for i, rule_i in enumerate(sorted_rules):
@@ -359,7 +399,9 @@ class RuleReducer:
                     # Progress reporting
                     if self.verbose and (i + 1) % batch_size == 0:
                         n_active = sum(active_flags)
-                        print(f"  Progress: {i+1}/{len(sorted_rules)} rules processed, {n_active} active, {n_tests} tests")
+                        print(
+                            f"  Progress: {i + 1}/{len(sorted_rules)} rules processed, {n_active} active, {n_tests} tests"
+                        )
 
                     # Build target rules based on CURRENT active_flags (not a stale snapshot)
                     target_rules = []
@@ -392,19 +434,25 @@ class RuleReducer:
                             for j, rule_j in enumerate(sorted_rules):
                                 if rule_j.rule_id == rule_id and active_flags[j]:
                                     active_flags[j] = False
-                                    eliminated_rules.append({
-                                        "rule_id": rule_j.rule_id,
-                                        "rule_text": rule_j.rule_text,
-                                        "subsumed_by": rule_i.rule_id,
-                                        "reason": f"Subsumed by {rule_i.rule_id}",
-                                    })
+                                    eliminated_rules.append(
+                                        {
+                                            "rule_id": rule_j.rule_id,
+                                            "rule_text": rule_j.rule_text,
+                                            "subsumed_by": rule_i.rule_id,
+                                            "reason": f"Subsumed by {rule_i.rule_id}",
+                                        }
+                                    )
 
                                     if self.verbose:
-                                        print(f"    Eliminated {rule_j.rule_id} (subsumed by {rule_i.rule_id})")
+                                        print(
+                                            f"    Eliminated {rule_j.rule_id} (subsumed by {rule_i.rule_id})"
+                                        )
                                     break
                     except Exception as e:
                         if self.verbose:
-                            print(f"  Warning: Error processing rule {rule_i.rule_id}: {e}")
+                            print(
+                                f"  Warning: Error processing rule {rule_i.rule_id}: {e}"
+                            )
 
         else:
             # Sequential execution (original code)
@@ -414,7 +462,9 @@ class RuleReducer:
 
                 if self.verbose and (i + 1) % 10 == 0:
                     n_active = sum(active_flags)
-                    print(f"  Progress: {i+1}/{len(sorted_rules)} rules processed, {n_active} active, {n_tests} tests")
+                    print(
+                        f"  Progress: {i + 1}/{len(sorted_rules)} rules processed, {n_active} active, {n_tests} tests"
+                    )
 
                 # Test subsumption: rule_i vs all other rules
                 # IMPORTANT: Check all j (not just j > i), because generality score is heuristic
@@ -428,21 +478,25 @@ class RuleReducer:
                     n_tests += 1
                     if self.tester.test_subsumption(rule_i, rule_j, debug=self.debug):
                         active_flags[j] = False
-                        eliminated_rules.append({
-                            "rule_id": rule_j.rule_id,
-                            "rule_text": rule_j.rule_text,
-                            "subsumed_by": rule_i.rule_id,
-                            "reason": f"Subsumed by {rule_i.rule_id}",
-                        })
+                        eliminated_rules.append(
+                            {
+                                "rule_id": rule_j.rule_id,
+                                "rule_text": rule_j.rule_text,
+                                "subsumed_by": rule_i.rule_id,
+                                "reason": f"Subsumed by {rule_i.rule_id}",
+                            }
+                        )
 
                         if self.verbose:
-                            print(f"    Eliminated {rule_j.rule_id} (subsumed by {rule_i.rule_id})")
+                            print(
+                                f"    Eliminated {rule_j.rule_id} (subsumed by {rule_i.rule_id})"
+                            )
 
         # Collect basis rules
         basis_rules = [r for i, r in enumerate(sorted_rules) if active_flags[i]]
 
         if self.verbose:
-            print(f"\nReduction complete!")
+            print("\nReduction complete!")
             print(f"  Original rules: {original_count}")
             print(f"  Skipped (premises): {len(skipped_by_premises)}")
             print(f"  Basis rules: {len(basis_rules)}")
@@ -465,7 +519,9 @@ class RuleReducer:
             },
         }
 
-    def reduce_by_seed(self, rules: List[RuleWithSource], use_ray: bool = False) -> Dict[str, Any]:
+    def reduce_by_seed(
+        self, rules: List[RuleWithSource], use_ray: bool = False
+    ) -> Dict[str, Any]:
         """Seed-grouped reduction: reduce within each seed group independently.
 
         1. Group rules by seed
@@ -495,13 +551,15 @@ class RuleReducer:
                 no_seed_rules.append(r)
 
         if self.verbose:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             mode_str = "Ray parallel" if use_ray else "sequential"
-            print(f"[reduce_by_seed] {len(rules)} rules, "
-                  f"{len(seed_groups)} seed groups, "
-                  f"{len(no_seed_rules)} rules without seed "
-                  f"(mode: {mode_str})")
-            print(f"{'='*60}")
+            print(
+                f"[reduce_by_seed] {len(rules)} rules, "
+                f"{len(seed_groups)} seed groups, "
+                f"{len(no_seed_rules)} rules without seed "
+                f"(mode: {mode_str})"
+            )
+            print(f"{'=' * 60}")
 
         # Group reduction
         group_survivors: List[RuleWithSource] = []
@@ -514,7 +572,9 @@ class RuleReducer:
         if use_ray:
             # Ray parallel: all seed groups processed concurrently
             import ray
-            from newclid.proof_scout.reduction.ray_workers import reduce_seed_group_worker
+            from newclid.proof_scout.reduction.ray_workers import (
+                reduce_seed_group_worker,
+            )
 
             if self.verbose:
                 print(f"  Submitting {len(seed_groups)} seed groups as Ray tasks...")
@@ -524,7 +584,9 @@ class RuleReducer:
             seed_vals = []
             for seed_val, group_rules in sorted(seed_groups.items()):
                 if self.verbose:
-                    print(f"  Submitting seed group {seed_val}: {len(group_rules)} rules")
+                    print(
+                        f"  Submitting seed group {seed_val}: {len(group_rules)} rules"
+                    )
                 future = reduce_seed_group_worker.remote(
                     seed_val,
                     group_rules,
@@ -565,17 +627,23 @@ class RuleReducer:
                 all_skipped.extend(result["skipped_by_premises"])
                 total_group_eliminated += result["stats"]["eliminated_count"]
                 total_group_skipped += result["stats"]["skipped_by_premises_count"]
-                group_stats.append({
-                    "seed": seed_val,
-                    "input": result["stats"]["original_count"],
-                    "basis": result["stats"]["basis_count"],
-                    "eliminated": result["stats"]["eliminated_count"],
-                    "skipped_premises": result["stats"]["skipped_by_premises_count"],
-                })
+                group_stats.append(
+                    {
+                        "seed": seed_val,
+                        "input": result["stats"]["original_count"],
+                        "basis": result["stats"]["basis_count"],
+                        "eliminated": result["stats"]["eliminated_count"],
+                        "skipped_premises": result["stats"][
+                            "skipped_by_premises_count"
+                        ],
+                    }
+                )
 
                 if self.verbose:
-                    print(f"  [{completed}/{len(seed_vals)}] Seed group {seed_val}: "
-                          f"{result['stats']['original_count']} → {result['stats']['basis_count']} rules")
+                    print(
+                        f"  [{completed}/{len(seed_vals)}] Seed group {seed_val}: "
+                        f"{result['stats']['original_count']} → {result['stats']['basis_count']} rules"
+                    )
 
         else:
             # Sequential: original behavior
@@ -589,24 +657,30 @@ class RuleReducer:
                 all_skipped.extend(result["skipped_by_premises"])
                 total_group_eliminated += result["stats"]["eliminated_count"]
                 total_group_skipped += result["stats"]["skipped_by_premises_count"]
-                group_stats.append({
-                    "seed": seed_val,
-                    "input": result["stats"]["original_count"],
-                    "basis": result["stats"]["basis_count"],
-                    "eliminated": result["stats"]["eliminated_count"],
-                    "skipped_premises": result["stats"]["skipped_by_premises_count"],
-                })
+                group_stats.append(
+                    {
+                        "seed": seed_val,
+                        "input": result["stats"]["original_count"],
+                        "basis": result["stats"]["basis_count"],
+                        "eliminated": result["stats"]["eliminated_count"],
+                        "skipped_premises": result["stats"][
+                            "skipped_by_premises_count"
+                        ],
+                    }
+                )
 
         # Add no-seed rules directly to survivors
         group_survivors.extend(no_seed_rules)
 
         if self.verbose:
-            print(f"\n{'='*60}")
-            print(f"[reduce_by_seed] Done: "
-                  f"{len(rules)} → {len(group_survivors)} survivors "
-                  f"(eliminated {total_group_eliminated}, "
-                  f"skipped {total_group_skipped})")
-            print(f"{'='*60}")
+            print(f"\n{'=' * 60}")
+            print(
+                f"[reduce_by_seed] Done: "
+                f"{len(rules)} → {len(group_survivors)} survivors "
+                f"(eliminated {total_group_eliminated}, "
+                f"skipped {total_group_skipped})"
+            )
+            print(f"{'=' * 60}")
 
         return {
             "basis_rules": group_survivors,
@@ -624,7 +698,9 @@ class RuleReducer:
         }
 
 
-def _parse_llm_input(llm_input: str) -> Tuple[List[Tuple[str, List[str]]], Tuple[str, List[str]]]:
+def _parse_llm_input(
+    llm_input: str,
+) -> Tuple[List[Tuple[str, List[str]]], Tuple[str, List[str]]]:
     """Parse llm_input_renamed format into premises and goal.
 
     Format: <problem> a : ; b : ; c : perp a b a c [000] ; ... ? goal </problem>
@@ -642,10 +718,10 @@ def _parse_llm_input(llm_input: str) -> Tuple[List[Tuple[str, List[str]]], Tuple
         text = text[:-10].strip()
 
     # Split by '?' to separate premises from goal
-    if '?' not in text:
+    if "?" not in text:
         raise ValueError(f"No goal marker '?' found in llm_input: {text}")
 
-    premise_part, goal_part = text.split('?', 1)
+    premise_part, goal_part = text.split("?", 1)
 
     # Parse goal (single predicate)
     goal_tokens = goal_part.strip().split()
@@ -657,26 +733,26 @@ def _parse_llm_input(llm_input: str) -> Tuple[List[Tuple[str, List[str]]], Tuple
 
     # Parse premises
     premises = []
-    clauses = premise_part.split(';')
+    clauses = premise_part.split(";")
 
     for clause in clauses:
         clause = clause.strip()
-        if not clause or ':' not in clause:
+        if not clause or ":" not in clause:
             continue
 
         # Split by ':' to get point declaration and predicates
-        _, pred_part = clause.split(':', 1)
+        _, pred_part = clause.split(":", 1)
         pred_part = pred_part.strip()
 
         if not pred_part:
             continue
 
         # Remove [NNN] tags
-        pred_part = re.sub(r'\[\d+\]', '', pred_part).strip()
+        pred_part = re.sub(r"\[\d+\]", "", pred_part).strip()
 
         # Split by predicate names (known predicates)
         # Common predicates: cong, para, perp, coll, cyclic, eqangle, eqratio, midp, etc.
-        predicate_pattern = r'\b(cong|para|perp|coll|cyclic|eqangle|eqratio|midp|eqpoint|sameside|ncoll|on_line|on_circle|on_pline|on_tline|square|rect|iso_triangle|right_triangle|equilateral|parallelogram|trapezoid)\b'
+        predicate_pattern = r"\b(cong|para|perp|coll|cyclic|eqangle|eqratio|midp|eqpoint|sameside|ncoll|on_line|on_circle|on_pline|on_tline|square|rect|iso_triangle|right_triangle|equilateral|parallelogram|trapezoid)\b"
 
         # Find all predicates and their positions
         matches = list(re.finditer(predicate_pattern, pred_part))
@@ -690,7 +766,6 @@ def _parse_llm_input(llm_input: str) -> Tuple[List[Tuple[str, List[str]]], Tuple
             premises.append((pred_name, args))
 
     return premises, goal
-
 
 
 def _parse_rule_map(rules_file, max_rules=None):
@@ -748,10 +823,10 @@ def _entry_to_rule_with_source(rule_id, rule_text, entry):
         fl_problem = entry.get("fl_problem", "")
         if fl_problem:
             _coord_re = _re.compile(
-                r'\b([A-Za-z][A-Za-z0-9]*)@'
-                r'(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)'
-                r'_'
-                r'(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)'
+                r"\b([A-Za-z][A-Za-z0-9]*)@"
+                r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"
+                r"_"
+                r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"
             )
             for m in _coord_re.finditer(fl_problem):
                 point_coords[m.group(1)] = [float(m.group(2)), float(m.group(3))]
@@ -788,7 +863,15 @@ def _scan_jsonl_for_rules(source_data_file, rule_map):
     """
     import json as _json
 
-    KEEP_FIELDS = {"llm_input_renamed", "llm_output_renamed", "point_coords", "fl_problem", "seed", "rid", "pid"}
+    KEEP_FIELDS = {
+        "llm_input_renamed",
+        "llm_output_renamed",
+        "point_coords",
+        "fl_problem",
+        "seed",
+        "rid",
+        "pid",
+    }
 
     entry_map = {}
     target_rids = set(rule_map.keys())
@@ -892,7 +975,9 @@ def load_rules_from_discovery_output(
             continue
         rule = _entry_to_rule_with_source(rule_id, rule_text, entry)
         if rule is None:
-            failures.append((rule_id, rule_text, "Empty llm_input_renamed or parse error"))
+            failures.append(
+                (rule_id, rule_text, "Empty llm_input_renamed or parse error")
+            )
             continue
         rules.append(rule)
         if max_rules and len(rules) >= max_rules:
@@ -936,7 +1021,15 @@ def stream_chunked_reduce_from_files(
     import json as _json
     import time as _time
 
-    KEEP_FIELDS = {"llm_input_renamed", "llm_output_renamed", "point_coords", "fl_problem", "seed", "rid", "pid"}
+    KEEP_FIELDS = {
+        "llm_input_renamed",
+        "llm_output_renamed",
+        "point_coords",
+        "fl_problem",
+        "seed",
+        "rid",
+        "pid",
+    }
 
     timeout = reducer_cfg.get("timeout", 60)
     n_workers = reducer_cfg.get("n_workers", 1)
@@ -970,7 +1063,7 @@ def stream_chunked_reduce_from_files(
         print(f"[stream_chunk_reduce] {n_total_rules} rules from {rules_file}")
 
     # Build reverse maps for matching
-    line_idx_map = _build_line_idx_map(rule_map)   # line_idx -> [rule_ids]
+    line_idx_map = _build_line_idx_map(rule_map)  # line_idx -> [rule_ids]
 
     if output_dir:
         output_dir = Path(output_dir)
@@ -991,10 +1084,12 @@ def stream_chunked_reduce_from_files(
     # For standard JSON, fall back to full load
     if not is_jsonl:
         if verbose:
-            print(f"[stream_chunk_reduce] source is JSON, loading all entries...")
+            print("[stream_chunk_reduce] source is JSON, loading all entries...")
         rules, failures = load_rules_from_discovery_output(rules_file, source_data_file)
         if verbose:
-            print(f"[stream_chunk_reduce] loaded {len(rules)} rules, {len(failures)} failures")
+            print(
+                f"[stream_chunk_reduce] loaded {len(rules)} rules, {len(failures)} failures"
+            )
         reducer = make_reducer()
         result = reducer.reduce(rules)
         survivors = result["basis_rules"]
@@ -1012,8 +1107,10 @@ def stream_chunked_reduce_from_files(
 
     # Step 2: streaming JSONL scan + chunk reduction
     if verbose:
-        print(f"[stream_chunk_reduce] streaming JSONL scan, group_size={group_size}, "
-              f"n_workers={n_workers}")
+        print(
+            f"[stream_chunk_reduce] streaming JSONL scan, group_size={group_size}, "
+            f"n_workers={n_workers}"
+        )
 
     all_survivors = []
     chunk_stats_list = []
@@ -1047,7 +1144,9 @@ def stream_chunked_reduce_from_files(
         }
         chunk_stats_list.append(cs)
         if verbose:
-            print(f"  [chunk {ci}] {len(current_chunk)} -> {len(basis)} survivors ({elapsed:.1f}s)")
+            print(
+                f"  [chunk {ci}] {len(current_chunk)} -> {len(basis)} survivors ({elapsed:.1f}s)"
+            )
         if output_dir:
             chunk_dir = output_dir / f"chunk_{ci:04d}"
             chunk_dir.mkdir(parents=True, exist_ok=True)
@@ -1055,6 +1154,7 @@ def stream_chunked_reduce_from_files(
                 for rule in basis:
                     fh.write(f"{rule.rule_id}\n{rule.rule_text}\n")
             import json as _j
+
             with open(chunk_dir / "stats.json", "w") as fh:
                 _j.dump(cs, fh, indent=2)
 
@@ -1077,7 +1177,8 @@ def stream_chunked_reduce_from_files(
             else:
                 # Strategy 2: line-number lookup (O(1))
                 candidate_rids = [
-                    rid for rid in line_idx_map.get(line_idx, [])
+                    rid
+                    for rid in line_idx_map.get(line_idx, [])
                     if rid not in matched_rids
                 ]
 
@@ -1107,22 +1208,28 @@ def stream_chunked_reduce_from_files(
 
     n_unmatched = n_total_rules - n_matched - n_failures
     if verbose:
-        print(f"\n[stream_chunk_reduce] scan complete: {n_matched} matched, "
-              f"{n_failures} parse errors, {n_unmatched} unmatched in JSONL")
+        print(
+            f"\n[stream_chunk_reduce] scan complete: {n_matched} matched, "
+            f"{n_failures} parse errors, {n_unmatched} unmatched in JSONL"
+        )
         print(f"  {len(all_survivors)} survivors from {chunk_idx} chunks")
 
     # Step 3: optional global reduction on survivors
     if do_global and len(all_survivors) > 1:
         if verbose:
-            print(f"\n[stream_chunk_reduce] global reduction on {len(all_survivors)} survivors...")
+            print(
+                f"\n[stream_chunk_reduce] global reduction on {len(all_survivors)} survivors..."
+            )
         t0 = _time.time()
         r = make_reducer()
         global_result = r.reduce(all_survivors)
         final_survivors = global_result["basis_rules"]
         global_elapsed = _time.time() - t0
         if verbose:
-            print(f"[stream_chunk_reduce] global: {len(all_survivors)} -> {len(final_survivors)} "
-                  f"({global_elapsed:.1f}s)")
+            print(
+                f"[stream_chunk_reduce] global: {len(all_survivors)} -> {len(final_survivors)} "
+                f"({global_elapsed:.1f}s)"
+            )
     else:
         final_survivors = all_survivors
 
@@ -1133,6 +1240,7 @@ def stream_chunked_reduce_from_files(
             for rule in final_survivors:
                 fh.write(f"{rule.rule_id}\n{rule.rule_text}\n")
         import json as _j
+
         overall = {
             "input_count": n_total_rules,
             "matched": n_matched,
@@ -1181,10 +1289,16 @@ def _test_subsumption_batch_worker(
         List of rule_ids that are subsumed by rule_strong
     """
     if solver_type == "csolver":
-        from newclid.proof_scout.reduction.subsumption_tester import SubsumptionTesterCSolver
-        tester = SubsumptionTesterCSolver(timeout=timeout, seed=seed, config_path=config_path)
+        from newclid.proof_scout.reduction.subsumption_tester import (
+            SubsumptionTesterCSolver,
+        )
+
+        tester = SubsumptionTesterCSolver(
+            timeout=timeout, seed=seed, config_path=config_path
+        )
     else:
         from newclid.proof_scout.reduction.subsumption_tester import SubsumptionTester
+
         tester = SubsumptionTester(timeout=timeout, seed=seed)
     eliminated = []
 
@@ -1223,6 +1337,7 @@ class IncrementalReducer:
 
     def start(self):
         import threading
+
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -1256,12 +1371,14 @@ class IncrementalReducer:
         self._group_survivors.extend(survivors)
         self._total_group_eliminated += result["stats"]["eliminated_count"]
         self._total_group_skipped += result["stats"]["skipped_by_premises_count"]
-        self._group_stats.append({
-            "seed": seed_val,
-            "input": result["stats"]["original_count"],
-            "basis": result["stats"]["basis_count"],
-            "eliminated": result["stats"]["eliminated_count"],
-        })
+        self._group_stats.append(
+            {
+                "seed": seed_val,
+                "input": result["stats"]["original_count"],
+                "basis": result["stats"]["basis_count"],
+                "eliminated": result["stats"]["eliminated_count"],
+            }
+        )
 
     def _finalize(self, no_seed_entries: list):
         """Run global reduction on all group survivors + no-seed rules."""
@@ -1269,7 +1386,9 @@ class IncrementalReducer:
         all_survivors = self._group_survivors + no_seed_rules
 
         if self.verbose:
-            print(f"\n[IncrementalReducer] Global phase: {len(all_survivors)} survivors")
+            print(
+                f"\n[IncrementalReducer] Global phase: {len(all_survivors)} survivors"
+            )
 
         if all_survivors:
             global_result = self.reducer.reduce(all_survivors)
@@ -1278,9 +1397,14 @@ class IncrementalReducer:
                 "basis_rules": [],
                 "eliminated_rules": [],
                 "skipped_by_premises": [],
-                "stats": {"original_count": 0, "basis_count": 0,
-                          "eliminated_count": 0, "skipped_by_premises_count": 0,
-                          "reduction_rate": 0, "n_subsumption_tests": 0},
+                "stats": {
+                    "original_count": 0,
+                    "basis_count": 0,
+                    "eliminated_count": 0,
+                    "skipped_by_premises_count": 0,
+                    "reduction_rate": 0,
+                    "n_subsumption_tests": 0,
+                },
             }
 
         self._result = {
@@ -1288,7 +1412,8 @@ class IncrementalReducer:
             "eliminated_rules": global_result["eliminated_rules"],
             "skipped_by_premises": global_result["skipped_by_premises"],
             "stats": {
-                "original_count": sum(s["input"] for s in self._group_stats) + len(no_seed_rules),
+                "original_count": sum(s["input"] for s in self._group_stats)
+                + len(no_seed_rules),
                 "group_phase": {
                     "n_groups": len(self._group_stats),
                     "n_no_seed": len(no_seed_rules),
@@ -1298,7 +1423,8 @@ class IncrementalReducer:
                 },
                 "global_phase": global_result["stats"],
                 "basis_count": global_result["stats"]["basis_count"],
-                "total_eliminated": self._total_group_eliminated + global_result["stats"]["eliminated_count"],
+                "total_eliminated": self._total_group_eliminated
+                + global_result["stats"]["eliminated_count"],
             },
         }
 
@@ -1327,16 +1453,20 @@ def _entries_to_rules_with_source(entries: list) -> List[RuleWithSource]:
 
         try:
             premises, goal = _parse_llm_input(llm_input)
-            points = [(name, coords[0], coords[1]) for name, coords in point_coords.items()]
-            rules.append(RuleWithSource(
-                rule_id=rule_id,
-                rule_text=rule_text,
-                points=points,
-                premises=premises,
-                goal=goal,
-                llm_output_renamed=llm_output,
-                seed=seed,
-            ))
+            points = [
+                (name, coords[0], coords[1]) for name, coords in point_coords.items()
+            ]
+            rules.append(
+                RuleWithSource(
+                    rule_id=rule_id,
+                    rule_text=rule_text,
+                    points=points,
+                    premises=premises,
+                    goal=goal,
+                    llm_output_renamed=llm_output,
+                    seed=seed,
+                )
+            )
         except Exception:
             continue
     return rules
@@ -1458,16 +1588,20 @@ def load_rules_by_ids(
 
         try:
             premises, goal = _parse_llm_input(llm_input)
-            points = [(name, coords[0], coords[1]) for name, coords in point_coords.items()]
-            rules.append(RuleWithSource(
-                rule_id=rule_id,
-                rule_text=rule_text,
-                points=points,
-                premises=premises,
-                goal=goal,
-                llm_output_renamed=llm_output,
-                seed=seed,
-            ))
+            points = [
+                (name, coords[0], coords[1]) for name, coords in point_coords.items()
+            ]
+            rules.append(
+                RuleWithSource(
+                    rule_id=rule_id,
+                    rule_text=rule_text,
+                    points=points,
+                    premises=premises,
+                    goal=goal,
+                    llm_output_renamed=llm_output,
+                    seed=seed,
+                )
+            )
         except Exception as e:
             failures.append((rule_id, str(e)))
 
@@ -1538,19 +1672,23 @@ class ChunkedIterativeReducer:
         kept = []
         skipped = []
         for rule in rules:
-            if '=>' in rule.rule_text:
-                n_prem = len([c for c in rule.rule_text.split('=>')[0].split(',') if c.strip()])
+            if "=>" in rule.rule_text:
+                n_prem = len(
+                    [c for c in rule.rule_text.split("=>")[0].split(",") if c.strip()]
+                )
             else:
                 n_prem = 0
             if n_prem <= max_premises:
                 kept.append(rule)
             else:
-                skipped.append({
-                    "rule_id": rule.rule_id,
-                    "rule_text": rule.rule_text,
-                    "n_premises": n_prem,
-                    "reason": f"Exceeds max_premises={max_premises} (has {n_prem})",
-                })
+                skipped.append(
+                    {
+                        "rule_id": rule.rule_id,
+                        "rule_text": rule.rule_text,
+                        "n_premises": n_prem,
+                        "reason": f"Exceeds max_premises={max_premises} (has {n_prem})",
+                    }
+                )
         return kept, skipped
 
     def reduce_one_round(
@@ -1571,10 +1709,12 @@ class ChunkedIterativeReducer:
         import time as _time
 
         n_chunks = math.ceil(len(rules) / group_size)
-        chunks = [rules[i * group_size:(i + 1) * group_size] for i in range(n_chunks)]
+        chunks = [rules[i * group_size : (i + 1) * group_size] for i in range(n_chunks)]
 
         if self.verbose:
-            print(f"  Splitting {len(rules)} rules into {n_chunks} chunks (group_size={group_size}, n_workers={n_workers})")
+            print(
+                f"  Splitting {len(rules)} rules into {n_chunks} chunks (group_size={group_size}, n_workers={n_workers})"
+            )
 
         round_start = _time.time()
         survivors = []
@@ -1585,18 +1725,26 @@ class ChunkedIterativeReducer:
             if self.verbose:
                 print(f"\n  --- Chunk {ci}/{n_chunks}: {len(chunk)} rules ---")
             result = _reduce_chunk_worker(
-                chunk, self.timeout, self.seed, None,
-                self.batch_size, self.solver_type, self.config_path, n_workers,
+                chunk,
+                self.timeout,
+                self.seed,
+                None,
+                self.batch_size,
+                self.solver_type,
+                self.config_path,
+                n_workers,
             )
             basis = result.get("basis_rules", [])
             survivors.extend(basis)
-            chunk_stats.append({
-                "chunk_id": ci,
-                "input": len(chunk),
-                "survivors": len(basis),
-                "eliminated": result["stats"]["eliminated_count"],
-                "n_tests": result["stats"]["n_subsumption_tests"],
-            })
+            chunk_stats.append(
+                {
+                    "chunk_id": ci,
+                    "input": len(chunk),
+                    "survivors": len(basis),
+                    "eliminated": result["stats"]["eliminated_count"],
+                    "n_tests": result["stats"]["n_subsumption_tests"],
+                }
+            )
 
         # Sort chunk_stats by chunk_id
         chunk_stats.sort(key=lambda x: x["chunk_id"])
@@ -1618,8 +1766,10 @@ class ChunkedIterativeReducer:
         }
 
         if self.verbose:
-            print(f"\n  Round result: {len(rules)} → {len(survivors)} survivors "
-                  f"(eliminated {total_eliminated}, {elapsed:.1f}s)")
+            print(
+                f"\n  Round result: {len(rules)} → {len(survivors)} survivors "
+                f"(eliminated {total_eliminated}, {elapsed:.1f}s)"
+            )
 
         return survivors, round_stats
 
@@ -1672,11 +1822,15 @@ class ChunkedIterativeReducer:
                     lines = [line.strip() for line in f if line.strip()]
 
                 # survivors.txt format: rule_id\nrule_text\n...
-                survivor_ids = [lines[i] for i in range(0, len(lines), 2) if i + 1 < len(lines)]
+                survivor_ids = [
+                    lines[i] for i in range(0, len(lines), 2) if i + 1 < len(lines)
+                ]
 
                 # Rebuild RuleWithSource from original rules
                 rule_map = {r.rule_id: r for r in rules}
-                current_rules = [rule_map[rid] for rid in survivor_ids if rid in rule_map]
+                current_rules = [
+                    rule_map[rid] for rid in survivor_ids if rid in rule_map
+                ]
 
                 # Load accumulated stats
                 for r in range(1, last_completed + 1):
@@ -1687,23 +1841,29 @@ class ChunkedIterativeReducer:
 
                 start_round = last_completed + 1
                 if self.verbose:
-                    print(f"[Resume] Found {last_completed} completed round(s), "
-                          f"loaded {len(current_rules)} survivors from round_{last_completed:03d}")
+                    print(
+                        f"[Resume] Found {last_completed} completed round(s), "
+                        f"loaded {len(current_rules)} survivors from round_{last_completed:03d}"
+                    )
 
         for round_num in range(start_round, iterations + 1):
             if self.verbose:
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print(f"Round {round_num}/{iterations}: {len(current_rules)} rules")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
 
             # If rules fit in one chunk, this is the final round
             if len(current_rules) <= group_size:
                 if self.verbose:
-                    print(f"  Rules ({len(current_rules)}) <= group_size ({group_size}), "
-                          f"running final single-chunk reduction")
+                    print(
+                        f"  Rules ({len(current_rules)}) <= group_size ({group_size}), "
+                        f"running final single-chunk reduction"
+                    )
 
             survivors, round_stats = self.reduce_one_round(
-                current_rules, group_size, n_workers,
+                current_rules,
+                group_size,
+                n_workers,
             )
             round_stats["round"] = round_num
             all_round_stats.append(round_stats)
@@ -1727,13 +1887,17 @@ class ChunkedIterativeReducer:
             # Early termination: no rules eliminated this round
             if len(survivors) == len(current_rules):
                 if self.verbose:
-                    print(f"\n  No rules eliminated in round {round_num}, stopping early")
+                    print(
+                        f"\n  No rules eliminated in round {round_num}, stopping early"
+                    )
                 break
 
             # Early termination: fits in one chunk
             if len(survivors) <= group_size:
                 if self.verbose:
-                    print(f"\n  Survivors ({len(survivors)}) <= group_size ({group_size}), done")
+                    print(
+                        f"\n  Survivors ({len(survivors)}) <= group_size ({group_size}), done"
+                    )
                 break
 
             current_rules = survivors
@@ -1760,14 +1924,21 @@ class ChunkedIterativeReducer:
         }
 
         if self.verbose:
-            print(f"\n{'='*60}")
-            print(f"Iterative reduction complete: {len(rules)} → {len(survivors)} rules "
-                  f"in {len(all_round_stats)} round(s), {overall_elapsed:.1f}s")
-            print(f"{'='*60}")
+            print(f"\n{'=' * 60}")
+            print(
+                f"Iterative reduction complete: {len(rules)} → {len(survivors)} rules "
+                f"in {len(all_round_stats)} round(s), {overall_elapsed:.1f}s"
+            )
+            print(f"{'=' * 60}")
 
         return survivors, overall_stats
 
 
-__all__ = ["RuleReducer", "RuleWithSource", "IncrementalReducer",
-           "load_rules_from_discovery_output", "ChunkedIterativeReducer",
-           "load_rules_by_ids"]
+__all__ = [
+    "RuleReducer",
+    "RuleWithSource",
+    "IncrementalReducer",
+    "load_rules_from_discovery_output",
+    "ChunkedIterativeReducer",
+    "load_rules_by_ids",
+]

@@ -1967,6 +1967,7 @@ dev = [
     { name = "pytest-check" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
+    { name = "rich" },
     { name = "ruff" },
 ]
 doc = [
@@ -1990,6 +1991,7 @@ full = [
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "qwen-vl-utils" },
+    { name = "rich" },
     { name = "ruff" },
     { name = "sphinx-autoapi" },
     { name = "sphinx-autobuild" },
@@ -2040,6 +2042,7 @@ requires-dist = [
     { name = "pyvis" },
     { name = "qwen-vl-utils", marker = "extra == 'gpu'" },
     { name = "ray", extras = ["default"] },
+    { name = "rich", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "scipy", specifier = ">=1.15" },
     { name = "sphinx-autoapi", marker = "extra == 'doc'" },

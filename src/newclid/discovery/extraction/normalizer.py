@@ -29,7 +29,9 @@ def _norm_args(pred: Pred) -> Pred:
     """按对称性规范化单个谓词的参数；未知谓词原样保留（不做规范化）。"""
     name, args = pred
     try:
-        return name, tuple(normalize_predicate(PredicateInstance(predicate=name, args=args)))
+        return name, tuple(
+            normalize_predicate(PredicateInstance(predicate=name, args=args))
+        )
     except ValueError:
         return name, tuple(args)
 
@@ -82,7 +84,8 @@ def normalize_proposition(prop: PropositionRecord) -> NormalizedRule | None:
 
     renamed_points = tuple(
         Point(name=rename[p], x=coord[p][0], y=coord[p][1])
-        for p in points if p in coord
+        for p in points
+        if p in coord
     )
     return NormalizedRule(
         rule_id=prop.proposition_id,
@@ -191,7 +194,7 @@ def normalize_and_dedup_parallel(
 
     from newclid.discovery.reduction.parallel import ensure_ray, run_bounded
 
-    chunks = [props[i:i + chunk_size] for i in range(0, len(props), chunk_size)]
+    chunks = [props[i : i + chunk_size] for i in range(0, len(props), chunk_size)]
     if len(chunks) <= 1:
         return normalize_and_dedup(props)
 
@@ -203,7 +206,9 @@ def normalize_and_dedup_parallel(
     occurrence_partials: list[SeedOccurrences] = []
     for chunk_best, chunk_occurrences in tqdm(
         run_bounded(remote, args, inflight=n_workers),
-        total=len(chunks), desc="[part1] 规范化去重(并行)", unit="块",
+        total=len(chunks),
+        desc="[part1] 规范化去重(并行)",
+        unit="块",
     ):
         partials.append(chunk_best)
         occurrence_partials.append(chunk_occurrences)

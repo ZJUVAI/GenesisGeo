@@ -20,7 +20,9 @@ from collections import defaultdict
 from typing import Any
 
 # Parse fl_problem clauses: "point_name@x_y" and "= construction_type args"
-_COORD_RE = re.compile(r"([a-zA-Z][a-zA-Z0-9]*)@(-?[0-9.]+(?:[eE][+-]?[0-9]+)?)_(-?[0-9.]+(?:[eE][+-]?[0-9]+)?)")
+_COORD_RE = re.compile(
+    r"([a-zA-Z][a-zA-Z0-9]*)@(-?[0-9.]+(?:[eE][+-]?[0-9]+)?)_(-?[0-9.]+(?:[eE][+-]?[0-9]+)?)"
+)
 
 
 class RuleTracer:
@@ -37,10 +39,14 @@ class RuleTracer:
         self.source_path = source_dataset_path
 
         # Indexes (built lazily)
-        self._norm_index: dict[str, dict] = {}          # rule_id → norm record
-        self._norm_by_seed: dict[int, list[dict]] = defaultdict(list)  # seed → norm records
+        self._norm_index: dict[str, dict] = {}  # rule_id → norm record
+        self._norm_by_seed: dict[int, list[dict]] = defaultdict(
+            list
+        )  # seed → norm records
         self._occurrences: dict[str, dict[str, int]] = {}  # rule_text → {seed: count}
-        self._source_line_offsets: dict[int, list[int]] = defaultdict(list)  # seed → [byte offsets]
+        self._source_line_offsets: dict[int, list[int]] = defaultdict(
+            list
+        )  # seed → [byte offsets]
 
         self._built = False
 
@@ -108,7 +114,9 @@ class RuleTracer:
                 count += 1
                 if count % 500000 == 0:
                     print(f"[tracer]   indexed {count} records...")
-        print(f"[tracer]   {count} records, {len(self._source_line_offsets)} unique seeds")
+        print(
+            f"[tracer]   {count} records, {len(self._source_line_offsets)} unique seeds"
+        )
 
     # ------------------------------------------------------------------
     # Source record access
@@ -170,7 +178,7 @@ class RuleTracer:
 
         # Step 2: get source record and extract aux constructions
         aux_constructions: list[dict] = []
-        aux_facts: list[dict] = []        # aux facts from <aux> section
+        aux_facts: list[dict] = []  # aux facts from <aux> section
         source_record: dict | None = None
         if primary_seed is not None:
             source_record = self.get_source_record(primary_seed, primary_idx)
@@ -205,14 +213,16 @@ class RuleTracer:
             # Also get source record for this seed
             src = self.get_source_record(seed, sn.get("index_in_seed", 0))
 
-            multi_coords.append({
-                "seed": seed,
-                "index_in_seed": sn.get("index_in_seed", 0),
-                "count": count,
-                "points": coords,
-                "rename_map": sn.get("rename_map", {}),
-                "source_record": src,
-            })
+            multi_coords.append(
+                {
+                    "seed": seed,
+                    "index_in_seed": sn.get("index_in_seed", 0),
+                    "count": count,
+                    "points": coords,
+                    "rename_map": sn.get("rename_map", {}),
+                    "source_record": src,
+                }
+            )
 
         return {
             "rule_id": rule_id,
@@ -289,13 +299,17 @@ def _extract_aux_constructions(
             # "square b a c d" → construction = "square", args = [b, a, c, d]
             right_tokens = right.split()
             if right_tokens:
-                aux_list.append({
-                    "aux_points": aux_points,
-                    "all_points_in_clause": point_names,
-                    "construction_type": right_tokens[0],
-                    "construction_args": right_tokens[1:] if len(right_tokens) > 1 else [],
-                    "clause_text": clause,
-                })
+                aux_list.append(
+                    {
+                        "aux_points": aux_points,
+                        "all_points_in_clause": point_names,
+                        "construction_type": right_tokens[0],
+                        "construction_args": right_tokens[1:]
+                        if len(right_tokens) > 1
+                        else [],
+                        "clause_text": clause,
+                    }
+                )
 
     return aux_list
 
@@ -317,29 +331,29 @@ def _extract_all_points(fl_problem: str) -> dict[str, tuple[float, float]]:
 # Format: construction_type → list of (condition_name, checker_function_name)
 # These are the "require" fields from defs.txt, translated to predicates.
 CONSTRUCTION_NDGS: dict[str, list[tuple[str, str]]] = {
-    "reflect":       [("ncoll", "A B C")],     # A, B, C non-collinear (line BC well-defined)
-    "on_circum":     [("ncoll", "B C D")],     # 3 defining points non-collinear
-    "angle_bisector":[("ncoll", "A B C")],     # angle well-defined
-    "midpoint":      [("diff", "A B")],         # A ≠ B
-    "foot":          [("ncoll", "B C D")],     # foot to line, line well-defined
-    "on_tline":      [("ncoll", "B C D")],
-    "on_bline":      [("ncoll", "B C D")],
-    "on_pline":      [("ncoll", "B C D")],
-    "on_circle":     [("diff", "B C")],         # center ≠ point on circle
-    "eqdistance":    [],
-    "on_line":       [("diff", "B C")],
-    "on_aline":      [("ncoll", "B C D")],
-    "on_dia":        [("diff", "B C")],
-    "incenter":      [("ncoll", "A B C")],
-    "excenter":      [("ncoll", "A B C")],
-    "centroid":      [("ncoll", "A B C")],
-    "orthocenter":   [("ncoll", "A B C")],
-    "cc_tangent":    [("diff", "A B"), ("diff", "C D")],
-    "intersection_ll":[("npara", "A B C D")],
-    "intersection_lt":[("npara", "A B C D")],
-    "intersection_tt":[("diff", "A B"), ("diff", "C D")],
-    "intersection_lc":[],
-    "intersection_cc":[],
+    "reflect": [("ncoll", "A B C")],  # A, B, C non-collinear (line BC well-defined)
+    "on_circum": [("ncoll", "B C D")],  # 3 defining points non-collinear
+    "angle_bisector": [("ncoll", "A B C")],  # angle well-defined
+    "midpoint": [("diff", "A B")],  # A ≠ B
+    "foot": [("ncoll", "B C D")],  # foot to line, line well-defined
+    "on_tline": [("ncoll", "B C D")],
+    "on_bline": [("ncoll", "B C D")],
+    "on_pline": [("ncoll", "B C D")],
+    "on_circle": [("diff", "B C")],  # center ≠ point on circle
+    "eqdistance": [],
+    "on_line": [("diff", "B C")],
+    "on_aline": [("ncoll", "B C D")],
+    "on_dia": [("diff", "B C")],
+    "incenter": [("ncoll", "A B C")],
+    "excenter": [("ncoll", "A B C")],
+    "centroid": [("ncoll", "A B C")],
+    "orthocenter": [("ncoll", "A B C")],
+    "cc_tangent": [("diff", "A B"), ("diff", "C D")],
+    "intersection_ll": [("npara", "A B C D")],
+    "intersection_lt": [("npara", "A B C D")],
+    "intersection_tt": [("diff", "A B"), ("diff", "C D")],
+    "intersection_lc": [],
+    "intersection_cc": [],
 }
 
 
@@ -369,13 +383,15 @@ def get_construction_ndgs(
 
             real_args = [placeholder_to_real.get(pa, pa) for pa in pattern_args]
 
-            all_ndgs.append({
-                "construction_type": ctype,
-                "aux_points": aux_info["aux_points"],
-                "clause": aux_info["clause_text"],
-                "ndg_predicate": ndg_pred,
-                "ndg_args": real_args,
-            })
+            all_ndgs.append(
+                {
+                    "construction_type": ctype,
+                    "aux_points": aux_info["aux_points"],
+                    "clause": aux_info["clause_text"],
+                    "ndg_predicate": ndg_pred,
+                    "ndg_args": real_args,
+                }
+            )
 
     return all_ndgs
 
@@ -442,11 +458,13 @@ def _extract_aux_facts(
         # Parse right side facts: "coll a b f [004] cong a f b f [005]"
         facts = []
         for m in _AUX_FACT_RE.finditer(right):
-            facts.append({
-                "predicate": m.group(1),
-                "args": tuple(m.group(2).split()),
-                "id": m.group(3),
-            })
+            facts.append(
+                {
+                    "predicate": m.group(1),
+                    "args": tuple(m.group(2).split()),
+                    "id": m.group(3),
+                }
+            )
 
         # Separate: which aux points are present
         aux_points_in_clause = [p for p in aux_point_names if p not in rename_map]
@@ -463,18 +481,22 @@ def _extract_aux_facts(
                     mapped_args.append(f"[AUX:{a}]")
                 else:
                     mapped_args.append(a)
-            mapped_facts.append({
-                "predicate": fact["predicate"],
-                "args": mapped_args,
-                "id": fact["id"],
-            })
+            mapped_facts.append(
+                {
+                    "predicate": fact["predicate"],
+                    "args": mapped_args,
+                    "id": fact["id"],
+                }
+            )
 
-        aux_list.append({
-            "aux_points": aux_points_in_clause,
-            "all_aux_names": aux_point_names,
-            "facts": facts,
-            "mapped_facts": mapped_facts,
-            "clause_text": clause,
-        })
+        aux_list.append(
+            {
+                "aux_points": aux_points_in_clause,
+                "all_aux_names": aux_point_names,
+                "facts": facts,
+                "mapped_facts": mapped_facts,
+                "clause_text": clause,
+            }
+        )
 
     return aux_list

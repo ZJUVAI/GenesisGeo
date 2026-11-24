@@ -67,9 +67,7 @@ def basics_sentence_count(construction_def) -> int:
     return sum(len(clause.sentences) for clause in construction_def.basics)
 
 
-def basics_complexity_weights(
-    construction_defs: dict, bias: float
-) -> dict[str, float]:
+def basics_complexity_weights(construction_defs: dict, bias: float) -> dict[str, float]:
     """
     Multiplicative weight factor per construction: 1 / max(1, n_sentences) ** bias.
 
@@ -834,9 +832,7 @@ class ProblemSampler:
             base_expand_triple = 0.5
             if num_triples > 0:
                 p_expand_triple = base_expand_triple * min(1.0, num_triples / 2.0)
-                p_create_triple = (
-                    base_create_triple * (1.0 - r) / (1.0 + num_triples)
-                )
+                p_create_triple = base_create_triple * (1.0 - r) / (1.0 + num_triples)
             else:
                 p_create_triple = base_create_triple * (1.0 - r) * 2.0
 
@@ -901,9 +897,7 @@ class ProblemSampler:
         main loop skips the DAG-add step for this iteration.
         """
         paired = self.equivalent_pairs.get_all_paired_points()
-        available = [
-            p for p in self.point_naming.defined_points if p not in paired
-        ]
+        available = [p for p in self.point_naming.defined_points if p not in paired]
         if len(available) < 2:
             return self._sample_clause_normal()
 
@@ -964,7 +958,12 @@ class ProblemSampler:
         if result is None:
             return self._sample_clause_normal()
 
-        original_clause_strs, selected_types, original_mappings_saved, num_points_used = result
+        (
+            original_clause_strs,
+            selected_types,
+            original_mappings_saved,
+            num_points_used,
+        ) = result
 
         # ---- build mirrored mapping ----
         mirrored_mappings: list[dict[str, str]] = []
@@ -1560,13 +1559,20 @@ class ProblemSampler:
 
             if chosen is None:
                 # Fall back to original shuffle-based approach
-                random_construction_type_candidates = construction_type_candidates.copy()
+                random_construction_type_candidates = (
+                    construction_type_candidates.copy()
+                )
                 self.rng.shuffle(random_construction_type_candidates)
                 for construction in random_construction_type_candidates:
                     construction_def = self.construction_defs[construction]
-                    if num_points is not None and len(construction_def.points) != num_points:
+                    if (
+                        num_points is not None
+                        and len(construction_def.points) != num_points
+                    ):
                         continue
-                    if len(construction_def.args) > len(self.point_naming.defined_points):
+                    if len(construction_def.args) > len(
+                        self.point_naming.defined_points
+                    ):
                         continue
                     args_mapping = self._map_construction_args(
                         construction_def,
@@ -1579,7 +1585,9 @@ class ProblemSampler:
                         continue
                     chosen = construction
                     chosen_mapping = args_mapping
-                    chosen_numerics = self._extract_numerics(construction_def, args_mapping)
+                    chosen_numerics = self._extract_numerics(
+                        construction_def, args_mapping
+                    )
                     chosen_cpoints = self._extract_construction_points(
                         construction_def, args_mapping
                     )
