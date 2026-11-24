@@ -29,7 +29,7 @@ class DDARBuildCommand(build_ext):
         build_temp.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix="ddar-", dir=build_temp) as tmp:
             root = Path(tmp)
-            if os.environ.get("PGO") != "0":
+            if os.environ.get("PGO") == "1":
                 try:
                     artifact = self._build_pgo(
                         root / "pgo", pybind11_cmake, output.name
