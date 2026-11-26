@@ -65,8 +65,9 @@ class SymbolsGraph:
 
     def _get_new_line_thru_pair(self, p1: Point, p2: Point) -> Line:
         name = p1.name + p2.name
+        numeric_line = num_geo.LineNum(p1.num, p2.num)
         line = self.new_node(Line, name)
-        line.num = num_geo.LineNum(p1.num, p2.num)
+        line.num = numeric_line
         line.points = {p1, p2}
         return line
 

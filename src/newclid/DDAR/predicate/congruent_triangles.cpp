@@ -3,6 +3,7 @@
 #include "type/triangle.hpp"
 #include "predicate/similar_triangles.hpp"
 #include "predicate/cong.hpp"
+#include "predicate/ncoll.hpp"
 #include <vector>
 #include <iostream>
 
@@ -26,6 +27,20 @@ string CongruentTriangles::name() const
 unique_ptr<Statement> CongruentTriangles::clone() const
 {
     return make_unique<CongruentTriangles>(*this);
+}
+
+bool CongruentTriangles::check_nondegen() const
+{
+    // Triangle's legacy negation of Coll also accepts coinciding vertices.
+    // Congruence properties require the actual native ncoll contract on both
+    // sides, including all six endpoint distinctions.
+    const auto proper = [](const Triangle &triangle)
+    {
+        return NColl(triangle.a(), triangle.b(), triangle.c()).check_numerically();
+    };
+    return proper(left()) && proper(right()) &&
+           SimilarTriangles::check_nondegen() &&
+           (sameclock() || to_sameclock().check_numerically());
 }
 
 bool CongruentTriangles::check_equations() const

@@ -202,6 +202,30 @@ void Problem::load_from_data(const string name, vector<tuple<string, double, dou
     return;
 }
 
+static long long parse_angle_integer(const string &value)
+{
+    size_t consumed = 0;
+    const auto result = stoll(value, &consumed);
+    if (consumed != value.size())
+        throw invalid_argument("Invalid angle constant: " + value);
+    return result;
+}
+
+static Rational parse_angle_constant(const string &value)
+{
+    if (value.ends_with("o"))
+        return Rational(parse_angle_integer(value.substr(0, value.size() - 1)), 180);
+
+    const auto pi = value.find("pi/");
+    if (pi != string::npos)
+        return Rational(parse_angle_integer(value.substr(0, pi)), parse_angle_integer(value.substr(pi + 3)));
+
+    const auto slash = value.find('/');
+    if (slash == string::npos)
+        return Rational(parse_angle_integer(value));
+    return Rational(parse_angle_integer(value.substr(0, slash)), parse_angle_integer(value.substr(slash + 1)));
+}
+
 unique_ptr<Statement> Problem::create_statement(const string &type, const vector<string> &args) const
 {
     if (type == "aconst")
@@ -211,9 +235,7 @@ unique_ptr<Statement> Problem::create_statement(const string &type, const vector
             Point p1 = this->find_point(args[0]);
             Point p2 = this->find_point(args[1]);
             Point p3 = this->find_point(args[2]);
-            long long p = stoll(args[3].substr(0, args[3].find('/')));
-            long long q = stoll(args[3].substr(args[3].find('/') + 1));
-            Rational a = Rational(p, q);
+            Rational a = parse_angle_constant(args[3]);
             return make_unique<AConst>(Angle(p1, p2, p3), a);
         }
         else if (args.size() == 5)
@@ -222,9 +244,7 @@ unique_ptr<Statement> Problem::create_statement(const string &type, const vector
             Point p2 = this->find_point(args[1]);
             Point p3 = this->find_point(args[2]);
             Point p4 = this->find_point(args[3]);
-            long long p = stoll(args[4].substr(0, args[4].find('/')));
-            long long q = stoll(args[4].substr(args[4].find('/') + 1));
-            Rational a = Rational(p, q);
+            Rational a = parse_angle_constant(args[4]);
             // 四点里有公共端点（原来的 Angle 构造能识别的四种情形）走原路径，
             // 行为与之前逐位一致。
             if (p1 == p3 || p1 == p4 || p2 == p3 || p2 == p4)

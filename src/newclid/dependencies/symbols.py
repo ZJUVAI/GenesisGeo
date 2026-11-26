@@ -116,12 +116,29 @@ class Line(Symbol):
         symbols_graph = points[0].symbols_graph
         s = set(points)
         merge: list[Line] = []
-        for line in symbols_graph.nodes_of_type(Line):
+        pending = list(symbols_graph.nodes_of_type(Line))
+        # A line visited early may overlap in only one point until another
+        # line is merged.  Keep scanning until the point set stops growing,
+        # otherwise an existing two-point line can remain disconnected from
+        # the representative containing both of its points.
+        while True:
+            remaining = []
+            for line in pending:
+                if len(s & line.points) >= 2:
+                    merge.append(line)
+                    s.update(line.points)
+                else:
+                    remaining.append(line)
+            if len(remaining) == len(pending):
+                break
+            pending = remaining
+        for line in merge:
             if s <= line.points:
-                return line, []
-            if len(s & line.points) >= 2:
-                merge.append(line)
-                s.update(line.points)
+                # Reuse an existing full representative, but still connect
+                # every overlapping line discovered during the closure.
+                others = [other for other in merge if other is not line]
+                line.merge(others)
+                return line, others
         line = symbols_graph.new_node(
             Line, f"line/{'-'.join(p.name for p in points)}/", dep
         )
@@ -202,12 +219,24 @@ class Circle(Symbol):
         symbols_graph = points[0].symbols_graph
         s = set(points)
         merge: list[Circle] = []
-        for c in symbols_graph.nodes_of_type(Circle):
-            if s <= c.points:
+        # A later merge can supply the third shared point needed to merge an
+        # earlier circle, so a single pass does not compute the closure.
+        pending = list(symbols_graph.nodes_of_type(Circle))
+        while True:
+            remaining = []
+            for circle in pending:
+                if len(s & circle.points) >= 3:
+                    merge.append(circle)
+                    s.update(circle.points)
+                else:
+                    remaining.append(circle)
+            if len(remaining) == len(pending):
+                break
+            pending = remaining
+        for circle in merge:
+            if s <= circle.points:
+                circle.merge([other for other in merge if other is not circle])
                 return
-            if len(s & c.points) >= 3:
-                merge.append(c)
-                s.update(c.points)
         c = symbols_graph.new_node(
             Circle, f"circle({''.join(p.name for p in points)})", dep
         )

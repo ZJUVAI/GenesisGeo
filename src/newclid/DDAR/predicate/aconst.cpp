@@ -4,6 +4,7 @@
 #include "type/angle.hpp"
 #include "ar/equation.hpp"
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -60,13 +61,24 @@ bool AConst::check_equations() const
     double dot = dx1 * dx2 + dy1 * dy2;
     double cross = dx1 * dy2 - dy1 * dx2;
 
-    double ang = std::atan2(cross, dot);
-    if (ang < 0.0)
+    double actual = std::atan2(cross, dot);
+    if (actual < 0.0)
+        actual += M_PI;
+    // Reduce the exact coefficient before conversion: large integer multiples
+    // of pi otherwise acquire a nonzero floating-point remainder.
+    auto numerator = _rhs.numerator();
+    const auto denominator = _rhs.denominator();
+    if (numerator < 0 || numerator > denominator)
     {
-        ang += M_PI;
+        numerator %= denominator;
+        if (numerator < 0)
+            numerator += denominator;
     }
-
-    return Numerical::close_enough(ang, _rhs.to_double() * M_PI);
+    const double expected = (static_cast<double>(numerator) / denominator) * M_PI;
+    // Preserve the existing relative tolerance for ordinary positive angles.
+    // A residual-only comparison with zero would silently discard that term.
+    return Numerical::close_enough(actual, expected) ||
+           Numerical::close_enough(std::remainder(actual - expected, M_PI), 0.0);
 }
 
 vector<statement_arg> AConst::args() const

@@ -498,45 +498,36 @@ void DDARSolver::add_established_equations(Proof *pf)
     _system_dist.add_reduced_equation(pf, "dist");
     _system_distlog.add_reduced_equation(pf, "distlog");
     _system_slope.add_reduced_equation(pf, "slope");
+    // Snapshot pairs before transferring: proving a replacement can append
+    // further statements (and equalities) to _checked_statements recursively.
+    vector<pair<Proof *, Proof *>> transfers;
     if (pf->name() == "eqpoint")
     {
-        auto pts = pf->statement()->points();
-        Point p = pts[0];
-        Point q = pts[1];
-        std::vector<Proof *> to_process_pq;
-        std::vector<Proof *> to_process_qp;
-        for (const auto &old_pf : _checked_statements)
-        {
-            bool has_p = old_pf->statement()->contain(p);
-            bool has_q = old_pf->statement()->contain(q);
-            if (has_p && !has_q)
-                to_process_pq.push_back(old_pf);
-            else if (has_q && !has_p)
-                to_process_qp.push_back(old_pf);
-        }
-        for (auto &old_pf : to_process_pq)
-        {
-            auto stmt = old_pf->statement()->replace(p, q);
-            string key = stmt->normalize()->to_string();
-            auto itr = _statement_proofs.find(key);
-            if (itr != _statement_proofs.end())
-            {
-                Proof *new_pf = itr->second.get();
-                if (!new_pf->is_proved())
-                    new_pf->set_proved(pf, old_pf);
-            }
-        }
-        for (auto &old_pf : to_process_qp)
-        {
-            auto stmt = old_pf->statement()->replace(q, p);
-            string key = stmt->normalize()->to_string();
-            auto itr = _statement_proofs.find(key);
-            if (itr != _statement_proofs.end())
-            {
-                Proof *new_pf = itr->second.get();
-                if (!new_pf->is_proved())
-                    new_pf->set_proved(pf, old_pf);
-            }
-        }
+        for (Proof *original : _checked_statements)
+            if (original != pf)
+                transfers.emplace_back(pf, original);
+    }
+    else
+    {
+        // Facts established after an equality must receive the same transfer
+        // as facts established before it; premise order must not matter.
+        for (Proof *equality : _checked_statements)
+            if (equality->name() == "eqpoint")
+                transfers.emplace_back(equality, pf);
+    }
+    for (const auto &[equality, original] : transfers)
+    {
+        const auto points = equality->statement()->points();
+        const Point p = points[0], q = points[1];
+        const bool has_p = original->statement()->contain(p);
+        const bool has_q = original->statement()->contain(q);
+        if (has_p == has_q)
+            continue;
+        auto statement = original->statement()->replace(has_p ? p : q, has_p ? q : p);
+        if (!statement->check_numerically())
+            continue;
+        Proof *replacement = insert_statement(statement->normalize());
+        if (!replacement->is_proved())
+            replacement->set_proved(equality, original);
     }
 }
