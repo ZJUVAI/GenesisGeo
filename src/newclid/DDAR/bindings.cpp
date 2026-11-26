@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <memory>
 #include <algorithm>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -605,12 +606,57 @@ extern "C"
         return make_pair(solver.is_solved(), dep_graph);
     }
 
-    pair<bool, py::list> run_ddar_with_custom_theorems(
+    vector<CustomRule> compile_rule_bank(const vector<string> &text)
+    {
+        for (const auto &rule : text)
+        {
+            vector<string> fields;
+            size_t start = 0;
+            while (true)
+            {
+                const auto separator = rule.find('|', start);
+                fields.push_back(rule.substr(start, separator == string::npos ? separator : separator-start));
+                if (separator == string::npos) break;
+                start = separator + 1;
+            }
+            if (fields.size() < 3 || fields.size() > 4 || fields[0].find_first_not_of(" \t\r\n") == string::npos)
+                throw invalid_argument("Compiled rules require name|premises|conclusions[|guards]");
+            for (size_t field = 1; field < fields.size(); ++field)
+            {
+                const auto &value = fields[field];
+                if (field == 3 && value.find_first_not_of(" \t\r\n") == string::npos)
+                    continue;
+                size_t first = 0;
+                while (true)
+                {
+                    const auto comma = value.find(',', first);
+                    stringstream atom(value.substr(first, comma == string::npos ? comma : comma-first));
+                    string predicate, argument;
+                    if (!(atom >> predicate >> argument))
+                        throw invalid_argument("Compiled rule contains an empty or incomplete predicate");
+                    if (comma == string::npos) break;
+                    first = comma + 1;
+                }
+            }
+        }
+        auto rules = parse_custom_theorems(text);
+        if (rules.size() != text.size())
+            throw invalid_argument("Compiled rule parsing changed the rule count");
+        return rules;
+    }
+
+    struct CompiledRuleBank
+    {
+        const vector<CustomRule> rules;
+        explicit CompiledRuleBank(const vector<string> &text) : rules(compile_rule_bank(text)) {}
+    };
+
+    pair<bool, py::list> run_ddar_with_rule_bank(
         string name,
         vector<tuple<string, double, double>> points,
         vector<pair<string, vector<string>>> premises,
         vector<pair<string, vector<string>>> goals,
-        vector<string> custom_theorem_strings,
+        const vector<CustomRule> &custom_rules,
         int max_level,
         py::dict config)
     {
@@ -637,11 +683,8 @@ extern "C"
         DDARSolver solver(&problem, config_map);
 
         // 添加自定义定理
-        if (!custom_theorem_strings.empty())
-        {
-            vector<CustomRule> custom_rules = parse_custom_theorems(custom_theorem_strings);
+        if (!custom_rules.empty())
             solver.add_custom_theorems(custom_rules);
-        }
 
         solver.run(max_level);
 
@@ -674,6 +717,31 @@ extern "C"
         // }
 
         return make_pair(solver.is_solved(), dep_graph);
+    }
+
+    pair<bool, py::list> run_ddar_with_custom_theorems(
+        string name,
+        vector<tuple<string, double, double>> points,
+        vector<pair<string, vector<string>>> premises,
+        vector<pair<string, vector<string>>> goals,
+        vector<string> custom_theorem_strings,
+        int max_level, py::dict config)
+    {
+        auto rules = parse_custom_theorems(custom_theorem_strings);
+        return run_ddar_with_rule_bank(std::move(name), std::move(points), std::move(premises),
+                                      std::move(goals), rules, max_level, config);
+    }
+
+    pair<bool, py::list> run_ddar_with_compiled_theorems(
+        string name,
+        vector<tuple<string, double, double>> points,
+        vector<pair<string, vector<string>>> premises,
+        vector<pair<string, vector<string>>> goals,
+        const CompiledRuleBank &bank,
+        int max_level, py::dict config)
+    {
+        return run_ddar_with_rule_bank(std::move(name), std::move(points), std::move(premises),
+                                      std::move(goals), bank.rules, max_level, config);
     }
 
     vector<string> get_possible_goals(
@@ -808,6 +876,15 @@ PYBIND11_MODULE(DDAR, m)
           py::arg("goals"),
           py::arg("max_level"),
           py::arg("config"));
+
+    py::class_<CompiledRuleBank>(m, "CompiledRuleBank")
+        .def(py::init<const vector<string> &>())
+        .def("__len__", [](const CompiledRuleBank &bank) { return bank.rules.size(); });
+    m.def("compile_custom_theorems", [](const vector<string> &rules) { return std::make_unique<CompiledRuleBank>(rules); },
+          py::arg("rules"), "Compile an immutable rule bank once for repeated problems");
+    m.def("run_ddar_with_compiled_theorems", &run_ddar_with_compiled_theorems,
+          py::arg("name"), py::arg("points"), py::arg("premises"), py::arg("goals"),
+          py::arg("bank"), py::arg("max_level"), py::arg("config"));
 
     m.def("run_ddar_with_custom_theorems", &run_ddar_with_custom_theorems,
           "Run DDAR with custom theorems",

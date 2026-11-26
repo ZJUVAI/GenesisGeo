@@ -245,6 +245,8 @@ class CSolver:
         points: List[Tuple[str, Any, Any]] = None,
         premises: List[Tuple[str, List[str]]] = None,
         goals: List[Tuple[str, List[str]]] = None,
+        *,
+        build_max_attempts: int = 10000,
         **overrides,
     ):
         """
@@ -259,6 +261,7 @@ class CSolver:
             points: Pre-built points list (lowest priority, used only when no other init path applies)
             premises: Pre-built premises list (used together with points/goals)
             goals: Pre-built goals list (used together with points/premises)
+            build_max_attempts: Limit on numeric construction attempts.
             **overrides: Config overrides (e.g., using_log=True, using_exp=False, light=True)
 
         Examples:
@@ -278,6 +281,13 @@ class CSolver:
             CSolver(points=pts, premises=prems, goals=gls)
         """
         from newclid.configs import load_solver_config
+
+        if (
+            isinstance(build_max_attempts, bool)
+            or not isinstance(build_max_attempts, int)
+            or build_max_attempts < 1
+        ):
+            raise ValueError("build_max_attempts must be a positive integer")
 
         # Load config with overrides
         final_config = load_solver_config(config_path, **overrides)
@@ -301,7 +311,7 @@ class CSolver:
             )
             rng = np.random.default_rng(self.seed)
             self.points, self.premises, self.goals = build_ddar_input(
-                problemJGEX, _defs, rng
+                problemJGEX, _defs, rng, max_attempts=build_max_attempts
             )
             for _, args in self.premises:
                 for a in args:
@@ -311,7 +321,7 @@ class CSolver:
             self.solver = (
                 GeometricSolverBuilder(self.seed)
                 .load_problem_from_txt(self.problem)
-                .build()
+                .build(max_attempts=build_max_attempts)
             )
             self._extract_premises()
             self._extract_goals()
@@ -372,13 +382,14 @@ class CSolver:
         self,
         max_level: int = 500,
         save_path: str | Path | None = None,
-        custom_rules: List[str] = None,
+        custom_rules: Any = None,
         *,
         goal_checks_only: bool = False,
         goal_proofs_only: bool = False,
     ) -> bool:
         """
         运行 DDAR 并执行求解。
+        :param custom_rules: Rule strings or an immutable DDAR.CompiledRuleBank.
         :param max_level: 最大推理层数
         :param save_path: 可选，保存证明步骤的路径。
         :param goal_checks_only: 仅用于之后检查目标真假、不读取证明的调用。
@@ -420,7 +431,12 @@ class CSolver:
         )
 
         if custom_rules:
-            solved, dep_graph = DDAR.run_ddar_with_custom_theorems(
+            runner = (
+                DDAR.run_ddar_with_compiled_theorems
+                if isinstance(custom_rules, getattr(DDAR, "CompiledRuleBank", ()))
+                else DDAR.run_ddar_with_custom_theorems
+            )
+            solved, dep_graph = runner(
                 self.problem_name,
                 self.points,
                 self.premises,
