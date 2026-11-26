@@ -45,6 +45,8 @@ private:
     bool transfer_equal_distance_products(const std::unordered_set<Proof *> &requested);
 
     std::vector<Proof *> _checked_statements;
+    // Proven point equalities only; ordinary facts must not scan the full proof graph.
+    std::vector<Proof *> _point_equalities;
 
     bool _solved{false};
 

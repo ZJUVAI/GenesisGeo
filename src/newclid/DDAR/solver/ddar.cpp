@@ -406,6 +406,8 @@ size_t DDARSolver::push_established_statement(Proof *pf)
 {
     size_t const index = _checked_statements.size();
     _checked_statements.push_back(pf);
+    if (pf->name() == "eqpoint")
+        _point_equalities.push_back(pf);
     return index;
 }
 
@@ -511,9 +513,8 @@ void DDARSolver::add_established_equations(Proof *pf)
     {
         // Facts established after an equality must receive the same transfer
         // as facts established before it; premise order must not matter.
-        for (Proof *equality : _checked_statements)
-            if (equality->name() == "eqpoint")
-                transfers.emplace_back(equality, pf);
+        for (Proof *equality : _point_equalities)
+            transfers.emplace_back(equality, pf);
     }
     for (const auto &[equality, original] : transfers)
     {
