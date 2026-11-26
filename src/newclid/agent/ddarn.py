@@ -39,6 +39,7 @@ class DDARN(DeductiveAgent):
                 return infos
         t0 = time.time()
         proof.dep_graph.obtain_numerical_checked_premises()
+        proof.matcher.register_ratio_goals(proof.goals)
         step = 0
         running = True
         while running and time.time() - t0 < timeout:

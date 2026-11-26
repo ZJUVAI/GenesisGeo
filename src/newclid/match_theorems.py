@@ -43,6 +43,36 @@ class Matcher:
                 json.dump({}, f)
         self.cache = {}
         self.rule_match_time = {}
+        self.ratio_goal_anchors: tuple[tuple[int, ...], ...] = ()
+
+    def register_ratio_goals(self, goals: list[Statement]) -> None:
+        """Use requested true ratios as extra numerical anchors for conclusions."""
+        points = self.dep_graph.symbols_graph.nodes_of_type(Point)
+        indexes = {point: i for i, point in enumerate(points)}
+        anchors = set()
+        orders = tuple(
+            order
+            for order in itertools.permutations(range(4))
+            if {order[0], order[3]} in ({0, 3}, {1, 2})
+        )
+        for goal in goals:
+            if goal.predicate.NAME != "eqratio" or len(goal.args) != 8:
+                continue
+            indices = tuple(indexes[point] for point in goal.args)
+            segments = tuple(indices[i : i + 2] for i in range(0, 8, 2))
+            for directed in itertools.product(
+                *((edge, edge[::-1]) for edge in segments)
+            ):
+                for order in orders:
+                    anchors.add(tuple(point for i in order for point in directed[i]))
+        ordered = tuple(sorted(anchors))
+        if getattr(self, "ratio_goal_anchors", None) != ordered:
+            self.ratio_goal_anchors = ordered
+            self.cache = {
+                rule: deps
+                for rule, deps in self.cache.items()
+                if rule.conclusions[0][0] != "eqratio"
+            }
 
     def apply_theorem(
         self, theorem: "Rule", mapping: dict[str, str]
@@ -113,7 +143,17 @@ class Matcher:
 
         return result
 
+    @staticmethod
+    def equation_anchor_covers_rule(theorem, anchor):
+        # The indexed equation matcher cannot bind additional variables or
+        # interpret trailing scalar constants. Use the ordinary matcher there.
+        return not set(theorem.variables()).difference(anchor[1:]) and not any(
+            p[0] in {"aconst", "rconst"} for p in theorem.premises
+        )
+
     def cache_eq_premise_theorem(self, theorem, points):
+        if not self.equation_anchor_covers_rule(theorem, theorem.premises[0]):
+            return self.cache_normal_theorem(theorem, points)
         statement_list = None
         res: set[Dependency] = set()
         premises = theorem.premises
@@ -262,6 +302,8 @@ class Matcher:
         res: set[Dependency] = set()
 
         for mapping in mappings:
+            if not set(theorem.variables()) <= mapping.keys():
+                continue
             why = []
             flag = False
             for key in mapping:
@@ -342,6 +384,11 @@ class Matcher:
         return res
 
     def cache_eq_conclusion_theorem(self, theorem, points):
+        # The equation index binds only variables in its anchor. Rules with
+        # additional points need the premise matcher to bind them explicitly.
+        if not self.equation_anchor_covers_rule(theorem, theorem.conclusions[0]):
+            return self.cache_normal_theorem(theorem, points)
+
         statement_list = None
         res: set[Dependency] = set()
         premises = theorem.premises
@@ -349,7 +396,14 @@ class Matcher:
         if premise[0] == "eqangle":
             statement_list = self.dep_graph.numerical_checked_eqangle
         if premise[0] == "eqratio":
-            statement_list = self.dep_graph.numerical_checked_eqratio
+            statement_list = list(
+                dict.fromkeys(
+                    (
+                        *self.dep_graph.numerical_checked_eqratio,
+                        *self.ratio_goal_anchors,
+                    )
+                )
+            )
         point_coors = [
             (p.num.x, p.num.y)
             for p in self.dep_graph.symbols_graph.nodes_of_type(Point)

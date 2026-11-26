@@ -129,52 +129,6 @@ Point calculate_center(const Point &a, const Point &b, const Point &c)
     return std::make_pair(x, y);
 }
 
-void generate_mappings(const std::vector<std::string> &vec, size_t n, std::vector<std::unordered_map<std::string, int>> &result)
-{
-    size_t total_combinations = 1;
-    for (size_t i = 0; i < vec.size(); ++i)
-    {
-        total_combinations *= n;
-    }
-
-    result.resize(total_combinations, std::unordered_map<std::string, int>(vec.size()));
-
-    for (size_t i = 0; i < total_combinations; ++i)
-    {
-        size_t temp = i;
-        for (size_t j = 0; j < vec.size(); ++j)
-        {
-            result[i][vec[j]] = temp % n;
-            temp /= n;
-        }
-    }
-}
-
-std::vector<std::vector<std::unordered_map<std::string, int>>> mapping_theorem_to_points(const std::vector<std::vector<std::string>> &theorem, const size_t &n)
-{
-    std::vector<std::vector<std::unordered_map<std::string, int>>> result;
-    std::vector<std::string> points;
-    for (const auto &premise : theorem)
-    {
-        std::vector<std::string> new_points;
-        std::vector<std::unordered_map<std::string, int>> mapping;
-        for (size_t i = 1; i < premise.size(); i++)
-        {
-            if (std::find(points.begin(), points.end(), premise[i]) == points.end())
-            {
-                new_points.push_back(premise[i]);
-                points.push_back(premise[i]);
-            }
-        }
-        if (!new_points.empty())
-        {
-            generate_mappings(new_points, n, mapping);
-        }
-        result.push_back(mapping);
-    }
-    return result;
-}
-
 double clock(const Point &a, const Point &b, const Point &c)
 {
     double abx = b.first - a.first;
@@ -294,21 +248,18 @@ bool check_numerical(std::string type, const std::vector<Point> &points)
     }
     else if (type == "para")
     {
-        if (points.size() % 2 != 0)
+        if (points.size() < 4 || points.size() % 2 != 0 || close_enough(points[0], points[1]))
             return false;
-        double ang = -1;
-        for (size_t i = 0; i < points.size() - 1; i = i + 2)
+        double reference = modpi(angle(points[0], points[1]));
+        for (size_t i = 2; i < points.size(); i += 2)
         {
             if (close_enough(points[i], points[i + 1]))
-            {
                 return false;
-            }
-            double current_ang = angle(points[i], points[i + 1]);
-            if (ang >= 0 && !close_enough(ang, current_ang))
-            {
+            const double direction = modpi(angle(points[i], points[i + 1]));
+            if (!close_enough(reference, direction)
+                && !close_enough(std::remainder(direction - reference, M_PI), 0.0))
                 return false;
-            }
-            ang = current_ang;
+            reference = direction;
         }
         return true;
     }
@@ -488,109 +439,162 @@ bool check_numerical(std::string type, const std::vector<Point> &points)
     return false;
 }
 
-double parseFraction(const std::string& input) {
-    size_t slashPos = input.find('/');
-    if (slashPos == std::string::npos) {
-        throw std::invalid_argument("Input must contain '/'");
-    }
-
-    std::string numeratorStr = input.substr(0, slashPos);
-    std::string denominatorStr = input.substr(slashPos + 1);
-
-    double numerator = 0.0;
-    double denominator = 0.0;
-
-    // 检查分子是否含有 "pi"
-    size_t piPos = numeratorStr.find("pi");
-    if (piPos != std::string::npos) {
-        std::string numberPart = numeratorStr.substr(0, piPos);
-        if (numberPart.empty()) {
-            numerator = M_PI;
-        } else {
-            numerator = std::stod(numberPart) * M_PI;
-        }
-    } else {
-        numerator = std::stod(numeratorStr);
-    }
-
-    denominator = std::stod(denominatorStr);
-
-    if (denominator == 0) {
-        throw std::invalid_argument("Denominator cannot be zero");
-    }
-
-    return numerator / denominator;
+long long parseInteger(const std::string &text)
+{
+    size_t used = 0;
+    const auto value = std::stoll(text, &used);
+    if (used != text.size())
+        throw std::invalid_argument("Invalid scalar constant: " + text);
+    return value;
 }
 
-void check_submapping(const size_t index, const std::vector<std::vector<std::string>> &theorem, const std::vector<Point> &points, std::vector<std::vector<std::unordered_map<std::string, int>>> &mappings, std::vector<std::unordered_map<std::string, int>> &results, std::unordered_map<std::string, int> &current_mapping)
+double parseFraction(const std::string &input, bool angle_constant)
 {
-    if (index == theorem.size())
+    long long numerator, denominator = 1;
+    const auto pi = input.find("pi/");
+    const auto slash = input.find('/');
+    if (!input.empty() && input.back() == 'o')
     {
-        results.push_back(current_mapping);
+        numerator = parseInteger(input.substr(0, input.size()-1));
+        denominator = 180;
+    }
+    else if (pi != std::string::npos)
+    {
+        numerator = parseInteger(input.substr(0, pi));
+        denominator = parseInteger(input.substr(pi+3));
+    }
+    else if (slash != std::string::npos)
+    {
+        numerator = parseInteger(input.substr(0, slash));
+        denominator = parseInteger(input.substr(slash+1));
+    }
+    else
+        numerator = parseInteger(input);
+    if (denominator == 0)
+        throw std::invalid_argument("Denominator cannot be zero");
+    if (angle_constant)
+    {
+        // std::fmod operates on the small exact integer remainder, not on a
+        // potentially enormous floating-point multiple of pi.
+        const auto remainder = denominator == -1 ? 0LL : numerator % denominator;
+        double coefficient = static_cast<double>(remainder) / denominator;
+        if (coefficient < 0) coefficient += 1;
+        return coefficient * M_PI;
+    }
+    return static_cast<double>(numerator) / denominator;
+}
+
+namespace
+{
+struct CompiledPremise
+{
+    std::string predicate;
+    std::vector<size_t> slots;
+    size_t first_new_slot;
+    size_t end_new_slot;
+    std::vector<Point> arguments;
+};
+
+void match_premise(size_t index, size_t assigned_end,
+                   std::vector<CompiledPremise> &premises,
+                   const std::vector<Point> &points,
+                   const std::vector<std::string> &variables,
+                   std::vector<int> &binding,
+                   std::vector<std::unordered_map<std::string, int>> &results)
+{
+    if (index == premises.size())
+    {
+        std::unordered_map<std::string, int> result;
+        result.reserve(variables.size());
+        for (size_t i = 0; i < variables.size(); ++i)
+            result.emplace(variables[i], binding[i]);
+        results.push_back(std::move(result));
         return;
     }
 
-    auto premise = theorem[index];
-    auto submappings = mappings[index];
+    auto &premise = premises[index];
+    if (assigned_end > premise.first_new_slot)
+    {
+        const size_t slot = assigned_end - 1;
+        for (size_t point = 0; point < points.size(); ++point)
+        {
+            binding[slot] = point;
+            match_premise(index, slot, premises, points, variables, binding, results);
+        }
+        return;
+    }
 
-    for (auto submapping : submappings)
+    for (size_t i = 0; i < premise.slots.size(); ++i)
+        premise.arguments[i] = points[binding[premise.slots[i]]];
+    if (check_numerical(premise.predicate, premise.arguments))
     {
-        auto new_mapping = current_mapping;
-        for (auto &pair : submapping)
-        {
-            new_mapping[pair.first] = pair.second;
-        }
-        std::string type = premise[0];
-        std::vector<Point> mapped_points;
-        for (size_t i = 1; i < premise.size(); ++i)
-        {
-            if (i == premise.size() - 1 && (type == "aconst" || type == "rconst"))
-            {
-                mapped_points.push_back(std::make_pair(parseFraction(premise[i]), 0));
-                break;
-            }
-            mapped_points.push_back(points[new_mapping[premise[i]]]);
-        }
-        if (check_numerical(type, mapped_points))
-        {
-            check_submapping(index + 1, theorem, points, mappings, results, new_mapping);
-        }
+        const size_t next_end = index + 1 < premises.size()
+            ? premises[index + 1].end_new_slot : binding.size();
+        match_premise(index + 1, next_end, premises, points, variables, binding, results);
     }
-    if (submappings.empty())
-    {
-        std::string type = premise[0];
-        std::vector<Point> mapped_points;
-        for (size_t i = 1; i < premise.size(); ++i)
-        {
-            if (i == premise.size() - 1 && (type == "aconst" || type == "rconst"))
-            {
-                mapped_points.push_back(std::make_pair(parseFraction(premise[i]), 0));
-                break;
-            }
-            mapped_points.push_back(points[current_mapping[premise[i]]]);
-        }
-        if (check_numerical(type, mapped_points))
-        {
-            check_submapping(index + 1, theorem, points, mappings, results, current_mapping);
-        }
-    }
+}
 }
 
 extern "C"
 {
     std::vector<std::unordered_map<std::string, int>> mapping_nomal_theorem(const std::vector<std::vector<std::string>> &theorem, const std::vector<Point> &points)
     {
-        auto mappings = mapping_theorem_to_points(theorem, points.size());
-        std::vector<std::unordered_map<std::string, int>> mapping;
-        std::unordered_map<std::string, int> current_mapping;
-        check_submapping(0, theorem, points, mappings, mapping, current_mapping);
-        return mapping;
+        std::vector<std::unordered_map<std::string, int>> results;
+        std::vector<std::string> variables;
+        std::unordered_map<std::string, size_t> slots;
+        std::vector<CompiledPremise> premises;
+        for (const auto &tokens : theorem)
+        {
+            if (tokens.size() < 2)
+                throw py::value_error("Each premise requires a predicate and arguments");
+            const bool has_constant = tokens[0] == "aconst" || tokens[0] == "rconst";
+            if (has_constant && tokens.size() != 6)
+                throw py::value_error("Constant predicates require four points and a scalar");
+            const size_t point_end = tokens.size() - (has_constant ? 1 : 0);
+            CompiledPremise premise{tokens[0], {}, variables.size(), 0, {}};
+            for (size_t i = 1; i < point_end; ++i)
+            {
+                const auto entry = slots.emplace(tokens[i], variables.size());
+                if (entry.second)
+                    variables.push_back(tokens[i]);
+                premise.slots.push_back(entry.first->second);
+            }
+            premise.end_new_slot = variables.size();
+            premise.arguments.resize(tokens.size() - 1);
+            if (has_constant)
+                premise.arguments.back() = {parseFraction(tokens.back(), tokens[0] == "aconst"), 0};
+            premises.push_back(std::move(premise));
+        }
+        std::vector<int> binding(variables.size());
+        match_premise(0, premises.empty() ? 0 : premises.front().end_new_slot,
+                      premises, points, variables, binding, results);
+        return results;
     }
 
     std::vector<std::unordered_map<std::string, int>> mapping_eq_theorem(const std::vector<std::vector<std::string>> &theorem, const std::vector<Point> &points, const std::vector<std::tuple<int, int, int, int, int, int, int, int>> eqs)
     {
         std::vector<std::unordered_map<std::string, int>> mappings;
         std::vector<std::unordered_map<std::string, int>> candidate_mappings;
+        if (theorem.empty() || theorem[0].size() != 9 ||
+            (theorem[0][0] != "eqangle" && theorem[0][0] != "eqratio"))
+            throw py::value_error("Equation matching requires an eight-point anchor");
+        std::set<std::string> anchored(theorem[0].begin()+1, theorem[0].end());
+        for (const auto &premise : theorem)
+        {
+            if (premise.size() < 2 || premise[0] == "aconst" || premise[0] == "rconst")
+                throw py::value_error("Use ordinary matching for scalar constants or empty premises");
+            for (size_t i = 1; i < premise.size(); ++i)
+                if (!anchored.count(premise[i]))
+                    throw py::value_error("Equation anchor does not bind every variable");
+        }
+        for (const auto &equation : eqs)
+        {
+            const int indices[] = {std::get<0>(equation),std::get<1>(equation),std::get<2>(equation),std::get<3>(equation),
+                                   std::get<4>(equation),std::get<5>(equation),std::get<6>(equation),std::get<7>(equation)};
+            for (int index : indices)
+                if (index < 0 || static_cast<size_t>(index) >= points.size())
+                    throw py::value_error("Equation point index is out of range");
+        }
         for (size_t i = 0; i < eqs.size(); i++)
         {
             int a = std::get<0>(eqs[i]);
