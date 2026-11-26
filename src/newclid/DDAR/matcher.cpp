@@ -1,6 +1,8 @@
 #include "predicate/cong.hpp"
 #include "predicate/sameclock.hpp"
 #include <array>
+#include <bit>
+#include <limits>
 #include "matcher.hpp"
 #include "numerical.hpp"
 #include "theorem.hpp"
@@ -996,15 +998,37 @@ namespace
         return (HasTrailingConstant(stmt.first) && n > 0) ? n - 1 : n;
     }
 
+    // Bind points with smaller indexed predicates before checking angles or ratios.
+    set<string> DeferredPredicates(const vector<Stmt> &premises)
+    {
+        set<string> bound;
+        for (const auto &premise : premises)
+        {
+            const auto &pred = premise.first;
+            if (pred == "midp" || pred == "coll" || pred == "cong" ||
+                pred == "para" || pred == "perp")
+                bound.insert(premise.second.begin(), premise.second.end());
+        }
+        set<string> deferred{"eqangle", "eqratio"};
+        for (const auto &premise : premises)
+        {
+            if (!deferred.contains(premise.first))
+                continue;
+            set<string> unbound;
+            for (const auto &point : premise.second)
+                if (!bound.contains(point))
+                    unbound.insert(point);
+            // Scanning one free point avoids building a whole-diagram index.
+            if (unbound.size() > 1)
+                deferred.erase(premise.first);
+        }
+        return deferred;
+    }
+
     // 内部工具：在 Mapping 中查找变量绑定的点索引
     int FindBinding(const Mapping &mapping, const string &var)
     {
-        for (const auto &kv : mapping)
-        {
-            if (kv.first == var)
-                return kv.second;
-        }
-        return -1;
+        return mapping.find(var);
     }
 }
 
@@ -1040,39 +1064,66 @@ vector<string> CustomTheoremMatcher::collect_new_vars(const Stmt &stmt, const Ma
 
 bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping) const
 {
-    vector<string> real_args;
+    const size_t n_point_args = GetPointArgsCount(stmt);
+    std::array<int, 8> small_indices;
+    vector<int> wide_indices;
+    if (n_point_args > small_indices.size()) wide_indices.reserve(n_point_args);
+    uint64_t key = 0;
+    for (size_t i = 0; i < n_point_args; ++i)
+    {
+        int index = FindBinding(mapping, stmt.second[i]);
+        if (index < 0) return false;
+        if (n_point_args <= small_indices.size()) small_indices[i] = index;
+        else wide_indices.push_back(index);
+        key = (key << 8) | uint64_t(index);
+    }
+    const bool cache = n_point_args <= 8 && n_point_args == stmt.second.size() &&
+                       _problem->num_points() <= 256 && _memo_enabled;
+    unordered_map<uint64_t, bool> *memo = nullptr;
+    if (cache)
+    {
+        memo = &_numeric_memo[stmt.first][n_point_args];
+        if (auto found = memo->find(key); found != memo->end())
+        {
+            ++_numeric_hits;
+            return found->second;
+        }
+        ++_numeric_misses;
+    }
     vector<int> pt_indices;
-    size_t n_point_args = GetPointArgsCount(stmt);
-
-    for (size_t i = 0; i < stmt.second.size(); ++i)
+    if (n_point_args <= small_indices.size())
+        pt_indices.assign(small_indices.begin(), small_indices.begin()+n_point_args);
+    else
+        pt_indices = std::move(wide_indices);
+    vector<string> real_args;
+    real_args.reserve(stmt.second.size());
+    for (int index : pt_indices)
+        real_args.push_back(_problem->point(index).name());
+    for (size_t i = n_point_args; i < stmt.second.size(); ++i)
+        real_args.push_back(stmt.second[i]);
+    const auto evaluate = [&]() -> bool
     {
-        const string &arg = stmt.second[i];
-        if (i < n_point_args)
+        try
         {
-            int pt_idx = FindBinding(mapping, arg);
-            if (pt_idx == -1)
-                return false;
-            pt_indices.push_back(pt_idx);
-            real_args.push_back(_problem->point(pt_idx).name());
+            auto s = _problem->create_statement(stmt.first, real_args);
+            // 退化筛子只针对 para：其它 4 元谓词里出现重复变量是正常的
+            // （例如 cong A B B C），不能一起拦掉。
+            return s && s->check_numerically() &&
+                   (stmt.first != "para" || para_instance_ok(pt_indices));
         }
-        else
+        catch (...)
         {
-            real_args.push_back(arg); // 透传常量参数
+            return false;
         }
-    }
-
-    try
+    };
+    const bool valid = evaluate();
+    // Hitting the memory limit only causes recomputation, never pruning.
+    if (memo && _numeric_memo_size < 500000)
     {
-        auto s = _problem->create_statement(stmt.first, real_args);
-        // 退化筛子只针对 para：其它 4 元谓词里出现重复变量是正常的
-        // （例如 cong A B B C），不能一起拦掉。
-        return s && s->check_numerically() &&
-               (stmt.first != "para" || para_instance_ok(pt_indices));
+        memo->emplace(key, valid);
+        ++_numeric_memo_size;
     }
-    catch (...)
-    {
-        return false;
-    }
+    return valid;
 }
 
 bool CustomTheoremMatcher::para_instance_ok(const std::vector<int> &pts) const
@@ -1349,11 +1400,12 @@ void CustomTheoremMatcher::build_eqratio_indices(size_t n)
     struct RatioInfo
     {
         double value;   // 比值
+        double up, down;
         int a, b, c, d; // 原始点索引，表示 AB/CD
     };
 
     vector<RatioInfo> ratios;
-    const double eps = 1e-8;
+    double minimum_denominator = std::numeric_limits<double>::infinity();
 
     // 1. 遍历所有合法的距离对 (4个点，AB和CD可以共享点)
     for (int a = 0; a < n; ++a)
@@ -1376,12 +1428,11 @@ void CustomTheoremMatcher::build_eqratio_indices(size_t n)
                         double len_ab = dist_ab.to_double();
                         double len_cd = dist_cd.to_double();
 
-                        if (std::abs(len_cd) < eps)
-                            continue;
-
                         double ratio = len_ab / len_cd;
-
-                        ratios.push_back({ratio, a, b, c, d});
+                        if (!(len_cd > 0) || !std::isfinite(ratio) || !std::isfinite(len_ab) || !std::isfinite(len_cd))
+                            continue;
+                        minimum_denominator = std::min(minimum_denominator, len_cd);
+                        ratios.push_back({ratio, len_ab, len_cd, a, b, c, d});
                     }
                     catch (...)
                     {
@@ -1401,16 +1452,19 @@ void CustomTheoremMatcher::build_eqratio_indices(size_t n)
 
     for (size_t i = 0; i < ratios.size(); ++i)
     {
-        for (size_t j = i + 1; j < ratios.size(); ++j)
+        const auto &rat1 = ratios[i];
+        // Sorted ratio windows must contain both branches of the native
+        // cross-product tolerance. A fixed ratio epsilon is not sufficient.
+        double upper = std::max(rat1.value / (1 - Numerical::relative_tolerance()),
+            rat1.value + Numerical::absolute_tolerance() / rat1.down / minimum_denominator);
+        upper += 64 * std::numeric_limits<double>::epsilon() * std::max(1.0, upper);
+        for (size_t j = i; j < ratios.size(); ++j)
         {
-            // 检查比值是否相同（是否在同一个桶）
-            if (std::abs(ratios[i].value - ratios[j].value) > eps)
-            {
-                break;
-            }
-
-            const auto &rat1 = ratios[i];
             const auto &rat2 = ratios[j];
+            if (rat2.value > upper)
+                break;
+            if (!Numerical::close_enough(rat1.up * rat2.down, rat1.down * rat2.up))
+                continue;
 
             // eqratio a b c d e f g h 表示 AB/CD = EF/GH
             int a1 = rat1.a, a2 = rat1.b, a3 = rat1.c, a4 = rat1.d;
@@ -1432,8 +1486,16 @@ void CustomTheoremMatcher::build_eqratio_indices(size_t n)
     }
 }
 
-void CustomTheoremMatcher::build_predicate_index()
+void CustomTheoremMatcher::build_predicate_index(const vector<CustomRule> &rules)
 {
+    set<string> predicates;
+    for (const auto &rule : rules)
+    {
+        const auto deferred = DeferredPredicates(rule.premises);
+        for (const auto &premise : rule.premises)
+            if (!deferred.contains(premise.first))
+                predicates.insert(premise.first);
+    }
     auto t_total = chrono::steady_clock::now();
     const size_t n = _problem->num_points();
 
@@ -1498,17 +1560,21 @@ void CustomTheoremMatcher::build_predicate_index()
 
     for (auto &p : {make_pair("midp", 3), {"coll", 3}, {"cong", 4}, {"para", 4}, {"perp", 4}})
     {
-        add_simple_indices(p.first, p.second);
+        if (predicates.contains(p.first))
+            add_simple_indices(p.first, p.second);
     }
 
     // 2. 处理三角形相似 (simtri/simtrir) - 保持原有形状签名算法，但逻辑更紧凑
-    build_triangle_indices(n);
+    if (predicates.contains("simtri") || predicates.contains("simtrir"))
+        build_triangle_indices(n);
 
     // 3. 处理等角 (eqangle)
-    build_eqangle_indices(n);
+    if (predicates.contains("eqangle"))
+        build_eqangle_indices(n);
 
     // 4. 处理等比 (eqratio)
-    build_eqratio_indices(n);
+    if (predicates.contains("eqratio"))
+        build_eqratio_indices(n);
 
     auto ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - t_total).count();
     // DebugLog("Predicate cache built in " + to_string(ms) + "ms");
@@ -1585,11 +1651,12 @@ void CustomTheoremMatcher::enumerate_brute_force(
 {
     const size_t n_pts = _problem->num_points();
     const size_t n_vars = new_vars.size();
-    bool allow_duplicate = get_config("allow_duplicate_points", false);
+    bool allow_duplicate = _allow_duplicates;
 
     // 内部递归 Lambda 函数用于生成笛卡尔积
     std::function<void(size_t)> generate_combinations = [&](size_t v_idx)
     {
+        if (results.size() >= _result_limit) return;
         // 所有新变量都已绑定
         if (v_idx == n_vars)
         {
@@ -1611,6 +1678,7 @@ void CustomTheoremMatcher::enumerate_brute_force(
             generate_combinations(v_idx + 1);
             used[p] = false;
             current.pop_back();
+            if (results.size() >= _result_limit) break;
         }
     };
 
@@ -1621,6 +1689,7 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
                                      Mapping &current, vector<bool> &used,
                                      vector<Mapping> &results) const
 {
+    if (results.size() >= _result_limit) return;
     if (stmt_idx == stmts.size())
     {
         results.push_back(current);
@@ -1641,12 +1710,52 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
     }
 
     // 情况 B：利用预计算索引快速匹配
-    if (auto it = _index.find(stmt.first); it != _index.end())
+    if (auto it = _index.find(stmt.first);
+        it != _index.end() &&
+        (it->second.empty() || it->second.front().size() == stmt.second.size()) &&
+        (new_vars.size() > 1 || it->second.size() <= _problem->num_points()))
     {
-        bool allow_duplicate = get_config("allow_duplicate_points", false);
+        bool allow_duplicate = _allow_duplicates;
 
-        for (const auto &combo : it->second)
+        // Compile a shared join index for the already bound argument columns.
+        // This replaces repeated full relation scans without changing candidates
+        // or their order, including repeated-variable and injectivity checks below.
+        const vector<size_t> *selected = nullptr;
+        if (_problem->num_points() <= 256 && stmt.second.size() <= 8 && _projection_enabled)
         {
+            unsigned mask = 0;
+            uint64_t key = 0;
+            for (size_t i = 0; i < stmt.second.size(); ++i)
+            {
+                const int value = FindBinding(current, stmt.second[i]);
+                if (value != -1)
+                {
+                    mask |= (1u << i);
+                    key = (key << 8) | uint64_t(value);
+                }
+            }
+            if (mask)
+            {
+            auto [projection, inserted] = _projections.try_emplace({stmt.first, mask});
+            if (inserted)
+                for (size_t row = 0; row < it->second.size(); ++row)
+                {
+                    uint64_t row_key = 0;
+                    for (size_t column = 0; column < stmt.second.size(); ++column)
+                        if (mask & (1u << column))
+                            row_key = (row_key << 8) | uint64_t(it->second[row][column]);
+                    projection->second[row_key].push_back(row);
+                }
+            auto found = projection->second.find(key);
+            if (found == projection->second.end())
+                return;
+            selected = &found->second;
+            }
+        }
+        const size_t candidate_count = selected ? selected->size() : it->second.size();
+        for (size_t candidate = 0; candidate < candidate_count; ++candidate)
+        {
+            const auto &combo = it->second[selected ? (*selected)[candidate] : candidate];
             size_t added_count = 0;
             bool conflict = false;
 
@@ -1683,6 +1792,7 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
                 used[current.back().second] = false;
                 current.pop_back();
             }
+            if (results.size() >= _result_limit) break;
         }
     }
     // 情况 C：暴力枚举（仅针对无索引谓词）
@@ -1694,6 +1804,7 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
 
 void CustomTheoremMatcher::match_rule(const CustomRule &rule)
 {
+    auto planning_start = chrono::steady_clock::now();
     // 1. 准备并排序前提 (约束强的优先)
     // 注意：只用前提参与 backtrack 匹配；结论不加入 sorted_stmts。
     // 原来把结论也塞进来一起 sort+backtrack，会导致 backtrack 把结论当"已知事实"
@@ -1701,19 +1812,166 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
     // 为空 → 规则永远不会被应用。结论的验证在第 3 步逐条数值校验中完成。
     vector<Stmt> sorted_stmts = rule.premises;
 
-    std::sort(sorted_stmts.begin(), sorted_stmts.end(), [this](const Stmt &a, const Stmt &b)
+    const auto deferred = DeferredPredicates(rule.premises);
+    std::sort(sorted_stmts.begin(), sorted_stmts.end(), [this, &deferred](const Stmt &a, const Stmt &b)
               {
+        if (deferred.contains(a.first) != deferred.contains(b.first))
+            return deferred.contains(b.first);
         auto it_a = _index.find(a.first), it_b = _index.find(b.first);
         size_t size_a = (it_a != _index.end()) ? it_a->second.size() : 999999;
         size_t size_b = (it_b != _index.end()) ? it_b->second.size() : 999999;
         return size_a < size_b; });
 
+    // Prefer checks whose points were bound by earlier premises. Preserve the
+    // original order for ties so independent checks still use index estimates.
+    unordered_map<string, uint64_t> variable_bits;
+    bool fits_bits = true;
+    for (const auto &stmt : sorted_stmts)
+        for (size_t i = 0; i < GetPointArgsCount(stmt); ++i)
+            if (!variable_bits.contains(stmt.second[i]))
+            {
+                if (variable_bits.size() == 64) { fits_bits = false; break; }
+                variable_bits.emplace(stmt.second[i], uint64_t(1) << variable_bits.size());
+            }
+    if (fits_bits && get_config("custom_bitset_plan", true))
+    {
+        vector<uint64_t> masks;
+        for (const auto &stmt : sorted_stmts)
+        {
+            uint64_t mask = 0;
+            for (size_t j = 0; j < GetPointArgsCount(stmt); ++j)
+                mask |= variable_bits.at(stmt.second[j]);
+            masks.push_back(mask);
+        }
+        uint64_t bound_mask = 0;
+        for (size_t first = 0; first < sorted_stmts.size(); ++first)
+        {
+            size_t best = first;
+            for (size_t candidate = first + 1; candidate < sorted_stmts.size(); ++candidate)
+            {
+                bool candidate_deferred = deferred.contains(sorted_stmts[candidate].first);
+                bool best_deferred = deferred.contains(sorted_stmts[best].first);
+                if (candidate_deferred != best_deferred ? !candidate_deferred :
+                    std::popcount(masks[candidate] & ~bound_mask) < std::popcount(masks[best] & ~bound_mask))
+                    best = candidate;
+            }
+            std::rotate(sorted_stmts.begin()+first, sorted_stmts.begin()+best, sorted_stmts.begin()+best+1);
+            std::rotate(masks.begin()+first, masks.begin()+best, masks.begin()+best+1);
+            bound_mask |= masks[first];
+        }
+    }
+    else
+    {
+        set<string> bound;
+        for (auto first = sorted_stmts.begin(); first != sorted_stmts.end(); ++first)
+        {
+            auto unbound_count = [&](const Stmt &stmt) {
+                set<string> new_points;
+                for (size_t i = 0; i < GetPointArgsCount(stmt); ++i)
+                    if (!bound.contains(stmt.second[i]))
+                        new_points.insert(stmt.second[i]);
+                return new_points.size();
+            };
+            auto best = std::min_element(first, sorted_stmts.end(), [&](const Stmt &a, const Stmt &b) {
+                if (deferred.contains(a.first) != deferred.contains(b.first))
+                    return !deferred.contains(a.first);
+                return unbound_count(a) < unbound_count(b);
+            });
+            std::rotate(first, best, best + 1);
+            for (size_t i = 0; i < GetPointArgsCount(*first); ++i)
+                bound.insert(first->second[i]);
+        }
+    }
+
+    // Schedule numerical inequality guards immediately after their last variable
+    // is bound. They remain guards, never logical hypotheses. Original premise
+    // order and candidate traversal are preserved.
+    if (get_config("custom_early_guards", true))
+    {
+        vector<Stmt> plan;
+        set<string> available;
+        vector<bool> scheduled(rule.guards.size(), false);
+        for (const auto &premise : sorted_stmts)
+        {
+            plan.push_back(premise);
+            for (size_t i = 0; i < GetPointArgsCount(premise); ++i)
+                available.insert(premise.second[i]);
+            for (size_t i = 0; i < rule.guards.size(); ++i)
+            {
+                const auto &guard = rule.guards[i];
+                if (scheduled[i] || (guard.first != "npara" && guard.first != "ncoll"))
+                    continue;
+                if (std::all_of(guard.second.begin(), guard.second.end(),
+                                [&](const string &arg) { return available.contains(arg); }))
+                {
+                    Stmt check = guard;
+                    plan.push_back(std::move(check));
+                    scheduled[i] = true;
+                }
+            }
+        }
+        sorted_stmts = std::move(plan);
+    }
+
+    auto backtrack_start = chrono::steady_clock::now();
+    _planning_seconds += chrono::duration<double>(backtrack_start-planning_start).count();
     // 2. 执行匹配（仅前提）
     Mapping current;
     vector<bool> used(_problem->num_points(), false);
     vector<Mapping> raw_results;
-    backtrack(sorted_stmts, 0, current, used, raw_results);
+    if (get_config("custom_shared_prefix", true) && sorted_stmts.size() >= 2)
+    {
+        size_t depth = 0;
+        set<string> prefix_variables;
+        for (size_t i = 0; i < std::min(size_t(6), sorted_stmts.size()); ++i)
+        {
+            for (size_t j = 0; j < GetPointArgsCount(sorted_stmts[i]); ++j)
+                prefix_variables.insert(sorted_stmts[i].second[j]);
+            if (prefix_variables.size() > 8) break;
+            ++depth;
+        }
+        if (depth == 0)
+            backtrack(sorted_stmts, 0, current, used, raw_results);
+        else
+        {
+            vector<Stmt> prefix(sorted_stmts.begin(), sorted_stmts.begin() + depth);
+            auto cached = _prefix_matches.find(prefix);
+            vector<Mapping> temporary;
+            const vector<Mapping> *bindings = nullptr;
+            if (cached != _prefix_matches.end())
+                bindings = &cached->second;
+            else
+            {
+                // Bound temporary materialization. An incomplete prefix is never
+                // cached or used: rerun the complete original search instead.
+                _result_limit = 5001;
+                backtrack(prefix, 0, current, used, temporary);
+                _result_limit = size_t(-1);
+                if (temporary.size() >= 5001)
+                    backtrack(sorted_stmts, 0, current, used, raw_results);
+                else if (_prefix_binding_count + temporary.size() <= 100000)
+                {
+                    _prefix_binding_count += temporary.size();
+                    bindings = &_prefix_matches.emplace(std::move(prefix), std::move(temporary)).first->second;
+                }
+                else
+                    bindings = &temporary;
+            }
+            if (bindings)
+                for (const auto &binding : *bindings)
+                {
+                    current = binding;
+                    std::fill(used.begin(), used.end(), false);
+                    for (const auto &entry : current) used[entry.second] = true;
+                    backtrack(sorted_stmts, depth, current, used, raw_results);
+                }
+        }
+    }
+    else
+        backtrack(sorted_stmts, 0, current, used, raw_results);
 
+    auto emitting_start = chrono::steady_clock::now();
+    _backtrack_seconds += chrono::duration<double>(emitting_start-backtrack_start).count();
     // 3. 结果转换与去重
     std::set<map<string, int>> unique_mappings;
     for (auto &m : raw_results)
@@ -1726,9 +1984,10 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         auto build_stmt = [&](const Stmt &s_stmt) -> unique_ptr<Statement>
         {
             vector<string> args;
-            for (const auto &arg : s_stmt.second)
+            const size_t point_args = GetPointArgsCount(s_stmt);
+            for (size_t i = 0; i < point_args; ++i)
             {
-                auto it = m_map.find(arg);
+                auto it = m_map.find(s_stmt.second[i]);
                 if (it == m_map.end())
                 {
                     // Variable not mapped to any concrete point in this
@@ -1738,6 +1997,8 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
                 }
                 args.push_back(_problem->point(it->second).name());
             }
+            if (point_args < s_stmt.second.size())
+                args.push_back(s_stmt.second.back());
             try
             {
                 return _problem->create_statement(s_stmt.first, args);
@@ -1802,18 +2063,6 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         // 这类结论，而不是让整条匹配崩掉。
         for (const auto &s_stmt : rule.conclusions)
         {
-            bool all_bound = true;
-            for (const auto &arg : s_stmt.second)
-            {
-                if (m_map.find(arg) == m_map.end())
-                {
-                    all_bound = false;
-                    break;
-                }
-            }
-            if (!all_bound)
-                continue;
-
             auto res_stmt = build_stmt(s_stmt);
             if (res_stmt && res_stmt->check_numerically() && stmt_instance_ok(s_stmt, m_map))
             {
@@ -1826,20 +2075,49 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
             _theorems.push_back(thm.normalize());
         }
     }
+    _emitting_seconds += chrono::duration<double>(chrono::steady_clock::now()-emitting_start).count();
 }
 
 CustomTheoremMatcher::CustomTheoremMatcher(Problem *prob, const vector<CustomRule> &rules,
                                            const map<string, bool> &config)
     : _problem(prob), _config(config)
 {
+    auto index_start = chrono::steady_clock::now();
+    _memo_enabled = get_config("custom_numeric_memo", true);
+    _projection_enabled = get_config("custom_projection_index", true);
+    _allow_duplicates = get_config("allow_duplicate_points", false);
     // 默认启用预计算索引
     bool use_cache = get_config("use_predicate_cache", true);
     if (use_cache)
-        build_predicate_index();
+        build_predicate_index(rules);
 
+    auto matching_start = chrono::steady_clock::now();
     for (const auto &rule : rules)
     {
+        auto started = chrono::steady_clock::now();
+        size_t before = _theorems.size();
         match_rule(rule);
+        if (get_config("profile_custom_match", false))
+        {
+            double seconds = chrono::duration<double>(chrono::steady_clock::now()-started).count();
+            if (seconds > 0.005)
+                cerr << "custom_profile " << rule.rule << " " << seconds << " " << (_theorems.size()-before) << endl;
+        }
+    }
+
+    if (get_config("profile_custom_match", false))
+    {
+        cerr << "custom_stage index " << chrono::duration<double>(matching_start-index_start).count()
+             << " matching " << chrono::duration<double>(chrono::steady_clock::now()-matching_start).count()
+             << " theorems " << _theorems.size()
+             << " planning " << _planning_seconds << " backtrack " << _backtrack_seconds
+             << " emitting " << _emitting_seconds
+             << " numeric_hits " << _numeric_hits << " numeric_misses " << _numeric_misses << endl;
+        for (const auto &[name, rows] : _index)
+        {
+            set<vector<int>> unique(rows.begin(), rows.end());
+            cerr << "custom_index " << name << " rows " << rows.size() << " unique " << unique.size() << endl;
+        }
     }
 
     // 调试用：打印每条 custom 规则实际匹配出的定理条数
@@ -1854,7 +2132,7 @@ CustomTheoremMatcher::CustomTheoremMatcher(Problem *prob, const vector<CustomRul
              << " custom_para_no_collinear="
              << (get_config("custom_para_no_collinear", true) ? 1 : 0)
              << " allow_duplicate_points="
-             << (get_config("allow_duplicate_points", false) ? 1 : 0) << endl;
+             << (_allow_duplicates ? 1 : 0) << endl;
         for (const auto &kv : by_rule)
             cout << "    " << kv.first << " x" << kv.second << endl;
     }

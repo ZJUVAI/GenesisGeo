@@ -6,6 +6,9 @@
 class Numerical
 {
 public:
+    static constexpr double absolute_tolerance() { return 4 * ATOM; }
+    static constexpr double relative_tolerance() { return REL_TOL; }
+
     static bool close_enough(const double &a, const double &b);
 
     static bool nearly_zero(double x);

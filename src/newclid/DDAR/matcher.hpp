@@ -2,6 +2,8 @@
 #define MATCHER_HPP
 
 #include <vector>
+#include <cstdint>
+#include <array>
 #include <unordered_map>
 #include <map>
 #include <string>
@@ -93,7 +95,38 @@ public:
 using Stmt = std::pair<std::string, std::vector<std::string>>;
 
 // Mapping: 定理点代号 -> Problem中点的索引
-using Mapping = std::vector<std::pair<std::string, int>>;
+class Mapping
+{
+    std::vector<std::pair<std::string, int>> _values;
+    // Normalized discovery variables use A..Z. Other names keep exact lookup.
+    std::array<int, 26> _single;
+public:
+    Mapping() { _single.fill(-1); }
+    void push_back(std::pair<std::string, int> value)
+    {
+        if (value.first.size()==1 && value.first[0]>='A' && value.first[0]<='Z')
+            _single[value.first[0]-'A'] = value.second;
+        _values.push_back(std::move(value));
+    }
+    void pop_back()
+    {
+        const auto &name = _values.back().first;
+        if (name.size()==1 && name[0]>='A' && name[0]<='Z')
+            _single[name[0]-'A'] = -1;
+        _values.pop_back();
+    }
+    int find(const std::string &name) const
+    {
+        if (name.size()==1 && name[0]>='A' && name[0]<='Z')
+            return _single[name[0]-'A'];
+        for (const auto &[key, value] : _values)
+            if (key==name) return value;
+        return -1;
+    }
+    auto begin() const { return _values.begin(); }
+    auto end() const { return _values.end(); }
+    const auto &back() const { return _values.back(); }
+};
 
 // Rule: (前提列表, 结论列表, 定理名, 规则名)
 struct CustomRule
@@ -116,8 +149,24 @@ private:
     // 例如 _index["coll"] = [[0,1,2], [1,0,2], [2,1,0], ...]
     std::unordered_map<std::string, std::vector<std::vector<int>>> _index;
 
+    // Share bound-column lookup tables across all rules in this problem.
+    // The numerical predicate index is immutable during custom matching.
+    // Reuse exact premise prefixes across rules; bindings retain traversal order.
+    std::map<std::vector<Stmt>, std::vector<Mapping>> _prefix_matches;
+    size_t _prefix_binding_count = 0;
+    double _planning_seconds = 0, _backtrack_seconds = 0, _emitting_seconds = 0;
+    // Exact numerical results on immutable coordinates, keyed by ordered points.
+    mutable std::unordered_map<std::string, std::array<std::unordered_map<uint64_t, bool>, 9>> _numeric_memo;
+    mutable size_t _numeric_memo_size = 0;
+    mutable size_t _numeric_hits = 0, _numeric_misses = 0;
+    bool _memo_enabled = true, _projection_enabled = true, _allow_duplicates = false;
+    size_t _result_limit = size_t(-1);
+
+    using ProjectionIndex = std::unordered_map<uint64_t, std::vector<size_t>>;
+    mutable std::map<std::pair<std::string, unsigned>, ProjectionIndex> _projections;
+
     // 预计算常见谓词的所有满足实例
-    void build_predicate_index();
+    void build_predicate_index(const std::vector<CustomRule> &rules);
 
     // 递归匹配 stmts[idx..] 在当前 mapping 下的所有合法扩展
     void backtrack(
