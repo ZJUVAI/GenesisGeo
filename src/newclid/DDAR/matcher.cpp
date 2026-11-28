@@ -24,6 +24,7 @@
 #include <set>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <iomanip>
 #include <cmath>
@@ -1084,44 +1085,34 @@ void CustomTheoremMatcher::DebugLog(const string &msg) const
     }
 }
 
-vector<string> CustomTheoremMatcher::collect_new_vars(const Stmt &stmt, const Mapping &current) const
-{
-    vector<string> new_vars;
-    size_t n_point_args = GetPointArgsCount(stmt);
-
-    for (size_t i = 0; i < n_point_args; ++i)
-    {
-        const string &arg = stmt.second[i];
-        // 如果当前 mapping 中没有，且 new_vars 中也没加入过，则视为新变量
-        if (FindBinding(current, arg) == -1 &&
-            std::find(new_vars.begin(), new_vars.end(), arg) == std::end(new_vars))
-        {
-            new_vars.push_back(arg);
-        }
-    }
-    return new_vars;
-}
-
 bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping) const
 {
-    const size_t n_point_args = GetPointArgsCount(stmt);
-    std::array<int, 8> small_indices;
-    vector<int> wide_indices;
-    if (n_point_args > small_indices.size()) wide_indices.reserve(n_point_args);
-    uint64_t key = 0;
-    for (size_t i = 0; i < n_point_args; ++i)
+    const size_t count = GetPointArgsCount(stmt);
+    array<int, 8> small;
+    vector<int> wide;
+    if (count > small.size())
+        wide.resize(count);
+    span<int> points(count <= small.size() ? small.data() : wide.data(), count);
+    for (size_t i = 0; i < count; ++i)
     {
-        int index = FindBinding(mapping, stmt.second[i]);
-        if (index < 0) return false;
-        if (n_point_args <= small_indices.size()) small_indices[i] = index;
-        else wide_indices.push_back(index);
-        key = (key << 8) | uint64_t(index);
+        points[i] = FindBinding(mapping, stmt.second[i]);
+        if (points[i] < 0)
+            return false;
     }
+    return verify_bound_stmt(stmt, points);
+}
+
+bool CustomTheoremMatcher::verify_bound_stmt(const Stmt &stmt, span<const int> points) const
+{
+    const size_t n_point_args = points.size();
     const bool cache = n_point_args <= 8 && n_point_args == stmt.second.size() &&
                        _problem->num_points() <= 256 && _memo_enabled;
     unordered_map<uint64_t, bool> *memo = nullptr;
+    uint64_t key = 0;
     if (cache)
     {
+        for (int point : points)
+            key = (key << 8) | uint64_t(point);
         memo = &_numeric_memo[stmt.first][n_point_args];
         if (auto found = memo->find(key); found != memo->end())
         {
@@ -1130,14 +1121,9 @@ bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping)
         }
         ++_numeric_misses;
     }
-    vector<int> pt_indices;
-    if (n_point_args <= small_indices.size())
-        pt_indices.assign(small_indices.begin(), small_indices.begin()+n_point_args);
-    else
-        pt_indices = std::move(wide_indices);
     vector<string> real_args;
     real_args.reserve(stmt.second.size());
-    for (int index : pt_indices)
+    for (int index : points)
         real_args.push_back(_problem->point(index).name());
     for (size_t i = n_point_args; i < stmt.second.size(); ++i)
         real_args.push_back(stmt.second[i]);
@@ -1145,10 +1131,10 @@ bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping)
     {
         if (stmt.first == "__guard_diff")
         {
-            if (pt_indices.size() != 2)
+            if (points.size() != 2)
                 return false;
-            const auto &a = _problem->point(pt_indices[0]);
-            const auto &b = _problem->point(pt_indices[1]);
+            const auto &a = _problem->point(points[0]);
+            const auto &b = _problem->point(points[1]);
             return std::isfinite(std::hypot(a.x()-b.x(), a.y()-b.y())) && !a.is_close(b);
         }
         if (stmt.first == "__guard_angle_defined" || stmt.first == "__guard_neqangle")
@@ -1168,7 +1154,7 @@ bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping)
             // 退化筛子只针对 para：其它 4 元谓词里出现重复变量是正常的
             // （例如 cong A B B C），不能一起拦掉。
             return s && s->check_numerically() &&
-                   (stmt.first != "para" || para_instance_ok(pt_indices));
+                   (stmt.first != "para" || para_instance_ok({points.begin(), points.end()}));
         }
         catch (...)
         {
@@ -1228,7 +1214,7 @@ bool CustomTheoremMatcher::para_instance_ok(const std::vector<int> &pts) const
     }
 }
 
-bool CustomTheoremMatcher::stmt_instance_ok(const Stmt &stmt, const std::map<std::string, int> &m_map) const
+bool CustomTheoremMatcher::stmt_instance_ok(const Stmt &stmt, const Mapping &mapping) const
 {
     if (stmt.first != "para")
         return true;
@@ -1240,10 +1226,10 @@ bool CustomTheoremMatcher::stmt_instance_ok(const Stmt &stmt, const std::map<std
 
     for (size_t i = 0; i < n_point_args; ++i)
     {
-        auto it = m_map.find(stmt.second[i]);
-        if (it == m_map.end())
-            return true; // 变量尚未绑定，交给原有流程处理
-        pts.push_back(it->second);
+        const int point = mapping.find(stmt.second[i]);
+        if (point < 0)
+            return true;
+        pts.push_back(point);
     }
     return para_instance_ok(pts);
 }
@@ -1703,7 +1689,7 @@ void CustomTheoremMatcher::build_predicate_index(const vector<CustomRule> &rules
 void CustomTheoremMatcher::enumerate_brute_force(
     const vector<Stmt> &stmts,
     size_t stmt_idx,
-    const vector<string> &new_vars,
+    span<const string *const> new_vars,
     Mapping &current,
     vector<bool> &used,
     vector<Mapping> &results) const
@@ -1732,7 +1718,7 @@ void CustomTheoremMatcher::enumerate_brute_force(
         {
             if (!allow_duplicate && used[p])
                 continue;
-            current.push_back({new_vars[v_idx], (int)p});
+            current.push_back({*new_vars[v_idx], (int)p});
             used[p] = true;
             generate_combinations(v_idx + 1);
             used[p] = false;
@@ -1756,15 +1742,53 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
     }
 
     const auto &stmt = stmts[stmt_idx];
-    auto new_vars = collect_new_vars(stmt, current);
-
-    // 情况 A：没有新变量，直接验证当前谓词
-    if (new_vars.empty())
+    struct Argument
     {
-        if (verify_stmt(stmt, current))
+        int bound;
+        size_t first;
+    };
+    const size_t count = GetPointArgsCount(stmt);
+    array<Argument, 8> small_arguments;
+    array<int, 8> small_points;
+    array<const string *, 8> small_vars;
+    vector<Argument> wide_arguments;
+    vector<int> wide_points;
+    vector<const string *> wide_vars;
+    if (count > small_arguments.size())
+    {
+        wide_arguments.resize(count);
+        wide_points.resize(count);
+        wide_vars.resize(count);
+    }
+    const bool small = count <= small_arguments.size();
+    auto *arguments = small ? small_arguments.data() : wide_arguments.data();
+    auto *points = small ? small_points.data() : wide_points.data();
+    auto *new_vars = small ? small_vars.data() : wide_vars.data();
+    size_t new_count = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto &name = stmt.second[i];
+        points[i] = FindBinding(current, name);
+        size_t first = i;
+        if (points[i] < 0)
         {
-            backtrack(stmts, stmt_idx + 1, current, used, results);
+            for (size_t j = 0; j < i; ++j)
+                if (stmt.second[j] == name)
+                {
+                    first = j;
+                    break;
+                }
+            if (first == i)
+                new_vars[new_count++] = &name;
         }
+        arguments[i] = {points[i], first};
+    }
+
+    // A fully bound premise can use the same lookup for its numerical check.
+    if (new_count == 0)
+    {
+        if (verify_bound_stmt(stmt, {points, count}))
+            backtrack(stmts, stmt_idx + 1, current, used, results);
         return;
     }
 
@@ -1772,7 +1796,8 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
     if (auto it = _index.find(stmt.first);
         it != _index.end() &&
         (it->second.empty() || it->second.front().size() == stmt.second.size()) &&
-        (new_vars.size() > 1 || it->second.size() <= _problem->num_points()))
+        count == stmt.second.size() &&
+        (new_count > 1 || it->second.size() <= _problem->num_points()))
     {
         bool allow_duplicate = _allow_duplicates;
 
@@ -1786,7 +1811,7 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
             uint64_t key = 0;
             for (size_t i = 0; i < stmt.second.size(); ++i)
             {
-                const int value = FindBinding(current, stmt.second[i]);
+                const int value = arguments[i].bound;
                 if (value != -1)
                 {
                     mask |= (1u << i);
@@ -1820,7 +1845,8 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
 
             for (size_t i = 0; i < stmt.second.size(); ++i)
             {
-                int bound_val = FindBinding(current, stmt.second[i]);
+                const auto [bound, first] = arguments[i];
+                const int bound_val = first == i ? bound : combo[first];
                 if (bound_val != -1)
                 {
                     if (bound_val != combo[i])
@@ -1857,7 +1883,7 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
     // 情况 C：暴力枚举（仅针对无索引谓词）
     else
     {
-        enumerate_brute_force(stmts, stmt_idx, new_vars, current, used, results);
+        enumerate_brute_force(stmts, stmt_idx, {new_vars, new_count}, current, used, results);
     }
 }
 
@@ -2088,11 +2114,25 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
     auto emitting_start = chrono::steady_clock::now();
     _backtrack_seconds += chrono::duration<double>(emitting_start-backtrack_start).count();
     // 3. 结果转换与去重
-    std::set<map<string, int>> unique_mappings;
-    for (auto &m : raw_results)
+    struct BindingHash
     {
-        map<string, int> m_map(m.begin(), m.end());
-        if (!unique_mappings.insert(m_map).second)
+        size_t operator()(const vector<int> &indices) const
+        {
+            size_t value = 0;
+            for (int index : indices)
+                value = value * 31 + static_cast<size_t>(index);
+            return value;
+        }
+    };
+    std::unordered_set<vector<int>, BindingHash> unique_mappings;
+    vector<int> indices;
+    for (const auto &mapping : raw_results)
+    {
+        // The plan introduces variables in a fixed order on every branch.
+        indices.clear();
+        for (const auto &[name, point] : mapping)
+            indices.push_back(point);
+        if (!unique_mappings.insert(indices).second)
             continue;
 
         Theorem thm(rule.name, rule.rule);
@@ -2102,15 +2142,15 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
             const size_t point_args = GetPointArgsCount(s_stmt);
             for (size_t i = 0; i < point_args; ++i)
             {
-                auto it = m_map.find(s_stmt.second[i]);
-                if (it == m_map.end())
+                const int point = mapping.find(s_stmt.second[i]);
+                if (point < 0)
                 {
                     // Variable not mapped to any concrete point in this
                     // problem — the rule does not apply.  Return nullptr
                     // so the caller silently skips this match.
                     return nullptr;
                 }
-                args.push_back(_problem->point(it->second).name());
+                args.push_back(_problem->point(point).name());
             }
             if (point_args < s_stmt.second.size())
                 args.push_back(s_stmt.second.back());
@@ -2160,12 +2200,12 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
             {
                 if (g_stmt.second.size() == 2)
                 {
-                    const auto left = m_map.find(g_stmt.second[0]);
-                    const auto right = m_map.find(g_stmt.second[1]);
-                    if (left != m_map.end() && right != m_map.end())
+                    const int left = mapping.find(g_stmt.second[0]);
+                    const int right = mapping.find(g_stmt.second[1]);
+                    if (left >= 0 && right >= 0)
                     {
-                        const auto &a = _problem->point(left->second);
-                        const auto &b = _problem->point(right->second);
+                        const auto &a = _problem->point(left);
+                        const auto &b = _problem->point(right);
                         const double distance = std::hypot(a.x() - b.x(), a.y() - b.y());
                         if (std::isfinite(distance) && !a.is_close(b))
                             continue;
@@ -2180,7 +2220,7 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
             const bool satisfied = g && (unequal_angle
                 ? g->check_nondegen() && !g->check_equations()
                 : g->check_numerically());
-            if (!satisfied || !stmt_instance_ok(g_stmt, m_map))
+            if (!satisfied || !stmt_instance_ok(g_stmt, mapping))
             {
                 guards_ok = false;
                 break;
@@ -2194,7 +2234,7 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         // 一条结论没过就连带丢弃同一前提下已经验证通过的其它结论。
         //
         // 结论不参与 backtrack 匹配（见上），意味着结论里出现的点必须全部来自
-        // 前提绑定的 m_map；如果规则本身有问题、结论引用了前提里没出现的点
+        // 前提绑定的 mapping；如果规则本身有问题、结论引用了前提里没出现的点
         // （如 rule_text 写成 "... => eqangle A B C D X Y X Y" 但前提只有
         // A B C D），build_stmt 会把未绑定的原始变量名当成点名传给
         // create_statement，导致该点在当前 problem 中查找失败而崩溃。跳过
@@ -2202,7 +2242,7 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         for (const auto &s_stmt : rule.conclusions)
         {
             auto res_stmt = build_stmt(s_stmt);
-            if (res_stmt && res_stmt->check_numerically() && stmt_instance_ok(s_stmt, m_map))
+            if (res_stmt && res_stmt->check_numerically() && stmt_instance_ok(s_stmt, mapping))
             {
                 thm.add_conclusion(move(res_stmt));
             }

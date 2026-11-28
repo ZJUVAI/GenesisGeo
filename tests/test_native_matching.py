@@ -3,6 +3,7 @@
 import re
 
 from newclid.api import DDAR
+from newclid.configs import load_solver_config
 
 
 def solve(rules, premises, optimized, points=None):
@@ -65,6 +66,27 @@ def test_shared_prefix_does_not_reuse_another_rules_guard_acceptance():
         "invalid|midp a b c,perp a b a d|cong a b a c|ncoll a b c",
     ]
     assert not solve(rules, facts, True)[0]
+
+
+def test_custom_rule_guards_still_reject_aliased_points():
+    points = [("a", 0.0, 0.0), ("b", 1.0, 0.0), ("c", 0.0, 1.0)]
+    premises = [("perp", list("abac"))]
+    goals = [("cong", list("abac"))]
+    config = load_solver_config(
+        using_ar=False, targeted_ar=False, using_log=False, using_exp=False
+    )
+    config.update({f"r{i:02d}": False for i in range(1000)})
+
+    def solves(rule, settings):
+        return DDAR.run_ddar_with_custom_theorems(
+            "aliased_points", points, premises, goals, [rule], 3, settings
+        )[0]
+
+    four_variables = "four|perp A B C D|cong A B C D"
+    assert solves(four_variables, config)
+    assert not solves(four_variables, {**config, "allow_duplicate_points": False})
+    distinct_segments = "|diff A C,diff A D,diff B C,diff B D"
+    assert not solves(four_variables + distinct_segments, config)
 
 
 def test_wide_rule_uses_the_non_bitset_fallback():

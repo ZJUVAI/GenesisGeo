@@ -56,6 +56,44 @@ class TestCSolverLightMode:
         goals = solver.possible_goals()
         assert isinstance(goals, list)
 
+    def test_custom_rule_can_conclude_a_constant_ratio(self):
+        problem = (
+            "a b c = triangle a b c; o = circumcenter o a b c; "
+            "x y z g = centroid x y z g a b c; h = orthocenter h a b c "
+            "? rconst o g o h 1/3"
+        )
+        rule = (
+            "euler_line_ratio|cong o a o b,cong o b o c,"
+            "perp h a b c,perp h b c a,midp x b c,midp y a c,"
+            "coll a x g,coll b y g|rconst o g o h 1/3|ncoll a b c"
+        )
+        assert CSolver(problem, seed=123, light=True).run(custom_rules=[rule])
+
+    def test_custom_rule_checks_angle_after_binding_its_points(self):
+        problem = (
+            "a b d = triangle a b d; e = midpoint e d a; "
+            "c = angle_bisector c a b d, on_dia c a b ? para c e b d"
+        )
+        rule = (
+            "bisector_projection|midp e a d,eqangle a b b c b c b d,"
+            "perp a c b c|para c e b d"
+        )
+        assert CSolver(problem, seed=123, light=True).run(custom_rules=[rule])
+
+    def test_custom_rule_checks_ratio_after_binding_its_points(self):
+        problem = (
+            "a b c = triangle a b c; "
+            "d = angle_bisector d c b a, on_line d a c; "
+            "e = angle_bisector e a c b, on_line e a b; "
+            "f = on_line f d e, on_line f b c ? eqangle a b a f a f a c"
+        )
+        rule = (
+            "intersecting_ratio_cevians|coll a c d,coll a b e,coll d e f,"
+            "coll b c f,eqratio a d d c a b b c,eqratio a e e b a c b c"
+            "|eqangle a b a f a f a c|ncoll a b c"
+        )
+        assert CSolver(problem, seed=123, light=True).run(custom_rules=[rule])
+
 
 class TestGeometricSolverBuilder:
     def test_chained_api(self):

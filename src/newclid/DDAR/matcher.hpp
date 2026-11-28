@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <map>
 #include <string>
+#include <span>
 #include "type/triangle.hpp"
 #include "type/dist.hpp"
 #include "theorem.hpp"
@@ -197,9 +198,8 @@ private:
 
     void DebugLog(const std::string &msg) const;
 
-    std::vector<std::string> collect_new_vars(const Stmt &stmt, const Mapping &current) const;
-
     bool verify_stmt(const Stmt &stmt, const Mapping &mapping) const;
+    bool verify_bound_stmt(const Stmt &stmt, std::span<const int> points) const;
 
     // custom 规则专用：para 实例的退化判据（由 config "custom_para_no_collinear" 控制，
     // 默认开启）。返回 true 表示该实例可用。拒绝两种情形：
@@ -209,10 +209,10 @@ private:
     // （内置 r82 正是刻意从共线推出平行，阻断它会使 jgex_231 从 160/231 掉到 21/231）。
     bool para_instance_ok(const std::vector<int> &pts) const;
 
-    // 把上面的判据应用到一条已绑定的语句上（m_map 与 match_rule 内部同构）。
-    bool stmt_instance_ok(const Stmt &stmt, const std::map<std::string, int> &m_map) const;
+    // Apply the same degeneracy check to a bound statement.
+    bool stmt_instance_ok(const Stmt &stmt, const Mapping &mapping) const;
 
-    void enumerate_brute_force(const std::vector<Stmt> &stmts, size_t stmt_idx, const std::vector<std::string> &new_vars, Mapping &current, std::vector<bool> &used, std::vector<Mapping> &results) const;
+    void enumerate_brute_force(const std::vector<Stmt> &stmts, size_t stmt_idx, std::span<const std::string *const> new_vars, Mapping &current, std::vector<bool> &used, std::vector<Mapping> &results) const;
 
     void build_triangle_indices(size_t n);
 
@@ -226,7 +226,7 @@ public:
     CustomTheoremMatcher(Problem *prob, const std::vector<CustomRule> &rules,
                          const std::map<std::string, bool> &config = {});
 
-    const std::vector<Theorem> &theorems() const { return _theorems; }
+    std::vector<Theorem> take_theorems() && { return std::move(_theorems); }
 };
 
 #endif // MATCHER_HPP
