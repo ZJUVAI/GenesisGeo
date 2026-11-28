@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <algorithm>
+#include <cmath>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -858,6 +859,38 @@ extern "C"
 
 PYBIND11_MODULE(DDAR, m)
 {
+    m.def("check_numerical_statements", [](
+        const vector<tuple<string,double,double>> &points,
+        const vector<pair<string,vector<string>>> &statements) {
+        vector<bool> result(statements.size(),false);
+        Problem problem;
+        unordered_set<string> names;
+        for (const auto &point : points) {
+            if (!std::isfinite(get<1>(point)) || !std::isfinite(get<2>(point)) ||
+                !names.insert(get<0>(point)).second)
+                return result;
+            problem.add_point(get<0>(point),get<1>(point),get<2>(point));
+        }
+        for (size_t i=0;i<statements.size();++i) {
+            try {
+                const auto &kind=statements[i].first;
+                const auto &args=statements[i].second;
+                if (kind=="diff") {
+                    result[i]=args.size()==2 && !problem.find_point(args[0]).is_close(problem.find_point(args[1]));
+                } else if (kind=="angle_defined" || kind=="neqangle") {
+                    auto statement=problem.create_statement("eqangle",args);
+                    result[i]=statement && statement->check_nondegen() &&
+                        (kind=="angle_defined" || !statement->check_equations());
+                } else {
+                    auto statement=problem.create_statement(kind,args);
+                    result[i]=statement && statement->check_numerically();
+                }
+            } catch (const std::exception &) {
+                result[i]=false;
+            }
+        }
+        return result;
+    }, py::arg("points"), py::arg("statements"), py::call_guard<py::gil_scoped_release>());
 #ifdef DDAR_PGO_BUILD
     m.attr("build_variant") = "pgo";
 #else

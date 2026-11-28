@@ -4,6 +4,20 @@ from newclid.api import CSolver, GeometricSolverBuilder
 
 
 class TestCSolverLightMode:
+    def test_custom_rule_can_require_unequal_angles(self):
+        problem = (
+            "a b c = triangle a b c; o = circle o a b c; d = on_line d a b; "
+            "e = on_line e a c, on_circle e a d; "
+            "f = on_bline f b d, on_circle f o a; "
+            "g = on_bline g e c, on_circle g o a ? para d e f g"
+        )
+        rule = (
+            "equal_projection_reflected_chord|coll a b d,coll a c e,cong a d a e,"
+            "cong f b f d,cong g c g e,cong o a o b,cong o a o c,cong o f o g"
+            "|para d e f g|ncoll a b c,ncoll a f g,neqangle a d o f a e o g"
+        )
+        assert CSolver(problem, seed=123, light=True).run(custom_rules=[rule])
+
     def test_light_mode_extracts_points(self):
         solver = CSolver(
             problem="a b c = triangle a b c; h = on_tline h b a c, on_tline h c a b ? perp a h b c",

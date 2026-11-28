@@ -1103,6 +1103,25 @@ bool CustomTheoremMatcher::verify_stmt(const Stmt &stmt, const Mapping &mapping)
         real_args.push_back(stmt.second[i]);
     const auto evaluate = [&]() -> bool
     {
+        if (stmt.first == "__guard_diff")
+        {
+            if (pt_indices.size() != 2)
+                return false;
+            const auto &a = _problem->point(pt_indices[0]);
+            const auto &b = _problem->point(pt_indices[1]);
+            return std::isfinite(std::hypot(a.x()-b.x(), a.y()-b.y())) && !a.is_close(b);
+        }
+        if (stmt.first == "__guard_angle_defined" || stmt.first == "__guard_neqangle")
+        {
+            try
+            {
+                auto angle = _problem->create_statement("eqangle", real_args);
+                return angle && angle->check_nondegen() &&
+                       (stmt.first == "__guard_angle_defined" || !angle->check_equations());
+            }
+            catch (...) { return false; }
+        }
+
         try
         {
             auto s = _problem->create_statement(stmt.first, real_args);
@@ -1899,12 +1918,16 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
             for (size_t i = 0; i < rule.guards.size(); ++i)
             {
                 const auto &guard = rule.guards[i];
-                if (scheduled[i] || (guard.first != "npara" && guard.first != "ncoll"))
+                if (scheduled[i] || (guard.first != "npara" && guard.first != "ncoll" &&
+                                     guard.first != "diff" && guard.first != "angle_defined" &&
+                                     guard.first != "neqangle"))
                     continue;
                 if (std::all_of(guard.second.begin(), guard.second.end(),
                                 [&](const string &arg) { return available.contains(arg); }))
                 {
                     Stmt check = guard;
+                    if (guard.first == "diff" || guard.first == "angle_defined" || guard.first == "neqangle")
+                        check.first = "__guard_" + guard.first;
                     plan.push_back(std::move(check));
                     scheduled[i] = true;
                 }
@@ -2033,16 +2056,39 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         bool guards_ok = true;
         for (const auto &g_stmt : rule.guards)
         {
-            unique_ptr<Statement> g;
-            try
+            if (g_stmt.first == "angle_defined")
             {
-                g = build_stmt(g_stmt);
+                auto angle = build_stmt({"eqangle", g_stmt.second});
+                if (angle && angle->check_nondegen())
+                    continue;
+                guards_ok = false;
+                break;
             }
-            catch (const exception &)
+            if (g_stmt.first == "diff")
             {
-                g = nullptr;
+                if (g_stmt.second.size() == 2)
+                {
+                    const auto left = m_map.find(g_stmt.second[0]);
+                    const auto right = m_map.find(g_stmt.second[1]);
+                    if (left != m_map.end() && right != m_map.end())
+                    {
+                        const auto &a = _problem->point(left->second);
+                        const auto &b = _problem->point(right->second);
+                        const double distance = std::hypot(a.x() - b.x(), a.y() - b.y());
+                        if (std::isfinite(distance) && !a.is_close(b))
+                            continue;
+                    }
+                }
+                guards_ok = false;
+                break;
             }
-            if (!g || !g->check_numerically() || !stmt_instance_ok(g_stmt, m_map))
+            const bool unequal_angle = g_stmt.first == "neqangle";
+            auto g = unequal_angle ? build_stmt({"eqangle", g_stmt.second}) : build_stmt(g_stmt);
+            // Invalid or degenerate angles cannot witness inequality.
+            const bool satisfied = g && (unequal_angle
+                ? g->check_nondegen() && !g->check_equations()
+                : g->check_numerically());
+            if (!satisfied || !stmt_instance_ok(g_stmt, m_map))
             {
                 guards_ok = false;
                 break;
