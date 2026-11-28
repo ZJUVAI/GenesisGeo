@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -10,6 +11,10 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--symbolic":
+    symbolic_script = Path(__file__).with_name("evaluation_symbolic.py")
+    os.execv(sys.executable, [sys.executable, str(symbolic_script), *sys.argv[2:]])
 
 import ray
 from rich.live import Live
