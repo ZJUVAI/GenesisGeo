@@ -76,7 +76,9 @@ class Workers:
         wait_for_process_exit([child.sentinel])
         with _START_LOCK:
             child.join()
+            exitcode = child.exitcode
             child.close()
+        return exitcode
 
     def close(self):
         for child in list(self.children):
@@ -90,9 +92,10 @@ class Workers:
                 child = self._start(function)
             connection = self.children[child]
             connection.send(argument)
+            remaining = max(0, timeout - (time.monotonic() - started))
             result = (
                 connection.recv()
-                if connection.poll(timeout)
+                if connection.poll(remaining)
                 else {"status": "wall_timeout"}
             )
         except Exception as exc:
@@ -100,6 +103,8 @@ class Workers:
         if child is not None:
             self.local.count += 1
             if result["status"] != "ok" or self.local.count >= self.limit:
-                self._stop(child)
+                exitcode = self._stop(child)
+                if result["status"] == "error":
+                    result["exitcode"] = exitcode
                 self.local.child = None
         return {**result, "wall": time.monotonic() - started}

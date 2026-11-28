@@ -1,13 +1,14 @@
-"""Evaluate frozen file-rule packages on explicitly supplied problem lists."""
+"""Compare DDAR with and without extra rules on the supplied problem lists."""
 
 import argparse
 import collections
 import concurrent.futures
 import csv
+from contextlib import closing
+from functools import partial
 import hashlib
 import json
 import multiprocessing
-import threading
 import os
 import signal
 import time
@@ -16,6 +17,7 @@ from pathlib import Path
 from newclid.api import CSolver, DDAR, GeometricSolverBuilder
 from newclid.formulations.problem import ProblemJGEX
 from newclid.formulations.rule import Rule
+from newclid.process_workers import Workers
 
 
 def digest(path):
@@ -124,60 +126,23 @@ def solve(job):
         signal.alarm(0)
 
 
-PROCESS_LOCK = threading.Lock()
-
-
-def deliver(writer, job):
-    try:
-        writer.send(solve(job))
-    finally:
-        writer.close()
-
-
-def bounded(job):
+def bounded_reused(workers, job):
     name, _, seed, variant, _, _, wall_seconds, *_ = job
-    started = time.monotonic()
-    context = multiprocessing.get_context("forkserver")
-    reader, writer = context.Pipe(duplex=False)
-    child = context.Process(target=deliver, args=(writer, job))
-    try:
-        with PROCESS_LOCK:
-            child.start()
-        writer.close()
-        remaining = max(0, wall_seconds - (time.monotonic() - started))
-        if reader.poll(remaining):
-            try:
-                return reader.recv()
-            except EOFError:
-                child.join()
-                timed_out = child.exitcode == -signal.SIGALRM
-                status = "timeout" if timed_out else "error"
-                error = (
-                    "native solve time limit"
-                    if timed_out
-                    else "worker exited without a result"
-                )
-        else:
-            status = "wall_timeout"
-            error = "process wall limit"
-        return {
-            "problem": name,
-            "seed": seed,
-            "variant": variant,
-            "status": status,
-            "seconds": time.monotonic() - started,
-            "error": error,
-            "proof_rules": "",
-        }
-    finally:
-        reader.close()
-        writer.close()
-        with PROCESS_LOCK:
-            if child.pid is not None:
-                if child.exitcode is None:
-                    child.kill()
-                child.join()
-                child.close()
+    result = workers.call(solve, job, wall_seconds)
+    if result["status"] == "ok":
+        return result["output"]
+    timed_out = result.get("exitcode") == -signal.SIGALRM
+    return {
+        "problem": name,
+        "seed": seed,
+        "variant": variant,
+        "status": "timeout" if timed_out else result["status"],
+        "seconds": result["wall"],
+        "error": "native solve time limit"
+        if timed_out
+        else result.get("error", "process wall limit"),
+        "proof_rules": "",
+    }
 
 
 def main():
@@ -186,36 +151,31 @@ def main():
         "--suite", action="append", nargs=2, metavar=("PATH", "COUNT"), required=True
     )
     parser.add_argument("--additions", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seeds", nargs="+", type=int, default=[123, 124, 125])
     parser.add_argument("--solve-seconds", type=int, default=60)
     parser.add_argument("--wall-seconds", type=int, default=120)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--tasks-per-worker", type=int, default=1)
     parser.add_argument("--build-attempts", type=int, default=64)
     args = parser.parse_args()
     if (
-        min(args.solve_seconds, args.wall_seconds, args.workers, args.build_attempts)
+        min(
+            args.solve_seconds,
+            args.wall_seconds,
+            args.workers,
+            args.build_attempts,
+            args.tasks_per_worker,
+        )
         <= 0
         or args.wall_seconds < args.solve_seconds
     ):
         parser.error("positive limits required and wall limit must cover solve limit")
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("repeat seeds must be distinct")
-    manifest = json.loads(args.manifest.read_text())
-    for filename, expected in manifest["sha256"].items():
-        if digest(Path(filename)) != expected:
-            raise ValueError("Frozen input changed: " + filename)
-    frozen_hashes = {
-        Path(path).resolve(): value for path, value in manifest["sha256"].items()
-    }
-    additions_digest = frozen_hashes.get(args.additions.resolve())
-    if additions_digest is None:
-        raise ValueError("Additions are absent from frozen manifest")
-    k0 = Path("src/newclid/default_configs/rules.txt")
-    if k0.resolve() not in frozen_hashes:
-        raise ValueError("K0 is absent from frozen manifest")
-    additions = args.additions.read_text()
+    additions_bytes = args.additions.read_bytes()
+    additions_digest = hashlib.sha256(additions_bytes).hexdigest()
+    additions = additions_bytes.decode("utf-8")
     rule_lines = [line.strip() for line in additions.splitlines() if line.strip()]
     guarded = args.additions.name.endswith(".pipe.txt") or any(
         "|" in line for line in rule_lines
@@ -240,6 +200,7 @@ def main():
         "solve_seconds": args.solve_seconds,
         "wall_seconds": args.wall_seconds,
         "workers": args.workers,
+        "tasks_per_worker": args.tasks_per_worker,
         "build_max_attempts": args.build_attempts,
         "evaluator_sha256": digest(Path(__file__)),
         "thread_env": {
@@ -251,7 +212,6 @@ def main():
                 "NUMEXPR_NUM_THREADS",
             )
         },
-        "manifest": manifest,
         "suites": {
             str(path): {"count": len(problems), "sha256": digest(path)}
             for path, problems in suites
@@ -285,10 +245,11 @@ def main():
                 for name, problem in problems.items()
                 for variant, rules in [("baseline", ""), ("candidate", additions)]
             ]
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=args.workers
-            ) as pool:
-                records = list(pool.map(bounded, tasks))
+            with (
+                closing(Workers(args.tasks_per_worker)) as workers,
+                concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool,
+            ):
+                records = list(pool.map(partial(bounded_reused, workers), tasks))
             if len(records) != 2 * len(problems):
                 raise RuntimeError("Incomplete result set: " + str(path))
             with (out / (path.stem + ".csv")).open("x", newline="") as file:

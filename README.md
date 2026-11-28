@@ -184,6 +184,20 @@ python scripts/evaluation.py \
 | `benchmarks/larger_imo_eval.txt` | Extended IMO-style evaluation set |
 | `benchmarks/testing_minimal_rules.txt` | Minimal regression checks for individual rules |
 
+### Rule discovery
+
+```bash
+# Discover and compress rules from generated proofs.
+python -m newclid.discovery_experimental --input generated.jsonl --output results/discovered
+
+# Sort the benchmark by descending construction point count.
+python scripts/sort_benchmark.py benchmarks/imo_30.txt results/imo_30_sorted.txt
+
+# Compare DDAR with and without the discovered rules.
+python scripts/evaluation_symbolic.py --suite results/imo_30_sorted.txt 30 \
+  --additions results/discovered/rules.pipe.txt --output results/symbolic_eval
+```
+
 ## Project Structure
 
 ```
