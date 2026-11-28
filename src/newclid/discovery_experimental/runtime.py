@@ -5,7 +5,7 @@ import math
 from types import SimpleNamespace
 
 from .algebra.predicate_encodings import domain_guards
-from .algebra.polynomial_context import simplify_collinear_parallel_premises
+from .compression import simplify_collinear_parallel_premises
 from .rules import parse_predicate, split_rule_text, to_pipe_format
 
 

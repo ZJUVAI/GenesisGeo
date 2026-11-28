@@ -195,7 +195,7 @@ python scripts/sort_benchmark.py benchmarks/imo_30.txt results/imo_30_sorted.txt
 
 # Compare DDAR with and without the discovered rules.
 python scripts/evaluation_symbolic.py --suite results/imo_30_sorted.txt 30 \
-  --additions results/discovered/rules.pipe.txt --output results/symbolic_eval
+  --additions results/discovered/rules_discovered.txt --output results/symbolic_eval
 ```
 
 ## Project Structure

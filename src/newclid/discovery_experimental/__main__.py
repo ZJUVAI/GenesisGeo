@@ -1,7 +1,6 @@
 """Discover DDAR rules from generated geometry proofs."""
 
 import argparse
-import json
 import math
 from pathlib import Path
 
@@ -15,9 +14,20 @@ def main():
     parser.add_argument("--rule-timeout", type=float, default=6)
     parser.add_argument("--singular-timeout", type=float, default=1)
     parser.add_argument(
+        "--bounded-coordinates",
+        action="store_true",
+        help="Drop implied diff guards for evaluation coordinates bounded by 1e100 in magnitude.",
+    )
+    parser.add_argument(
         "--candidate-input",
         action="store_true",
         help="Read already extracted candidates for a paired benchmark.",
+    )
+    parser.add_argument(
+        "--algebraic-compression",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Remove premises implied by exact geometric equations (enabled by default).",
     )
     args = parser.parse_args()
     if args.workers < 1 or (args.limit is not None and args.limit < 1):
@@ -31,19 +41,16 @@ def main():
 
     from .pipeline import run
 
-    print(
-        json.dumps(
-            run(
-                args.input,
-                args.output,
-                workers=args.workers,
-                limit=args.limit,
-                rule_timeout=args.rule_timeout,
-                singular_timeout=args.singular_timeout,
-                candidate_input=args.candidate_input,
-            )
-        ),
-        flush=True,
+    run(
+        args.input,
+        args.output,
+        workers=args.workers,
+        limit=args.limit,
+        rule_timeout=args.rule_timeout,
+        singular_timeout=args.singular_timeout,
+        candidate_input=args.candidate_input,
+        bounded_coordinates=args.bounded_coordinates,
+        algebraic_compression=args.algebraic_compression,
     )
 
 

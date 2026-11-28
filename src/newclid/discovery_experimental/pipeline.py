@@ -4,53 +4,74 @@ from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import closing
 from itertools import groupby, islice
+from pathlib import Path
 import json
 import sqlite3
 from tempfile import TemporaryDirectory
 from time import perf_counter
 
-from .certification import certify
-from .extraction import extract
-from .rules import to_pipe_format
+from newclid.configs import load_solver_config
 from newclid.process_workers import Workers, configure_runtime
 
+from .certification import certify
+from .compression import Rule, compress_rule_bank, split
+from .extraction import extract
+from .rules import split_rule_text
 
-def emit(stream, row):
-    stream.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+def publish_rules(
+    output,
+    certified,
+    bounded_coordinates,
+    *,
+    algebraic_compression=True,
+    statistics=None,
+):
+    counts = Counter(rule.name for rule in certified)
+    compressed = compress_rule_bank(
+        [rule for rule in certified if counts[rule.name] == 1],
+        allow_aliased_points=load_solver_config()["allow_duplicate_points"],
+        bounded_coordinates=bounded_coordinates,
+        algebraic_compression=algebraic_compression,
+        statistics=statistics,
+    )
+    by_id = {rule.name: rule for rule in compressed}
+    exported = 0
+    with TemporaryDirectory(prefix=".export-", dir=output) as scratch:
+        pipe_path = Path(scratch) / "rules_discovered.txt"
+        with pipe_path.open("w") as pipe:
+            for original in certified:
+                rule = (
+                    original if counts[original.name] > 1 else by_id.get(original.name)
+                )
+                if rule is not None:
+                    pipe.write(rule.pipe() + "\n")
+                    exported += 1
+        pipe_path.replace(output / "rules_discovered.txt")
+    return exported
 
 
 def extract_candidates(source, output, limit, stats, timing):
     with (
         TemporaryDirectory(prefix=".index-", dir=output) as scratch,
         closing(sqlite3.connect(f"{scratch}/dedup.sqlite")) as database,
-        (output / "candidates.jsonl").open("w") as candidates,
-        (output / "origins.jsonl").open("w") as origins,
         source.open() as stream,
     ):
         database.execute("CREATE TABLE rules (text TEXT PRIMARY KEY) WITHOUT ROWID")
         for line, raw in enumerate(islice(stream, limit), 1):
             started = perf_counter()
             stats["proofs"] += 1
+            fresh = []
             try:
-                extracted = list(extract(json.loads(raw), line))
+                for row in extract(json.loads(raw), line):
+                    stats["occurrences"] += 1
+                    if database.execute(
+                        "INSERT OR IGNORE INTO rules VALUES (?)", (row["rule_text"],)
+                    ).rowcount:
+                        stats["candidates"] += 1
+                        fresh.append(row)
             except (ValueError, IndexError, KeyError) as error:
                 raise ValueError(f"Invalid proof on line {line}: {error}") from error
-            fresh = []
-            for row in extracted:
-                stats["occurrences"] += 1
-                emit(
-                    origins,
-                    {
-                        key: row[key]
-                        for key in ("rule_id", "seed", "line", "proof_step")
-                    },
-                )
-                if database.execute(
-                    "INSERT OR IGNORE INTO rules VALUES (?)", (row["rule_text"],)
-                ).rowcount:
-                    stats["candidates"] += 1
-                    emit(candidates, row)
-                    fresh.append(row)
             if line % 4096 == 0:
                 database.commit()
             timing["extraction_and_dedup"] += perf_counter() - started
@@ -104,7 +125,7 @@ def _schedule(rows, workers, rule_timeout, singular_timeout):
                             raise RuntimeError(
                                 f"Rule {row['rule_id']}: {worker['error']}"
                             )
-                        yield row, worker.get("output", worker)
+                        yield worker.get("output", worker)
     finally:
         children.close()
         pending.close()
@@ -119,6 +140,8 @@ def run(
     rule_timeout=6,
     singular_timeout=1,
     candidate_input=False,
+    bounded_coordinates=False,
+    algebraic_compression=True,
 ):
     configure_runtime(
         "newclid.discovery_experimental.certification", "newclid.api", "flint"
@@ -137,36 +160,34 @@ def run(
             timing,
         )
     )
-    bank_path = output / ".rules.jsonl.pending"
-    pipe_path = output / ".rules.pipe.txt.pending"
-    with (
-        bank_path.open("w") as bank,
-        pipe_path.open("w") as pipe,
-        (output / "failed.jsonl").open("w") as failures,
-        closing(_schedule(rows, workers, rule_timeout, singular_timeout)) as jobs,
-    ):
-        for row, result in jobs:
+    certified = []
+    with closing(_schedule(rows, workers, rule_timeout, singular_timeout)) as jobs:
+        for result in jobs:
             status = result["status"]
             outcomes[status] += 1
             worker_timing.update(result.get("timings", {}))
             if status == "certified":
-                rule = result["rule"]
+                row = result["rule"]
                 backends[result["backend"]] += 1
-                emit(bank, rule)
-                pipe.write(
-                    to_pipe_format(rule["rule_id"], rule["rule_text"], rule["guards"])
-                    + "\n"
+                premises, conclusion = split_rule_text(row["rule_text"])
+                certified.append(
+                    Rule(
+                        row["rule_id"],
+                        tuple(premises),
+                        split(conclusion),
+                        split(row["guards"]),
+                    )
                 )
-            else:
-                failure = {"rule_id": row["rule_id"], "status": status}
-                if "reason" in result:
-                    failure["reason"] = result["reason"]
-                emit(failures, failure)
-            if sum(outcomes.values()) % 512 == 0:
-                print(f"certify: {sum(outcomes.values())} processed", flush=True)
-    bank_path.replace(output / "rules.jsonl")
-    pipe_path.replace(output / "rules.pipe.txt")
-    report = {
+    compression_start = perf_counter()
+    compression = {}
+    exported = publish_rules(
+        output,
+        certified,
+        bounded_coordinates,
+        algebraic_compression=algebraic_compression,
+        statistics=compression,
+    )
+    return {
         "input": str(source.resolve()),
         "workers": workers,
         "rule_timeout": rule_timeout,
@@ -175,9 +196,10 @@ def run(
         "extraction_seconds": timing["extraction_and_dedup"],
         "worker_phase_seconds": dict(worker_timing),
         "certified": outcomes["certified"],
+        "exported": exported,
+        "compression_seconds": perf_counter() - compression_start,
+        "compression": compression,
         "outcomes": dict(outcomes),
         "certified_backends": dict(backends),
         "seconds": perf_counter() - started,
     }
-    (output / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
-    return report
