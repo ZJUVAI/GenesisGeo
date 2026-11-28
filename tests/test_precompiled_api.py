@@ -5,7 +5,7 @@ import pytest
 from newclid.api import CSolver, DDAR
 
 
-def run(bank, *, known=True, changed=False):
+def run(bank, *, known=True, changed=False, **overrides):
     points = [
         ("a", 0.0, 0.0),
         ("b", -1.0, 0.0),
@@ -22,6 +22,7 @@ def run(bank, *, known=True, changed=False):
         immutable_dependency_tokens=True,
         allow_duplicate_points=False,
     )
+    config.update(overrides)
     runner = (
         DDAR.run_ddar_with_compiled_theorems
         if isinstance(bank, DDAR.CompiledRuleBank)
@@ -50,6 +51,25 @@ def test_reusing_bank_does_not_share_numeric_or_logical_state():
     assert run(bank)[0]
     with pytest.raises(AttributeError):
         bank.rules = []
+
+
+@pytest.mark.parametrize(
+    "variables", [("p0", "p1", "p2", "p3"), ("p0", "p01", "A", "p26")]
+)
+def test_static_plan_preserves_rule_proofs(variables):
+    a, b, c, d = variables
+    rules = [
+        f"valid|midp {a} {b} {c},ncoll {a} {b} {d}|perp {a} {b} {a} {d}|diff {a} {b}",
+        f"blocked|midp {a} {b} {c},ncoll {a} {b} {d}|perp {a} {b} {a} {d}|ncoll {a} {b} {c}",
+    ]
+    bank = DDAR.compile_custom_theorems(rules)
+    expected = run(rules)
+    assert expected[0]
+    for static_plan in (False, True):
+        assert (
+            run(bank, custom_static_plan=static_plan, custom_validate_plan=True)
+            == expected
+        )
 
 
 def test_csolver_accepts_both_formats_and_empty_banks():

@@ -49,8 +49,17 @@ def solve(job):
             .build(max_attempts=build_attempts)
         )
         if guarded:
-            custom_rules = additions.splitlines()
-            rule_names = {line.split("|", 1)[0] for line in custom_rules}
+            from newclid.evaluation.symbolic_rule_bank import (
+                COMPILE_PID,
+                RULE_BANK,
+                RULE_NAMES,
+            )
+
+            custom_rules, rule_names = [], frozenset()
+            if variant == "candidate":
+                if RULE_BANK is None or COMPILE_PID == os.getpid():
+                    raise RuntimeError("Symbolic rule bank was not preloaded")
+                custom_rules, rule_names = RULE_BANK, RULE_NAMES
             native_solver = CSolver(solver=solver, seed=seed)
             signal.signal(signal.SIGALRM, signal.SIG_DFL)
             signal.alarm(solve_seconds)
@@ -197,11 +206,14 @@ def main():
     for filename, expected in manifest["sha256"].items():
         if digest(Path(filename)) != expected:
             raise ValueError("Frozen input changed: " + filename)
-    frozen_paths = {Path(filename).resolve() for filename in manifest["sha256"]}
-    if args.additions.resolve() not in frozen_paths:
+    frozen_hashes = {
+        Path(path).resolve(): value for path, value in manifest["sha256"].items()
+    }
+    additions_digest = frozen_hashes.get(args.additions.resolve())
+    if additions_digest is None:
         raise ValueError("Additions are absent from frozen manifest")
     k0 = Path("src/newclid/default_configs/rules.txt")
-    if k0.resolve() not in frozen_paths:
+    if k0.resolve() not in frozen_hashes:
         raise ValueError("K0 is absent from frozen manifest")
     additions = args.additions.read_text()
     rule_lines = [line.strip() for line in additions.splitlines() if line.strip()]
@@ -210,7 +222,7 @@ def main():
     )
     if guarded:
         DDAR.compile_custom_theorems(rule_lines)
-        additions = "\n".join(rule_lines)
+        additions = ""
     suites = []
     for filename, count in args.suite:
         path = Path(filename)
@@ -246,7 +258,12 @@ def main():
         },
     }
     (args.output / "config.json").write_text(json.dumps(config, indent=2) + "\n")
-    multiprocessing.set_forkserver_preload(["newclid.api"])
+    preload = ["newclid.api"]
+    if guarded:
+        os.environ["NEWCLID_SYMBOLIC_RULE_BANK"] = str(args.additions.resolve())
+        os.environ["NEWCLID_SYMBOLIC_RULE_BANK_SHA256"] = additions_digest
+        preload.append("newclid.evaluation.symbolic_rule_bank")
+    multiprocessing.set_forkserver_preload(preload)
     summary = {}
     for repeat, seed in enumerate(args.seeds, 1):
         out = args.output / ("repeat_" + str(repeat))

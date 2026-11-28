@@ -1032,6 +1032,46 @@ namespace
     }
 }
 
+void CustomRule::prepare_static()
+{
+    const auto deferred = DeferredPredicates(premises);
+    std::unordered_map<std::string,uint64_t> bits;
+    static_fits = true;
+    for (const auto &s : premises)
+        for (size_t i=0; i<GetPointArgsCount(s); ++i)
+            if (!bits.contains(s.second[i]))
+            {
+                if (bits.size()==64) { static_fits=false; break; }
+                bits.emplace(s.second[i],uint64_t(1)<<bits.size());
+            }
+    static_masks.clear(); static_deferred.clear();
+    for (const auto &s : premises)
+    {
+        uint64_t mask=0;
+        if (static_fits)
+            for (size_t i=0;i<GetPointArgsCount(s);++i) mask |= bits.at(s.second[i]);
+        static_masks.push_back(mask); static_deferred.push_back(deferred.contains(s.first));
+    }
+    early_checks.clear(); early_masks.clear(); early_valid.clear();
+    for (const auto &guard : guards)
+    {
+        if (guard.first!="npara" && guard.first!="ncoll" && guard.first!="diff" &&
+            guard.first!="angle_defined" && guard.first!="neqangle") continue;
+        auto check=guard;
+        if (guard.first=="diff" || guard.first=="angle_defined" || guard.first=="neqangle")
+            check.first="__guard_"+guard.first;
+        uint64_t mask=0; bool valid=static_fits;
+        for (const auto &arg : guard.second)
+        {
+            auto found=bits.find(arg);
+            if (found==bits.end()) valid=false;
+            else mask |= found->second;
+        }
+        early_checks.push_back(std::move(check)); early_masks.push_back(mask); early_valid.push_back(valid);
+    }
+    static_prepared=true;
+}
+
 // ----------------------------------------------------------------------------
 // 辅助成员函数
 // ----------------------------------------------------------------------------
@@ -1821,9 +1861,8 @@ void CustomTheoremMatcher::backtrack(const vector<Stmt> &stmts, size_t stmt_idx,
     }
 }
 
-void CustomTheoremMatcher::match_rule(const CustomRule &rule)
+vector<Stmt> CustomTheoremMatcher::legacy_plan(const CustomRule &rule) const
 {
-    auto planning_start = chrono::steady_clock::now();
     // 1. 准备并排序前提 (约束强的优先)
     // 注意：只用前提参与 backtrack 匹配；结论不加入 sorted_stmts。
     // 原来把结论也塞进来一起 sort+backtrack，会导致 backtrack 把结论当"已知事实"
@@ -1936,6 +1975,59 @@ void CustomTheoremMatcher::match_rule(const CustomRule &rule)
         sorted_stmts = std::move(plan);
     }
 
+    return sorted_stmts;
+}
+
+vector<Stmt> CustomTheoremMatcher::static_plan(const CustomRule &rule) const
+{
+    if (!rule.static_prepared || !rule.static_fits || !get_config("custom_bitset_plan",true) ||
+        !get_config("custom_early_guards",true)) return legacy_plan(rule);
+    const size_t n=rule.premises.size();
+    vector<size_t> order(n), sizes(n);
+    for (size_t i=0;i<n;++i)
+    {
+        order[i]=i;
+        auto found=_index.find(rule.premises[i].first);
+        sizes[i]=found==_index.end() ? 999999 : found->second.size();
+    }
+    std::sort(order.begin(),order.end(),[&](size_t a,size_t b) {
+        if (rule.static_deferred[a]!=rule.static_deferred[b]) return bool(rule.static_deferred[b]);
+        return sizes[a]<sizes[b];
+    });
+    uint64_t bound=0;
+    for (size_t first=0;first<n;++first)
+    {
+        size_t best=first;
+        for (size_t candidate=first+1;candidate<n;++candidate)
+        {
+            size_t a=order[candidate], b=order[best];
+            if (rule.static_deferred[a]!=rule.static_deferred[b] ? !rule.static_deferred[a] :
+                std::popcount(rule.static_masks[a]&~bound)<std::popcount(rule.static_masks[b]&~bound)) best=candidate;
+        }
+        std::rotate(order.begin()+first,order.begin()+best,order.begin()+best+1);
+        bound |= rule.static_masks[order[first]];
+    }
+    vector<Stmt> plan; plan.reserve(n+rule.early_checks.size());
+    vector<uint8_t> scheduled(rule.early_checks.size(),0);
+    bound=0;
+    for (size_t i : order)
+    {
+        plan.push_back(rule.premises[i]); bound |= rule.static_masks[i];
+        for (size_t g=0;g<scheduled.size();++g)
+            if (!scheduled[g] && rule.early_valid[g] && (rule.early_masks[g]&~bound)==0)
+            {
+                plan.push_back(rule.early_checks[g]); scheduled[g]=1;
+            }
+    }
+    return plan;
+}
+
+void CustomTheoremMatcher::match_rule(const CustomRule &rule)
+{
+    auto planning_start = chrono::steady_clock::now();
+    auto sorted_stmts = _static_plans ? static_plan(rule) : legacy_plan(rule);
+    if (get_config("custom_validate_plan", false) && sorted_stmts != legacy_plan(rule))
+        throw std::runtime_error("Static plan differs for rule " + rule.rule);
     auto backtrack_start = chrono::steady_clock::now();
     _planning_seconds += chrono::duration<double>(backtrack_start-planning_start).count();
     // 2. 执行匹配（仅前提）
@@ -2132,6 +2224,7 @@ CustomTheoremMatcher::CustomTheoremMatcher(Problem *prob, const vector<CustomRul
     _memo_enabled = get_config("custom_numeric_memo", true);
     _projection_enabled = get_config("custom_projection_index", true);
     _allow_duplicates = get_config("allow_duplicate_points", false);
+    _static_plans = get_config("custom_static_plan", true);
     // 默认启用预计算索引
     bool use_cache = get_config("use_predicate_cache", true);
     if (use_cache)

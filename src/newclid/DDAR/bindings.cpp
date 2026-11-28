@@ -643,6 +643,8 @@ extern "C"
         auto rules = parse_custom_theorems(text);
         if (rules.size() != text.size())
             throw invalid_argument("Compiled rule parsing changed the rule count");
+        for (auto &rule : rules)
+            rule.prepare_static();
         return rules;
     }
 

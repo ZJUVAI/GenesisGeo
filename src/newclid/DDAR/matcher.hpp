@@ -136,6 +136,13 @@ struct CustomRule
     std::vector<Stmt> guards; // 数值守卫谓词：只 check_numerically，不参与推理链
     std::string name;
     std::string rule;
+    bool static_prepared = false, static_fits = false;
+    std::vector<uint64_t> static_masks;
+    std::vector<uint8_t> static_deferred;
+    std::vector<Stmt> early_checks;
+    std::vector<uint64_t> early_masks;
+    std::vector<uint8_t> early_valid;
+    void prepare_static();
 };
 
 class CustomTheoremMatcher
@@ -160,6 +167,7 @@ private:
     mutable size_t _numeric_memo_size = 0;
     mutable size_t _numeric_hits = 0, _numeric_misses = 0;
     bool _memo_enabled = true, _projection_enabled = true, _allow_duplicates = false;
+    bool _static_plans = true;
     size_t _result_limit = size_t(-1);
 
     using ProjectionIndex = std::unordered_map<uint64_t, std::vector<size_t>>;
@@ -178,6 +186,8 @@ private:
 
     // 对一条 rule 的所有前提匹配，生成 Theorem 并插入 _theorems
     void match_rule(const CustomRule &rule);
+    std::vector<Stmt> legacy_plan(const CustomRule &rule) const;
+    std::vector<Stmt> static_plan(const CustomRule &rule) const;
 
     bool get_config(const std::string &key, bool default_val = false) const
     {
