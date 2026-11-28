@@ -49,11 +49,15 @@ class ProblemPipeline:
         img_pixels=512,
         custom_rules_path=None,
         triple_symmetry=True,
+        construction_count=None,
+        ray_node_ip=None,
     ):
         if img_pixels <= 0:
             raise ValueError("img_pixels must be a positive integer")
 
         self.n_clauses = n_clauses
+        self.construction_count = construction_count
+        self.ray_node_ip = ray_node_ip
         self.n_samples = n_samples
         self.n_threads = n_threads
         self.timeout = timeout
@@ -171,6 +175,15 @@ class ProblemPipeline:
         )
 
     def generate(self):
+        if self.construction_count is not None:
+            if self.use_seed_cache:
+                raise ValueError("Fixed construction runs require seed_cache=False")
+            if not self.clear and os.path.exists(
+                os.path.join(self.writer.output_dir, self.file_prefix + ".jsonl")
+            ):
+                raise FileExistsError(
+                    "Use a fresh output directory for each fixed seed range"
+                )
         if self.clear:
             self.writer.clear()
         else:
@@ -209,7 +222,10 @@ class ProblemPipeline:
                 )
 
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=self.n_threads)
+            ray_options = {"ignore_reinit_error": True, "num_cpus": self.n_threads}
+            if self.ray_node_ip is not None:
+                ray_options["_node_ip_address"] = self.ray_node_ip
+            ray.init(**ray_options)
         task_iterator = task_generator()
         max_pending = int(self.n_threads * 1.5)
         pending_tasks = {}
@@ -227,7 +243,12 @@ class ProblemPipeline:
         recon_candidates_total = 0
         recon_kept_total = 0
 
-        while self.writer.written_count < self.n_samples:
+        submitted = failures = timeouts = productive = 0
+        while (
+            self.writer.written_count < self.n_samples
+            if self.construction_count is None
+            else submitted < self.construction_count or pending_tasks
+        ):
             done, _ = ray.wait(list(pending_tasks.keys()), num_returns=1, timeout=10)
 
             if done:
@@ -245,6 +266,7 @@ class ProblemPipeline:
                 _, seed = pending_tasks.pop(task_id)
                 tasks_since_log += 1
                 if not task_success:
+                    failures += 1
                     failed_tasks_since_log += 1
                 else:
                     recon_candidates_total += summary.get("recon_candidates", 0)
@@ -272,6 +294,7 @@ class ProblemPipeline:
 
                     data = self.problem_hash_filter(data, "llm_input_renamed")
                     if data:
+                        productive += 1
                         summary["n_samples"] = len(data)
                         summary["n_filtered_samples"] = (
                             summary["n_samples_raw"] - summary["n_samples"]
@@ -350,10 +373,17 @@ class ProblemPipeline:
                 if time.time() - s_time > self.timeout:
                     print(f"⚠️ Task {task} timeout. Canceling")
                     ray.cancel(task, force=True)
+                    timeouts += 1
                     del pending_tasks[task]
 
             while len(pending_tasks) < max_pending:
+                if (
+                    self.construction_count is not None
+                    and submitted >= self.construction_count
+                ):
+                    break
                 task_args = next(task_iterator)
+                submitted += 1
                 seed = task_args[1]
                 pending_tasks[_process_problem_remote.remote(task_args)] = (
                     time.time(),
@@ -375,6 +405,22 @@ class ProblemPipeline:
         logging.info(
             f"Generate {self.writer.written_count} samples in {final_elapsed_time:.2f}s."
         )
+        if self.construction_count is not None:
+            counts = {
+                "first_seed": self.base_seed,
+                "last_seed": self.base_seed + submitted - 1,
+                "attempted": submitted,
+                "failed": failures,
+                "timed_out": timeouts,
+                "with_new_output": productive,
+                "without_new_output": submitted - failures - timeouts - productive,
+                "samples": self.writer.written_count,
+                "wall_seconds": final_elapsed_time,
+            }
+            with open(
+                os.path.join(self.writer.output_dir, "construction_counts.json"), "w"
+            ) as file:
+                json.dump(counts, file, indent=2)
         self.summary_reporter.output_report()
 
 
@@ -451,6 +497,12 @@ def write_cli_args(params_path: str, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(description="Create problem fl - nl dataset")
+    parser.add_argument("--ray_node_ip", help="Optional local Ray node bind address")
+    parser.add_argument(
+        "--construction_count",
+        type=positive_int,
+        help="Stop after this many consecutive construction seeds instead of an output sample count",
+    )
     # General parameters
     parser.add_argument(
         "--log_level",
@@ -615,6 +667,8 @@ def main():
         n_threads=args.n_threads,
         output_dir=args.dir,
         n_samples=args.n_samples,
+        construction_count=args.construction_count,
+        ray_node_ip=args.ray_node_ip,
         timeout=args.timeout,
         max_level=args.max_level,
         img=args.img,
